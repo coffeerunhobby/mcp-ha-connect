@@ -1,0 +1,166 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Home Assistant MCP Wrapper",
+    "version": "1.2",
+    "description": "Pretty REST endpoints that call MCP tools under the hood. Raw JSON-RPC passthrough remains available at POST / for n8n compatibility."
+  },
+  "servers": [
+    { "url": "http://127.0.0.1:3000", "description": "Local (browser/UI)" },
+    { "url": "http://localhost:3000", "description": "Local development" }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" },
+                    "mcp_path": { "type": "string" },
+                    "ha_url": { "type": "string" },
+                    "token_configured": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/get_all_sensors": {
+      "post": {
+        "operationId": "get_all_sensors",
+        "summary": "Get all sensors from Home Assistant",
+        "responses": {
+          "200": {
+            "description": "Sensors list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["count", "sensors"],
+                  "properties": {
+                    "count": { "type": "integer", "example": 271 },
+                    "sensors": {
+                      "type": "array",
+                      "items": { "type": "object" }
+                    },
+                    "raw": { "type": "object", "description": "Original MCP response (debug)" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/get_sensor_state": {
+      "post": {
+        "operationId": "get_sensor_state",
+        "summary": "Get state for a Home Assistant entity_id",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["entity_id"],
+                "properties": {
+                  "entity_id": { "type": "string", "example": "sensor.nas_station_s5_temperature" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Entity state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["entity"],
+                  "properties": {
+                    "entity": { "type": "object" },
+                    "raw": { "type": "object", "description": "Original MCP response (debug)" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/control_device": {
+      "post": {
+        "operationId": "control_device",
+        "summary": "Call a Home Assistant service (domain/service) with data",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["domain", "service"],
+                "properties": {
+                  "domain": { "type": "string", "example": "notify" },
+                  "service": { "type": "string", "example": "persistent_notification" },
+                  "data": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "example": { "title": "Alert", "message": "Hello" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Service result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok"],
+                  "properties": {
+                    "ok": { "type": "boolean", "example": true },
+                    "result": { "description": "Parsed HA/MCP result", "nullable": true },
+                    "raw": { "type": "object", "description": "Original MCP response (debug)" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/": {
+      "post": {
+        "operationId": "mcp_tools_call_raw",
+        "summary": "Raw JSON-RPC passthrough (kept for n8n compatibility)",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    }
+  }
+}

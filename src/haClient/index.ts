@@ -1,0 +1,211 @@
+/**
+ * Home Assistant API Client
+ * Main client class that composes all operation modules
+ */
+
+import type { EnvironmentConfig } from '../config.js';
+import type {
+  Entity,
+  ServiceCallData,
+  ServiceCallResponse,
+  Automation,
+  DomainSummary,
+  HaVersion,
+  LogbookEntry,
+  UpdateInfo,
+} from '../types/index.js';
+import { logger } from '../utils/logger.js';
+
+import { AutomationOperations } from './automations.js';
+import { ConfigOperations } from './config.js';
+import { EntityOperations } from './entities.js';
+import { HistoryOperations } from './history.js';
+import { RequestHandler } from './request.js';
+import { ServiceOperations } from './services.js';
+import { StateOperations } from './states.js';
+import { UpdateOperations } from './updates.js';
+
+/**
+ * Main client for interacting with the Home Assistant API.
+ * Organized with dedicated operation classes for each domain.
+ */
+export class HaClient {
+  private readonly request: RequestHandler;
+  private readonly stateOps: StateOperations;
+  private readonly serviceOps: ServiceOperations;
+  private readonly entityOps: EntityOperations;
+  private readonly automationOps: AutomationOperations;
+  private readonly historyOps: HistoryOperations;
+  private readonly updateOps: UpdateOperations;
+  private readonly configOps: ConfigOperations;
+
+  constructor(config: EnvironmentConfig) {
+    logger.debug('Initializing HaClient');
+
+    // Initialize request handler
+    this.request = new RequestHandler({
+      baseUrl: config.baseUrl,
+      token: config.token,
+      timeout: config.timeout,
+      strictSsl: config.strictSsl,
+    });
+
+    // Initialize operation modules with dependencies
+    this.stateOps = new StateOperations(this.request);
+    this.serviceOps = new ServiceOperations(this.request);
+    this.entityOps = new EntityOperations(this.stateOps);
+    this.automationOps = new AutomationOperations(this.stateOps);
+    this.historyOps = new HistoryOperations(this.request);
+    this.updateOps = new UpdateOperations(this.entityOps);
+    this.configOps = new ConfigOperations(this.request);
+
+    logger.info('HaClient initialized');
+  }
+
+  // ===== State Operations =====
+
+  /**
+   * Get all states (entities)
+   */
+  async getStates(): Promise<Entity[]> {
+    return this.stateOps.getStates();
+  }
+
+  /**
+   * Get state of a specific entity
+   */
+  async getState(entityId: string): Promise<Entity | null> {
+    return this.stateOps.getState(entityId);
+  }
+
+  /**
+   * Get all sensors (sensor.* and binary_sensor.* entities)
+   */
+  async getAllSensors(): Promise<Entity[]> {
+    return this.stateOps.getAllSensors();
+  }
+
+  // ===== Service Operations =====
+
+  /**
+   * Call a service
+   */
+  async callService(data: ServiceCallData): Promise<ServiceCallResponse> {
+    return this.serviceOps.callService(data);
+  }
+
+  /**
+   * Restart Home Assistant
+   */
+  async restartServer(): Promise<void> {
+    return this.serviceOps.restartServer();
+  }
+
+  // ===== Entity Operations =====
+
+  /**
+   * Get entities filtered by domain
+   */
+  async getEntitiesByDomain(domain: string): Promise<Entity[]> {
+    return this.entityOps.getEntitiesByDomain(domain);
+  }
+
+  /**
+   * Search entities by name or entity_id
+   */
+  async searchEntities(query: string): Promise<Entity[]> {
+    return this.entityOps.searchEntities(query);
+  }
+
+  /**
+   * Get domain summary with entity counts and state breakdown
+   */
+  async getDomainSummary(domain: string): Promise<DomainSummary> {
+    return this.entityOps.getDomainSummary(domain);
+  }
+
+  /**
+   * List entities with optional filtering
+   */
+  async listEntities(options: {
+    domain?: string;
+    search?: string;
+    limit?: number;
+    state?: string;
+  } = {}): Promise<Entity[]> {
+    return this.entityOps.listEntities(options);
+  }
+
+  // ===== Automation Operations =====
+
+  /**
+   * Get all automations
+   */
+  async getAutomations(): Promise<Automation[]> {
+    return this.automationOps.getAutomations();
+  }
+
+  // ===== History Operations =====
+
+  /**
+   * Get historical data for an entity
+   */
+  async getHistory(entityId: string, hours: number = 24): Promise<Entity[][]> {
+    return this.historyOps.getHistory(entityId, hours);
+  }
+
+  /**
+   * Get system log entries from the logbook
+   */
+  async getSystemLog(options: {
+    hours?: number;
+    entity_id?: string;
+  } = {}): Promise<LogbookEntry[]> {
+    return this.historyOps.getSystemLog(options);
+  }
+
+  // ===== Update Operations =====
+
+  /**
+   * Get available updates by checking update.* entities
+   */
+  async getAvailableUpdates(): Promise<{
+    updates: UpdateInfo[];
+    entities: Entity[];
+  }> {
+    return this.updateOps.getAvailableUpdates();
+  }
+
+  // ===== Config Operations =====
+
+  /**
+   * Get config
+   */
+  async getConfig(): Promise<Record<string, unknown>> {
+    return this.configOps.getConfig();
+  }
+
+  /**
+   * Check API (health check)
+   */
+  async checkApi(): Promise<{ message: string }> {
+    return this.configOps.checkApi();
+  }
+
+  /**
+   * Get Home Assistant version and configuration info
+   */
+  async getVersion(): Promise<HaVersion> {
+    return this.configOps.getVersion();
+  }
+}
+
+// Re-export operation classes for testing
+export { RequestHandler } from './request.js';
+export { StateOperations } from './states.js';
+export { ServiceOperations } from './services.js';
+export { EntityOperations } from './entities.js';
+export { AutomationOperations } from './automations.js';
+export { HistoryOperations } from './history.js';
+export { UpdateOperations } from './updates.js';
+export { ConfigOperations } from './config.js';

@@ -1,0 +1,355 @@
+{
+  "name": "AI Agent Safety Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        256,
+        304
+      ],
+      "id": "schedule",
+      "name": "Every 5 Minutes"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3000/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"getAllSensors\",\"arguments\":{}}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        464,
+        304
+      ],
+      "id": "get-sensors",
+      "name": "Get Sensors"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse SSE response from MCP server\nlet rawResponse = $input.first().json;\nlet mcpResponse;\n\n// Handle SSE format (event: message\\ndata: {...})\nif (typeof rawResponse === 'string' || rawResponse.data) {\n  const text = typeof rawResponse === 'string' ? rawResponse : rawResponse.data;\n  const dataMatch = text.match(/^data:\\s*(.+)$/m);\n  if (dataMatch) {\n    mcpResponse = JSON.parse(dataMatch[1]);\n  } else {\n    throw new Error('No data line in SSE response');\n  }\n} else {\n  mcpResponse = rawResponse;\n}\n\nconst content = mcpResponse.result?.content?.[0]?.text;\nif (!content) throw new Error('No data from MCP');\nconst allSensors = JSON.parse(content);\n\nconst issues = [];\n\nfor (const sensor of allSensors) {\n  const id = sensor.entity_id?.toLowerCase() || '';\n  const state = String(sensor.state || '').toLowerCase();\n  const stateClass = sensor.attributes?.state_class?.toLowerCase() || '';\n  const deviceClass = sensor.attributes?.device_class?.toLowerCase() || '';\n  const name = sensor.attributes?.friendly_name?.toLowerCase() || '';\n  \n  if (stateClass === 'total' || stateClass === 'total_increasing') continue;\n  if (id.includes('cloud_connection') || id.includes('connectivity') || id.includes('_update') || id.includes('_connection')) continue;\n  \n  if (id.startsWith('binary_sensor.')) {\n    if ((deviceClass === 'gas' || id.match(/\\bgas\\b/)) && state === 'on') {\n      issues.push({sensor: sensor.entity_id, issue: 'GAS DETECTED', severity: 'critical', state, name: sensor.attributes?.friendly_name});\n    }\n    else if ((deviceClass === 'smoke' || id.includes('smoke')) && state === 'on') {\n      issues.push({sensor: sensor.entity_id, issue: 'SMOKE DETECTED', severity: 'critical', state, name: sensor.attributes?.friendly_name});\n    }\n    else if ((deviceClass === 'carbon_monoxide' || id.match(/\\bco\\b/) || id.includes('carbon')) && state === 'on') {\n      issues.push({sensor: sensor.entity_id, issue: 'CO DETECTED', severity: 'critical', state, name: sensor.attributes?.friendly_name});\n    }\n    else if ((deviceClass === 'moisture' || id.includes('leak') || id.includes('flood') || id.includes('water_') || name.includes('leak') || name.includes('moisture')) && state === 'on') {\n      issues.push({sensor: sensor.entity_id, issue: 'Water detected', severity: 'critical', state, name: sensor.attributes?.friendly_name});\n    }\n  }\n  else if (id.startsWith('sensor.')) {\n    if ((id.includes('status') || id.includes('health')) && (state === 'attention' || state === 'warning' || state === 'error' || state === 'critical' || state === 'problem')) {\n      issues.push({sensor: sensor.entity_id, issue: `Status: ${state}`, severity: 'high', state, name: sensor.attributes?.friendly_name});\n    }\n    else if (deviceClass === 'battery') {\n      const batteryLevel = parseFloat(state);\n      if (!isNaN(batteryLevel) && batteryLevel < 15) {\n        issues.push({sensor: sensor.entity_id, issue: `Battery low: ${batteryLevel}%`, severity: batteryLevel < 5 ? 'high' : 'medium', state, name: sensor.attributes?.friendly_name});\n      }\n    }\n    else if (deviceClass === 'temperature') {\n      const temp = parseFloat(state);\n      const unit = sensor.attributes?.unit_of_measurement;\n      if (!isNaN(temp) && (unit === '°C' || unit === 'C')) {\n        if (temp > 40) {\n          issues.push({sensor: sensor.entity_id, issue: `Very high temp: ${temp}C`, severity: 'high', state, name: sensor.attributes?.friendly_name});\n        } else if (temp < 0 && !name.includes('outdoor') && !name.includes('outside')) {\n          issues.push({sensor: sensor.entity_id, issue: `Freezing temp: ${temp}C`, severity: 'medium', state, name: sensor.attributes?.friendly_name});\n        }\n      }\n    }\n  }\n}\n\nreturn [{json: {total_sensors: allSensors.length, issues_found: issues.length, issues: issues}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        304
+      ],
+      "id": "filter",
+      "name": "Filter Issues"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nif (data.issues_found === 0) {\n  return [{json: {should_notify: false, notification: {title: 'All OK', message: `Monitored ${data.total_sensors} sensors - all normal`}, reasoning: 'No issues'}}];\n}\n\nconst criticalCount = data.issues.filter(i => i.severity === 'critical').length;\n\nconst prompt = `Home safety AI monitoring ${data.total_sensors} sensors.\n\nISSUES (${data.issues_found}):\n${JSON.stringify(data.issues, null, 2)}\n\nCritical: ${criticalCount}\n\nIMPORTANT: Create notification WITHOUT emojis or special characters. Plain text only.\n\nJSON:\n{\n  \"should_notify\": true,\n  \"notification\": {\n    \"title\": \"${criticalCount > 0 ? 'CRITICAL ALERT' : 'System Notice'}\",\n    \"message\": \"Plain text summary and actions needed\"\n  },\n  \"reasoning\": \"brief\"\n}`;\n\nreturn [{json: {model: 'phi4:14b', prompt: prompt, stream: false, issues: data.issues}}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        304
+      ],
+      "id": "build",
+      "name": "Build Prompt"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\":\"ministral-3:14b\",\"prompt\":\"Home safety AI monitoring 278 sensors.\\n\\nISSUES (3):\\n[\\n  {\\n    \\\"sensor\\\": \\\"sensor.nas_station_s5_drive_1_temperature\\\",\\n    \\\"issue\\\": \\\"Very high temp: 42C\\\",\\n    \\\"severity\\\": \\\"high\\\",\\n    \\\"state\\\": \\\"42\\\",\\n    \\\"name\\\": \\\"nas-station-s5 (Drive 1) Temperature\\\"\\n  },\\n  {\\n    \\\"sensor\\\": \\\"sensor.nas_station_s5_m_2_drive_2_temperature\\\",\\n    \\\"issue\\\": \\\"Very high temp: 41C\\\",\\n    \\\"severity\\\": \\\"high\\\",\\n    \\\"state\\\": \\\"41\\\",\\n    \\\"name\\\": \\\"nas-station-s5 (M.2 Drive 2) Temperature\\\"\\n  },\\n  {\\n    \\\"sensor\\\": \\\"sensor.nas_station_s5_temperature\\\",\\n    \\\"issue\\\": \\\"Very high temp: 60C\\\",\\n    \\\"severity\\\": \\\"high\\\",\\n    \\\"state\\\": \\\"60\\\",\\n    \\\"name\\\": \\\"nas-station-s5 Temperature\\\"\\n  }\\n]\\n\\nCritical: 0\\n\\nIMPORTANT: Create notification WITHOUT emojis or special characters. Plain text only.\\n\\nJSON:\\n{\\n  \\\"should_notify\\\": true,\\n  \\\"notification\\\": {\\n    \\\"title\\\": \\\"System Notice\\\",\\n    \\\"message\\\": \\\"Plain text summary and actions needed\\\"\\n  },\\n  \\\"reasoning\\\": \\\"brief\\\"\\n}\",\"stream\":false}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1056,
+        304
+      ],
+      "id": "ollama",
+      "name": "Ollama"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ollamaResponse = $input.first().json;\nif (!ollamaResponse.response) {\n  throw new Error('No response from Ollama');\n}\n\nlet responseText = ollamaResponse.response;\n\n// Remove markdown code fences\nresponseText = responseText.replace(/```json\\s*/g, '').replace(/```\\s*/g, '').trim();\n\n// Extract JSON (find first { to last })\nfunction extractJSON(text) {\n  const firstBrace = text.indexOf('{');\n  const lastBrace = text.lastIndexOf('}');\n  \n  if (firstBrace === -1 || lastBrace === -1 || firstBrace >= lastBrace) {\n    throw new Error('No valid JSON object found in response');\n  }\n  \n  return text.substring(firstBrace, lastBrace + 1);\n}\n\nlet jsonText = extractJSON(responseText);\n\n// DON'T escape newlines - JSON.parse() handles them fine\n// Just parse directly\nlet decision;\ntry {\n  decision = JSON.parse(jsonText);\n} catch (e) {\n  // If parse fails, try removing problematic characters\n  jsonText = jsonText\n    .replace(/[\\u0000-\\u001F]/g, '') // Remove control characters except newline/tab\n    .replace(/,(\\s*[}\\]])/g, '$1');  // Remove trailing commas\n  \n  try {\n    decision = JSON.parse(jsonText);\n  } catch (e2) {\n    throw new Error('JSON parse failed: ' + e2.message + '\\n\\nJSON text: ' + jsonText.substring(0, 500));\n  }\n}\n\n// Clean up text helper\nfunction cleanText(text) {\n  if (!text) return text;\n  \n  return text\n    // Remove emojis\n    .replace(/[\\u{1F600}-\\u{1F64F}]/gu, '')\n    .replace(/[\\u{1F300}-\\u{1F5FF}]/gu, '')\n    .replace(/[\\u{1F680}-\\u{1F6FF}]/gu, '')\n    .replace(/[\\u{2600}-\\u{26FF}]/gu, '')\n    .replace(/[\\u{2700}-\\u{27BF}]/gu, '')\n    // Clean excessive whitespace\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n}\n\n// Clean notification fields\nif (decision.notification?.message) {\n  decision.notification.message = cleanText(decision.notification.message);\n}\n\nif (decision.notification?.title) {\n  decision.notification.title = cleanText(decision.notification.title);\n}\n\nreturn [{json: decision}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        304
+      ],
+      "id": "parse",
+      "name": "Parse & Strip"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "notify",
+              "leftValue": "={{ $json.should_notify }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1664,
+        304
+      ],
+      "id": "check",
+      "name": "Notify?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const message = $input.first().json.notification.message || 'Issue detected';\nconst title = $input.first().json.notification.title || 'Alert';\n\nconst mcpRequest = {\n  jsonrpc: '2.0',\n  id: 2,\n  method: 'tools/call',\n  params: {\n    name: 'callService',\n    arguments: {\n      domain: 'notify',\n      service: 'persistent_notification',\n      service_data: {message, title}\n    }\n  }\n};\n\nreturn [{json: {mcpRequest}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1872,
+        208
+      ],
+      "id": "build-req",
+      "name": "Build Request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3000/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json, text/event-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.mcpRequest) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2064,
+        208
+      ],
+      "id": "notify",
+      "name": "Send Alert"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json: {result: 'Alert sent', issues: $('Build Prompt').item.json.issues}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2272,
+        208
+      ],
+      "id": "done-alert",
+      "name": "Done Alert"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json: {result: 'All OK'}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1872,
+        400
+      ],
+      "id": "done-ok",
+      "name": "Done OK"
+    },
+    {
+      "parameters": {
+        "jsCode": "const notification = $input.first().json.notification;\nconst buildPromptData = $('Build Prompt').first().json;\nconst issues = buildPromptData.issues || [];\n\n// Create detailed alert log\nconst alertLog = {\n  'ALERT': notification.title,\n  'Message': notification.message,\n  'Issue Count': issues.length,\n  'Issues': issues.map(i => `${i.severity.toUpperCase()}: ${i.name} - ${i.issue}`),\n  'Time': new Date().toLocaleString()\n};\n\nconsole.log(JSON.stringify(alertLog, null, 2));\n\n// Pass data through unchanged\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1472,
+        304
+      ],
+      "id": "code-in-javascript",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Get Sensors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Sensors": {
+      "main": [
+        [
+          {
+            "node": "Filter Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Issues": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompt": {
+      "main": [
+        [
+          {
+            "node": "Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama": {
+      "main": [
+        [
+          {
+            "node": "Parse & Strip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Strip": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify?": {
+      "main": [
+        [
+          {
+            "node": "Build Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Done OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Request": {
+      "main": [
+        [
+          {
+            "node": "Send Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Alert": {
+      "main": [
+        [
+          {
+            "node": "Done Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Done OK": {
+      "main": [
+        []
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Notify?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "00000000-0000-0000-0000-000000000000",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "1",
+  "tags": []
+}
