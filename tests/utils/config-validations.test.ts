@@ -193,9 +193,9 @@ describe('isValidOrigin', () => {
   describe('Common use cases', () => {
     it('should accept development origins', () => {
       const devOrigins = [
-        'http://localhost:3000',
+        'http://mcpserver.10.0.0.18.nip.io:3000',
         'http://localhost:8080',
-        'http://127.0.0.1:3000',
+        'http://127.0.0.1:8080',
         'localhost',
       ];
 
@@ -261,7 +261,7 @@ describe('isValidOrigin', () => {
 
   describe('Integration with config', () => {
     it('should validate comma-separated origins', () => {
-      const originsString = 'http://localhost:3000,http://192.168.0.10:8080,localhost';
+      const originsString = 'http://mcpserver.10.0.0.18.nip.io:3000,http://192.168.0.10:8080,localhost';
       const origins = originsString.split(',').map(s => s.trim());
 
       for (const origin of origins) {
@@ -270,7 +270,7 @@ describe('isValidOrigin', () => {
     });
 
     it('should detect invalid origin in list', () => {
-      const originsString = 'http://localhost:3000,invalid@origin,localhost';
+      const originsString = 'http://mcpserver.10.0.0.18.nip.io:3000,invalid@origin,localhost';
       const origins = originsString.split(',').map(s => s.trim());
 
       const invalidOrigin = origins.find(origin => !isValidOrigin(origin));
@@ -278,7 +278,7 @@ describe('isValidOrigin', () => {
     });
 
     it('should handle whitespace in origin list', () => {
-      const originsString = ' http://localhost:3000 , localhost ';
+      const originsString = ' http://mcpserver.10.0.0.18.nip.io:3000 , localhost ';
       const origins = originsString.split(',').map(s => s.trim()).filter(Boolean);
 
       for (const origin of origins) {

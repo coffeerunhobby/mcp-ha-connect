@@ -9,6 +9,7 @@ import type {
   ServiceCallData,
   ServiceCallResponse,
   Automation,
+  AutomationConfig,
   DomainSummary,
   HaVersion,
   LogbookEntry,
@@ -18,6 +19,7 @@ import { logger } from '../utils/logger.js';
 
 import { AutomationOperations } from './automations.js';
 import { ConfigOperations } from './config.js';
+import { DeviceOperations } from './devices.js';
 import { EntityOperations } from './entities.js';
 import { HistoryOperations } from './history.js';
 import { RequestHandler } from './request.js';
@@ -38,6 +40,7 @@ export class HaClient {
   private readonly historyOps: HistoryOperations;
   private readonly updateOps: UpdateOperations;
   private readonly configOps: ConfigOperations;
+  public readonly devices: DeviceOperations;
 
   constructor(config: EnvironmentConfig) {
     logger.debug('Initializing HaClient');
@@ -54,10 +57,11 @@ export class HaClient {
     this.stateOps = new StateOperations(this.request);
     this.serviceOps = new ServiceOperations(this.request);
     this.entityOps = new EntityOperations(this.stateOps);
-    this.automationOps = new AutomationOperations(this.stateOps);
+    this.automationOps = new AutomationOperations(this.stateOps, this.serviceOps, this.request);
     this.historyOps = new HistoryOperations(this.request);
     this.updateOps = new UpdateOperations(this.entityOps);
     this.configOps = new ConfigOperations(this.request);
+    this.devices = new DeviceOperations(this.serviceOps, this.stateOps);
 
     logger.info('HaClient initialized');
   }
@@ -145,6 +149,76 @@ export class HaClient {
     return this.automationOps.getAutomations();
   }
 
+  /**
+   * Get a single automation by entity_id
+   */
+  async getAutomation(entityId: string): Promise<Automation | null> {
+    return this.automationOps.getAutomation(entityId);
+  }
+
+  /**
+   * Trigger an automation manually
+   */
+  async triggerAutomation(entityId: string, variables?: Record<string, unknown>): Promise<ServiceCallResponse> {
+    return this.automationOps.triggerAutomation(entityId, variables);
+  }
+
+  /**
+   * Enable an automation
+   */
+  async enableAutomation(entityId: string): Promise<ServiceCallResponse> {
+    return this.automationOps.enableAutomation(entityId);
+  }
+
+  /**
+   * Disable an automation
+   */
+  async disableAutomation(entityId: string): Promise<ServiceCallResponse> {
+    return this.automationOps.disableAutomation(entityId);
+  }
+
+  /**
+   * Toggle an automation
+   */
+  async toggleAutomation(entityId: string): Promise<ServiceCallResponse> {
+    return this.automationOps.toggleAutomation(entityId);
+  }
+
+  /**
+   * Reload all automations from configuration
+   */
+  async reloadAutomations(): Promise<void> {
+    return this.automationOps.reloadAutomations();
+  }
+
+  /**
+   * Create a new automation
+   */
+  async createAutomation(config: AutomationConfig): Promise<{ id: string }> {
+    return this.automationOps.createAutomation(config);
+  }
+
+  /**
+   * Update an existing automation
+   */
+  async updateAutomation(automationId: string, config: Partial<AutomationConfig>): Promise<void> {
+    return this.automationOps.updateAutomation(automationId, config);
+  }
+
+  /**
+   * Delete an automation
+   */
+  async deleteAutomation(automationId: string): Promise<void> {
+    return this.automationOps.deleteAutomation(automationId);
+  }
+
+  /**
+   * Get automation execution trace
+   */
+  async getAutomationTrace(entityId: string): Promise<unknown[]> {
+    return this.automationOps.getAutomationTrace(entityId);
+  }
+
   // ===== History Operations =====
 
   /**
@@ -209,3 +283,5 @@ export { AutomationOperations } from './automations.js';
 export { HistoryOperations } from './history.js';
 export { UpdateOperations } from './updates.js';
 export { ConfigOperations } from './config.js';
+export { DeviceOperations } from './devices.js';
+export type { LightControlOptions, ClimateControlOptions, MediaPlayerControlOptions, CoverControlOptions, FanControlOptions } from './devices.js';

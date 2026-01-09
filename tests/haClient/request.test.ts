@@ -14,7 +14,7 @@ describe('RequestHandler', () => {
 
   beforeEach(() => {
     handler = new RequestHandler({
-      baseUrl: 'http://homeassistant.local:8123',
+      baseUrl: 'http://homeassistant.10.0.0.19.nip.io:8123',
       token: 'test-token-12345',
       timeout: 30000,
       strictSsl: false,
@@ -37,7 +37,7 @@ describe('RequestHandler', () => {
       await handler.request('/test');
 
       expect(global.fetch).toHaveBeenCalledWith(
-        'http://homeassistant.local:8123/api/test',
+        'http://homeassistant.10.0.0.19.nip.io:8123/api/test',
         expect.objectContaining({
           method: 'GET',
           headers: expect.objectContaining({
@@ -61,7 +61,7 @@ describe('RequestHandler', () => {
       });
 
       expect(global.fetch).toHaveBeenCalledWith(
-        'http://homeassistant.local:8123/api/test',
+        'http://homeassistant.10.0.0.19.nip.io:8123/api/test',
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify({ key: 'value' }),
@@ -192,7 +192,7 @@ describe('RequestHandler', () => {
   describe('SSL configuration', () => {
     it('should create HTTPS agent when strictSsl is false', () => {
       const handlerNoSsl = new RequestHandler({
-        baseUrl: 'https://homeassistant.local:8123',
+        baseUrl: 'https://homeassistant.10.0.0.19.nip.io:8123',
         token: 'token',
         timeout: 30000,
         strictSsl: false,
@@ -204,7 +204,7 @@ describe('RequestHandler', () => {
 
     it('should not create HTTPS agent when strictSsl is true', () => {
       const handlerWithSsl = new RequestHandler({
-        baseUrl: 'https://homeassistant.local:8123',
+        baseUrl: 'https://homeassistant.10.0.0.19.nip.io:8123',
         token: 'token',
         timeout: 30000,
         strictSsl: true,

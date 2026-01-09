@@ -1,15 +1,18 @@
 /**
  * HTTP server for MCP with SSE or Streamable transports
- * Includes health check and CORS support
+ * Includes health check, CORS support, rate limiting, and real-time event subscriptions
  */
 
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { EnvironmentConfig } from '../config.js';
 import type { HaClient } from '../haClient/index.js';
+import { EventSubscriber } from '../haClient/events.js';
 import type { LocalAIClient } from '../localAI/index.js';
 import { logger } from '../utils/logger.js';
 import { handleSseConnection, handleSseMessage, getSseMessagePath, type SSETransportState } from './sse.js';
 import { handleStreamRequest, type StreamTransportState } from './stream.js';
+import { handleEventSubscription, getClientCount } from './eventSubscription.js';
+import { RateLimiter } from './rateLimiter.js';
 
 // Session storage for stateful mode
 const sessions = new Map<string, SSETransportState | StreamTransportState>();
@@ -47,16 +50,20 @@ function sendJson(res: ServerResponse, statusCode: number, data: unknown): void 
 /**
  * Handle health check endpoint
  */
-function handleHealthCheck(res: ServerResponse, config: EnvironmentConfig, aiEnabled: boolean): void {
+function handleHealthCheck(res: ServerResponse, config: EnvironmentConfig, aiEnabled: boolean, sseEnabled: boolean): void {
   sendJson(res, 200, {
     status: 'healthy',
-    version: '0.4.0',
+    version: '0.5.0',
     transport: config.httpTransport,
     stateful: config.stateful,
     aiEnabled,
     aiProvider: aiEnabled ? config.aiProvider : undefined,
     aiUrl: aiEnabled ? config.aiUrl : undefined,
     aiModel: aiEnabled ? config.aiModel : undefined,
+    sseEventsEnabled: sseEnabled,
+    sseEventsPath: sseEnabled ? config.sseEventsPath : undefined,
+    sseConnectedClients: sseEnabled ? getClientCount() : undefined,
+    rateLimitEnabled: config.rateLimitEnabled,
   });
 }
 
@@ -343,6 +350,36 @@ export async function startHttpServer(client: HaClient, config: EnvironmentConfi
   const bindAddr = config.httpBindAddr ?? '127.0.0.1';
   const mcpPath = config.httpPath ?? '/mcp';
   const healthPath = config.httpHealthcheckPath ?? '/health';
+  const sseEventsPath = config.sseEventsPath ?? '/subscribe_events';
+
+  // Initialize rate limiter if enabled
+  const rateLimiter = config.rateLimitEnabled
+    ? new RateLimiter({
+        windowMs: config.rateLimitWindowMs,
+        maxRequests: config.rateLimitMaxRequests,
+        skipPaths: [healthPath, '/openapi.json'],
+      })
+    : null;
+
+  // Initialize event subscriber if SSE events are enabled
+  let eventSubscriber: EventSubscriber | null = null;
+  if (config.sseEventsEnabled) {
+    eventSubscriber = new EventSubscriber({
+      baseUrl: config.baseUrl,
+      token: config.token,
+    });
+
+    // Connect to Home Assistant WebSocket
+    try {
+      await eventSubscriber.connect();
+      logger.info('Event subscriber connected to Home Assistant');
+    } catch (error) {
+      logger.warn('Failed to connect event subscriber, SSE events will be unavailable', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      eventSubscriber = null;
+    }
+  }
 
   logger.info('Starting HTTP server', {
     port,
@@ -350,16 +387,20 @@ export async function startHttpServer(client: HaClient, config: EnvironmentConfi
     transport: config.httpTransport,
     mcpPath,
     healthPath,
+    sseEventsPath: config.sseEventsEnabled ? sseEventsPath : undefined,
     stateful: config.stateful,
     aiEnabled: !!aiClient,
+    rateLimitEnabled: config.rateLimitEnabled,
+    sseEventsEnabled: config.sseEventsEnabled && !!eventSubscriber,
   });
 
   const server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = req.url ?? '/';
+    const urlPath = url.split('?')[0];
 
     // Handle OPTIONS (CORS preflight) - add CORS headers for REST API endpoints
     if (req.method === 'OPTIONS') {
-      if (url === '/openapi.json' || url.startsWith('/api/')) {
+      if (url === '/openapi.json' || url.startsWith('/api/') || urlPath === sseEventsPath) {
         addRestApiCors(req, res);
       } else {
         handleCors(req, res, config);
@@ -369,13 +410,32 @@ export async function startHttpServer(client: HaClient, config: EnvironmentConfi
       return;
     }
 
+    // Apply rate limiting (skip health checks and certain paths)
+    if (rateLimiter) {
+      const allowed = rateLimiter.middleware()(req, res);
+      if (!allowed) {
+        return; // Response already sent by rate limiter
+      }
+    }
+
     // Add CORS headers for MCP endpoints
     handleCors(req, res, config);
 
     try {
       // Health check endpoint
       if (config.httpEnableHealthcheck && url === healthPath) {
-        handleHealthCheck(res, config, !!aiClient);
+        handleHealthCheck(res, config, !!aiClient, !!eventSubscriber);
+        return;
+      }
+
+      // SSE Event Subscription endpoint
+      if (config.sseEventsEnabled && eventSubscriber && urlPath === sseEventsPath) {
+        if (req.method === 'GET') {
+          addRestApiCors(req, res);
+          await handleEventSubscription(req, res, eventSubscriber);
+          return;
+        }
+        sendJson(res, 405, { error: 'Method not allowed. Use GET for SSE subscription.' });
         return;
       }
 
@@ -456,6 +516,19 @@ export async function startHttpServer(client: HaClient, config: EnvironmentConfi
     }
   });
 
+  // Handle server shutdown
+  const cleanup = () => {
+    if (eventSubscriber) {
+      eventSubscriber.disconnect();
+    }
+    if (rateLimiter) {
+      rateLimiter.stop();
+    }
+  };
+
+  process.on('SIGTERM', cleanup);
+  process.on('SIGINT', cleanup);
+
   // Start listening
   await new Promise<void>((resolve, reject) => {
     server.on('error', reject);
@@ -465,6 +538,7 @@ export async function startHttpServer(client: HaClient, config: EnvironmentConfi
         bindAddr,
         url: `http://${bindAddr}:${port}${mcpPath}`,
         healthUrl: config.httpEnableHealthcheck ? `http://${bindAddr}:${port}${healthPath}` : undefined,
+        sseEventsUrl: config.sseEventsEnabled && eventSubscriber ? `http://${bindAddr}:${port}${sseEventsPath}` : undefined,
       });
       resolve();
     });

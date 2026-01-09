@@ -6,8 +6,8 @@
     "description": "Pretty REST endpoints that call MCP tools under the hood. Raw JSON-RPC passthrough remains available at POST / for n8n compatibility."
   },
   "servers": [
-    { "url": "http://127.0.0.1:3000", "description": "Local (browser/UI)" },
-    { "url": "http://localhost:3000", "description": "Local development" }
+    { "url": "http://mcpserver.10.0.0.18.nip.io:3000", "description": "MCP Server (nip.io)" },
+    { "url": "http://127.0.0.1:3000", "description": "Local development" }
   ],
   "paths": {
     "/health": {

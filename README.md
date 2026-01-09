@@ -2,7 +2,67 @@
 
 A production-ready Model Context Protocol (MCP) server for Home Assistant integration with AI assistants like Claude.
 
-## Features
+## Version 0.5.0 Features
+
+- **Real-time Updates**: Get instant updates through Server-Sent Events (SSE) - subscribe to state changes, automations, and service calls
+- **Device Control**: Control any Home Assistant device through natural language with advanced options
+- **Automation Management**: Create, update, delete, trigger, and manage automations programmatically
+- **State Monitoring**: Track and query device states in real-time
+- **Rate Limiting**: Built-in rate limiting to protect your Home Assistant instance
+- **Secure**: Token-based authentication and configurable rate limits
+- **Mobile Ready**: Works with any HTTP-capable client
+
+## Real-time Updates with SSE
+
+The server includes a powerful Server-Sent Events (SSE) system that provides real-time updates from your Home Assistant instance:
+
+- **Get instant state changes** for any device
+- **Monitor automation triggers** and executions
+- **Subscribe to specific domains** or entities
+- **Track service calls** and script executions
+
+### Quick SSE Example
+
+```javascript
+const eventSource = new EventSource(
+  'http://mcpserver.10.0.0.18.nip.io:3000/subscribe_events?domain=light'
+);
+
+eventSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log('Update received:', data);
+};
+```
+
+See [docs/SSE_API.md](docs/SSE_API.md) for complete documentation of the SSE system.
+
+## Key Features
+
+### Core Functionality
+
+- **Smart Device Control**
+  - Lights: Brightness, color temperature, RGB color, transitions
+  - Climate: Temperature, HVAC modes, fan modes, humidity
+  - Covers: Position and tilt control
+  - Switches: On/off control
+  - Sensors & Contacts: State monitoring
+  - Media Players: Playback control, volume, source selection
+  - Fans: Speed, oscillation, direction
+  - Locks: Lock/unlock control
+  - Vacuums: Start, stop, return to base
+  - Cameras: Motion detection, snapshots
+
+### Automation Management
+
+- List all automations with status
+- Trigger automations manually with variables
+- Enable/disable/toggle automations
+- Create new automations via API
+- Delete automations
+- View automation execution traces
+- Reload automations from configuration
+
+### System Features
 
 - Direct Home Assistant API integration
 - Long-lived access token authentication
@@ -18,28 +78,64 @@ A production-ready Model Context Protocol (MCP) server for Home Assistant integr
 - Full type safety with TypeScript
 - Stateful and stateless session support
 
-## Available Tools
+## Available Tools (33 Total)
 
-### MCP Tools
+### State & Entity Tools
 
 | Tool | Description |
 |------|-------------|
 | `getStates` | Get all entity states from Home Assistant |
 | `getState` | Get the state of a specific entity by entity_id |
-| `callService` | Call any Home Assistant service (turn on lights, etc) |
-| `getEntitiesByDomain` | Get all entities for a specific domain (lights, sensors, etc) |
+| `getEntitiesByDomain` | Get all entities for a specific domain |
 | `searchEntities` | Search for entities by name or entity_id |
 | `getAllSensors` | Get all sensor and binary_sensor entities |
-| `analyzeSensors` | AI-powered sensor analysis using Ollama |
-| `getHistory` | Get historical data for an entity |
-| `getVersion` | Get Home Assistant version and configuration info |
-| `entityAction` | Simple turn_on/turn_off/toggle actions (auto-detects domain) |
 | `listEntities` | List entities with filtering (domain, state, search, limit) |
 | `getDomainSummary` | Get summary statistics for a domain |
-| `listAutomations` | List all automations with status and last triggered time |
+| `getHistory` | Get historical data for an entity |
+
+### Service & Control Tools
+
+| Tool | Description |
+|------|-------------|
+| `callService` | Call any Home Assistant service |
+| `entityAction` | Simple turn_on/turn_off/toggle actions |
+
+### Device Control Tools
+
+| Tool | Description |
+|------|-------------|
+| `controlLight` | Control lights with brightness, color, temperature |
+| `controlClimate` | Control thermostats with temperature, HVAC mode |
+| `controlMediaPlayer` | Control media players with playback, volume |
+| `controlCover` | Control covers/blinds with position, tilt |
+| `controlFan` | Control fans with speed, oscillation, direction |
+| `activateScene` | Activate a Home Assistant scene |
+| `runScript` | Run a Home Assistant script |
+| `sendNotification` | Send notifications through Home Assistant |
+
+### Automation Tools
+
+| Tool | Description |
+|------|-------------|
+| `listAutomations` | List all automations with status |
+| `triggerAutomation` | Manually trigger an automation |
+| `enableAutomation` | Enable a disabled automation |
+| `disableAutomation` | Disable an automation |
+| `toggleAutomation` | Toggle automation state |
+| `reloadAutomations` | Reload automations from config |
+| `createAutomation` | Create a new automation |
+| `deleteAutomation` | Delete an automation |
+| `getAutomationTrace` | Get automation execution history |
+
+### System Tools
+
+| Tool | Description |
+|------|-------------|
+| `getVersion` | Get Home Assistant version and config info |
 | `restartHomeAssistant` | Restart the Home Assistant server |
-| `getSystemLog` | Get system log entries from the Home Assistant logbook |
-| `checkUpdates` | Check for available updates for Home Assistant Core, Supervisor, and OS |
+| `getSystemLog` | Get system log entries from logbook |
+| `checkUpdates` | Check for available updates |
+| `analyzeSensors` | AI-powered sensor analysis using Ollama |
 
 ### MCP Resources
 
@@ -51,49 +147,6 @@ A production-ready Model Context Protocol (MCP) server for Home Assistant integr
 | `hass://entities/domain/{domain}` | Get all entities for a domain |
 | `hass://search/{query}/{limit}` | Search entities with result limit |
 
-## AI-Powered Sensor Analysis (Optional)
-
-The `analyzeSensors` tool uses a local AI model to analyze sensor data. This feature is optional and requires a running AI provider.
-
-### Tested Models
-
-- phi4:14b
-- qwen3:14b
-- ministral-3:14b
-- codellama:13b-instruct
-- qwen3:8b
-- mistral:7b
-
-### Configuration
-
-```bash
-AI_PROVIDER=ollama              # ollama or openai (for OpenAI-compatible APIs)
-AI_URL=http://localhost:11434   # Provider URL
-AI_MODEL=phi4:14b               # Model name
-AI_TIMEOUT=60000                # Timeout in ms
-AI_API_KEY=                     # Optional API key
-```
-
-## Transport Modes
-
-This server supports three MCP transport modes:
-
-### 1. Stdio Transport (Default)
-- **Use Case:** Claude Desktop integration
-- **Protocol:** Standard input/output
-- **Best For:** Desktop AI assistants
-
-### 2. SSE (Server-Sent Events)
-- **Use Case:** Legacy MCP protocol (2024-11-05)
-- **Protocol:** HTTP with Server-Sent Events
-- **Best For:** Browser-based MCP clients
-
-### 3. Streamable HTTP
-- **Use Case:** Modern MCP protocol (2025-03-26)
-- **Protocol:** HTTP with streaming responses
-- **Best For:** Web applications and modern MCP clients
-- **Features:** Health checks, CORS, session management
-
 ## Prerequisites
 
 - **Node.js 20+** (tested with v20.19.6)
@@ -102,8 +155,6 @@ This server supports three MCP transport modes:
 - Network access to your Home Assistant instance
 - (Optional) Ollama for AI-powered analysis
 - (Optional) Docker for containerized deployment
-
-
 
 ## Configuration
 
@@ -122,7 +173,7 @@ Copy `.env.example` to `.env` and configure:
 
 ```bash
 # Home Assistant Connection
-HA_URL=http://127.0.0.1:8123
+HA_URL=http://homeassistant.10.0.0.19.nip.io:8123
 HA_TOKEN=your_long_lived_access_token_here
 HA_STRICT_SSL=false
 HA_TIMEOUT=30000
@@ -141,11 +192,20 @@ MCP_HTTP_PATH=/mcp                       # /mcp for stream, /sse for SSE
 MCP_HTTP_ENABLE_HEALTHCHECK=true
 MCP_HTTP_HEALTHCHECK_PATH=/health
 MCP_HTTP_ALLOW_CORS=true
-MCP_HTTP_ALLOWED_ORIGINS=127.0.0.1,localhost  # Comma-separated list or * for all
+MCP_HTTP_ALLOWED_ORIGINS=127.0.0.1,localhost
+
+# SSE Event Subscription (real-time updates)
+MCP_SSE_EVENTS_ENABLED=true              # Enable SSE event subscription
+MCP_SSE_EVENTS_PATH=/subscribe_events    # SSE endpoint path
+
+# Rate Limiting
+MCP_RATE_LIMIT_ENABLED=true              # Enable rate limiting
+MCP_RATE_LIMIT_WINDOW_MS=60000           # Time window in ms (default: 1 minute)
+MCP_RATE_LIMIT_MAX_REQUESTS=100          # Max requests per window
 
 # AI Configuration (optional)
-AI_PROVIDER=ollama
-AI_URL=http://localhost:11434
+AI_PROVIDER=ollama                       # ollama or openai
+AI_URL=http://ollama.10.0.0.17.nip.io:11434
 AI_MODEL=phi4:14b
 AI_TIMEOUT=60000
 ```
@@ -154,263 +214,29 @@ AI_TIMEOUT=60000
 
 ### Mode 1: Claude Desktop (Stdio Transport)
 
-Add to your Claude Desktop configuration file:
+[`docs/LOCAL_CLIENT.md`](docs/LOCAL_CLIENT.md)
 
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`  
-**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "home-assistant": {
-      "command": "node",
-      "args": [
-        "--env-file=.env",
-        "C:\\path\\to\\mcp-ha-connect\\dist\\index.js"
-      ]
-    }
-  }
-}
-```
-
-Or specify environment variables directly:
-
-```json
-{
-  "mcpServers": {
-    "home-assistant": {
-      "command": "node",
-      "args": [
-        "C:\\path\\to\\mcp-ha-connect\\dist\\index.js"
-      ],
-      "env": {
-        "HA_URL": "http://127.0.0.1:8123",
-        "HA_TOKEN": "your_long_lived_access_token",
-        "HA_STRICT_SSL": "false",
-        "MCP_SERVER_LOG_LEVEL": "info",
-        "AI_URL": "http://localhost:11434",
-        "AI_MODEL": "phi4:14b"
-      }
-    }
-  }
-}
-```
-
-### Mode 1B: Claude Desktop with Docker (Stdio Transport)
-
-If you prefer to run the MCP server in Docker and connect Claude Desktop to it via stdio, you can use `docker exec`.
-
-**Prerequisites:**
-- Docker container running with MCP server
-- Container must be running in stdio mode (not HTTP)
-
-**Step 1: Start Docker Container**
+### Mode 2: HTTP Server
 
 ```bash
-# Build image
-docker build -t mcp-ha-connect .
-
-# Run container in stdio mode (detached, but ready for exec)
-docker run -d --name mcp-ha-connect \
-  -e HA_URL=http://127.0.0.1:8123 \
-  -e HA_TOKEN=your_token \
-  -e AI_URL=http://127.0.0.1:11434 \
-  -e AI_MODEL=phi4:14b \
-  -e MCP_SERVER_USE_HTTP=false \
-  mcp-ha-connect \
-  tail -f /dev/null
+# Start HTTP server
+MCP_SERVER_USE_HTTP=true npm start
 ```
-
-**Note:** The `tail -f /dev/null` keeps the container running. The MCP server will be executed via `docker exec` by Claude Desktop.
-
-**Step 2: Configure Claude Desktop**
-
-Add to your Claude Desktop configuration file:
-
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`  
-**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "home-assistant": {
-      "command": "docker",
-      "args": [
-        "exec",
-        "-i",
-        "mcp-ha-connect",
-        "node",
-        "dist/index.js"
-      ],
-      "env": {
-        "HA_URL": "http://127.0.0.1:8123",
-        "HA_TOKEN": "your_long_lived_access_token",
-        "AI_URL": "http://127.0.0.1:11434",
-        "AI_MODEL": "phi4:14b",
-        "MCP_SERVER_LOG_LEVEL": "info"
-      }
-    }
-  }
-}
-```
-
-**Important Notes:**
-- The `-i` flag (interactive) is required for stdio communication
-- Environment variables are passed through the `env` object
-- The Docker container must already be running
-- The container name is `mcp-ha-connect` (change if different)
-
-**Step 3: Restart Claude Desktop**
-
-Close and reopen Claude Desktop for the configuration to take effect.
-
-**Verification:**
-
-```bash
-# Check if container is running
-docker ps | grep mcp-ha-connect
-
-# Test stdio communication
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | docker exec -i mcp-ha-connect node dist/index.js
-```
-
-**Troubleshooting:**
-
-If Claude Desktop can't connect:
-
-```bash
-# Check container logs
-docker logs mcp-ha-connect
-
-# Test docker exec manually
-docker exec -i mcp-ha-connect node dist/index.js
-
-# Ensure container has access to Home Assistant
-docker exec mcp-ha-connect curl http://127.0.0.1:8123/api/
-
-# Verify environment variables are set
-docker exec mcp-ha-connect env | grep HA_
-```
-
-### Mode 1C: Claude Desktop with Docker Compose
-
-For a more robust Docker setup, use Docker Compose:
-
-**Step 1: Create docker-compose.yml**
-
-```yaml
-version: '3.8'
-
-services:
-  mcp-ha-connect:
-    build: .
-    container_name: mcp-ha-connect
-    restart: unless-stopped
-    environment:
-      - HA_URL=http://127.0.0.1:8123
-      - HA_TOKEN=${HA_TOKEN}  # Load from .env file
-      - AI_URL=http://127.0.0.1:11434
-      - AI_MODEL=phi4:14b
-      - MCP_SERVER_USE_HTTP=false
-      - MCP_SERVER_LOG_LEVEL=info
-    command: tail -f /dev/null
-    networks:
-      - home-automation
-
-networks:
-  home-automation:
-    driver: bridge
-```
-
-**Step 2: Create .env file**
-
-```bash
-HA_TOKEN=your_long_lived_access_token_here
-```
-
-**Step 3: Start with Docker Compose**
-
-```bash
-# Start container
-docker-compose up -d
-
-# Check status
-docker-compose ps
-```
-
-**Step 4: Configure Claude Desktop**
-
-```json
-{
-  "mcpServers": {
-    "home-assistant": {
-      "command": "docker",
-      "args": [
-        "exec",
-        "-i",
-        "mcp-ha-connect",
-        "node",
-        "dist/index.js"
-      ]
-    }
-  }
-}
-```
-
-**Note:** Environment variables are already set in the container via Docker Compose, so you don't need to specify them again in Claude Desktop config.
-
-**Advantages of Docker Compose:**
-- Easy multi-container management
-- Automatic restart on failure
-- Environment variable management via .env
-- Network isolation
-- Easy updates: `docker-compose pull && docker-compose up -d
-```
-
 
 #### Streamable HTTP Transport (Recommended)
 
 Configure your MCP client to use:
-- **URL:** `http://127.0.0.1:3000/mcp`
+- **URL:** `http://mcpserver.10.0.0.18.nip.io:3000/mcp`
 - **Transport:** Streamable HTTP (MCP 2025-03-26)
-- **Session:** Send `Mcp-Session-Id` header for stateful mode
 
-#### SSE Transport (Legacy)
+#### SSE Event Subscription
 
-Set `MCP_HTTP_TRANSPORT=sse` in your `.env` file:
+Subscribe to real-time events:
+- **URL:** `http://mcpserver.10.0.0.18.nip.io:3000/subscribe_events`
+- **Method:** GET
+- **Query params:** `domain`, `entity_id`, `event_types`
 
-```bash
-MCP_HTTP_TRANSPORT=sse
-MCP_HTTP_PATH=/sse
-```
-
-Configure your MCP client to use:
-- **Connection URL:** `http://127.0.0.1:3000/sse` (GET)
-- **Message URL:** `http://127.0.0.1:3000/message` (POST)
-- **Session Header:** `Mcp-Session-Id` (provided in connection response)
-
-
-## Running the Server
-
-### Stdio Mode (Default)
-
-```bash
-npm start
-```
-
-Logs to stderr to avoid interfering with MCP protocol on stdout.
-
-### HTTP Mode
-
-```bash
-npm run start:http
-```
-
-Or set `MCP_SERVER_USE_HTTP=true` in `.env` and run `npm start`.
-
-### Production Deployment
-
-#### Docker (Recommended)
+### Mode 3: Docker
 
 ```bash
 # Build image
@@ -418,27 +244,11 @@ docker build -t mcp-ha-connect .
 
 # Run container
 docker run -d --name mcp-ha-connect \
-  -e HA_URL=http://127.0.0.1:8123 \
+  -e HA_URL=http://homeassistant.10.0.0.19.nip.io:8123 \
   -e HA_TOKEN=your_token \
-  -e AI_URL=http://127.0.0.1:11434 \
-  -e AI_MODEL=phi4:14b \
   -e MCP_SERVER_USE_HTTP=true \
   -p 3000:3000 \
   mcp-ha-connect
-```
-
-#### Systemd Service
-
-```bash
-# Copy to system location
-sudo cp mcp-ha-connect.service /etc/systemd/system/
-
-# Enable and start
-sudo systemctl enable mcp-ha-connect
-sudo systemctl start mcp-ha-connect
-
-# Check status
-sudo systemctl status mcp-ha-connect
 ```
 
 ## Development
@@ -446,14 +256,9 @@ sudo systemctl status mcp-ha-connect
 ### Running Tests
 
 ```bash
-# Run all tests
-npm test
-
-# Watch mode
-npm run test:watch
-
-# Coverage report
-npm run test:coverage
+npm test              # Run all tests
+npm run test:watch    # Watch mode
+npm run test:coverage # Coverage report
 ```
 
 ### Type Checking
@@ -474,36 +279,6 @@ npm run lint
 npm run build
 ```
 
-## Logging
-
-The server uses pino for structured logging with three output formats:
-
-### Plain Format (Default)
-```bash
-MCP_SERVER_LOG_FORMAT=plain
-```
-Human-readable logs with uppercase level names.
-
-### JSON Format
-```bash
-MCP_SERVER_LOG_FORMAT=json
-```
-Standard JSON logs for log aggregation systems.
-
-### GCP JSON Format
-```bash
-MCP_SERVER_LOG_FORMAT=gcp-json
-```
-Google Cloud Platform compatible logs with `severity` field.
-
-### Log Levels
-```bash
-MCP_SERVER_LOG_LEVEL=debug  # Verbose debugging
-MCP_SERVER_LOG_LEVEL=info   # General information (default)
-MCP_SERVER_LOG_LEVEL=warn   # Warnings
-MCP_SERVER_LOG_LEVEL=error  # Errors only
-```
-
 ## Integration Examples
 
 ### With Claude Desktop
@@ -511,8 +286,11 @@ MCP_SERVER_LOG_LEVEL=error  # Errors only
 Once configured, you can ask Claude:
 
 - "Show me all lights in my house"
-- "What's the current temperature of sensor.living_room_temperature?"
-- "Turn on the kitchen lights"
+- "Turn on the kitchen lights to 50% brightness"
+- "Set the living room temperature to 72 degrees"
+- "Create an automation that turns off all lights at midnight"
+- "What automations are currently enabled?"
+- "Trigger the morning routine automation"
 - "Search for entities with 'bedroom' in their name"
 - "Get all climate entities"
 - "Analyze my sensors for any issues" (requires Ollama)
@@ -544,13 +322,11 @@ docker exec -it n8n n8n import:workflow --input=/files/workflow.json
 docker exec -it n8n n8n list:workflow
 ```
 
-For detailed n8n integration, see the [n8n Workflows Reference](docs/n8n-workflows-reference.md).
-
 ### With Web Applications
 
 Use the HTTP transport with your MCP-compatible web client:
 
-1. Configure client to use `http://127.0.0.1:3000/mcp`
+1. Configure client to use `http://mcpserver.10.0.0.18.nip.io:3000/mcp`
 2. Set transport to Streamable HTTP (MCP 2025-03-26)
 3. Enable CORS by adding your origin to `MCP_HTTP_ALLOWED_ORIGINS`
 
@@ -567,6 +343,19 @@ Your MCP client should:
 2. Reuse the same session ID for related requests
 3. Session state is maintained server-side
 
+Connect to SSE for real-time updates
+
+```javascript
+const eventSource = new EventSource(
+  'http://mcpserver.10.0.0.18.nip.io:3000/subscribe_events?domain=light'
+);
+
+eventSource.addEventListener('state_changed', (event) => {
+  const data = JSON.parse(event.data);
+  updateUI(data.entity_id, data.new_state);
+});
+```
+
 ## Security
 
 ### Network Security
@@ -577,7 +366,8 @@ Your MCP client should:
 - Consider VLAN for IoT devices
 - Never expose MCP server directly to internet
 
-**Best Practices:**
+### Best Practices
+
 - Store `.env` securely (contains access token)
 - Never commit `.env` to version control
 - Set `.env` permissions: `chmod 600 .env`
@@ -585,34 +375,7 @@ Your MCP client should:
 - Rotate access tokens periodically
 - Restrict `MCP_HTTP_ALLOWED_ORIGINS` (avoid wildcard)
 - Bind to `127.0.0.1` for local-only access
-- Use proper network security when exposing HTTP mode
-
-**AI Provider Issues:**
-- Ensure provider is running (e.g., `ollama serve`)
-- Check model is available (e.g., `ollama list`)
-- Increase timeout for slow responses: `AI_TIMEOUT=120000`
-
-**Environment Variable Issues:**
-Ensure you're using Node.js --env-file flag or loading .env manually:
-
-```bash
-node --env-file=.env dist/index.js
-```
-
-**Port Already in Use:**
-Change `MCP_HTTP_PORT` if port 3000 is already in use:
-
-```bash
-MCP_HTTP_PORT=3001
-```
-
-**CORS Errors:**
-Add your client's origin to allowed origins:
-
-```bash
-MCP_HTTP_ALLOWED_ORIGINS=http://localhost:3000,http://your-app.com
-```
-
+- Enable rate limiting in production
 
 ## License
 
@@ -624,60 +387,8 @@ Coffee Run Hobby (github.com/coffeerunhobby)
 
 ## Version
 
-0.4.0
+0.5.0
 
 ## Changelog
 
-### 0.4.0 (January 2026)
-- **Extensible AI Provider System**: Refactored AI client to support multiple providers
-  - New `src/localAI/` folder with provider-based architecture
-  - Supports Ollama (native API) and OpenAI-compatible APIs (LocalAI, LM Studio, vLLM)
-  - New environment variables: `AI_PROVIDER`, `AI_URL`, `AI_MODEL`, `AI_TIMEOUT`, `AI_API_KEY`
-- Refactored `haClient.ts` into modular folder structure (`src/haClient/`)
-- Split monolithic client into dedicated operation classes:
-  - `request.ts` - HTTP request handler
-  - `states.ts` - State operations (getStates, getState, getAllSensors)
-  - `services.ts` - Service operations (callService, restartServer)
-  - `entities.ts` - Entity operations (getEntitiesByDomain, searchEntities, listEntities, getDomainSummary)
-  - `automations.ts` - Automation operations (getAutomations)
-  - `history.ts` - History operations (getHistory, getSystemLog)
-  - `updates.ts` - Update operations (getAvailableUpdates)
-  - `config.ts` - Config operations (getVersion, getConfig, checkApi)
-  - `index.ts` - Main HaClient class composing all operations
-- Improved code organization following modular architecture pattern
-- No changes to public API or tools - fully backward compatible
-- All 325 tests pass
-
-### 0.3.0 (January 2026)
-- Added 8 new tools: `getVersion`, `entityAction`, `listEntities`, `getDomainSummary`, `listAutomations`, `restartHomeAssistant`, `getSystemLog`, `checkUpdates`
-- Added MCP Resources support with 5 URI-based endpoints (`hass://entities`, etc.)
-- Added `entityAction` tool for simplified turn_on/turn_off/toggle operations
-- Added `listEntities` tool with domain, state, search, and limit filtering
-- Added `getDomainSummary` tool for domain statistics
-- Added `listAutomations` tool for automation management
-- Added `restartHomeAssistant` tool for server control
-- Added `getSystemLog` tool for viewing logbook entries (events, state changes)
-- Added `checkUpdates` tool to check for available updates (Core, Supervisor, OS, add-ons)
-- Total tools increased from 8 to 16
-- Enhanced type definitions for Automation, DomainSummary, HaVersion, LogbookEntry, UpdateInfo
-
-### 0.2.0 (January 2026)
-- Added AI-powered sensor analysis with Ollama
-- Added `getAllSensors` tool
-- Added `analyzeSensors` tool
-- Added `getHistory` tool
-- Added phi4:14b as recommended model (9.5/10, 6.65s avg)
-- Added qwen3:14b support (10/10 accuracy, 12.5s avg)
-- Added comprehensive security documentation
-- Added UFW firewall configuration guide
-- Added n8n workflow examples and import instructions
-- Updated to Node.js 20+ (v20.19.6) and npm 10.8+
-- Updated installation instructions with verified versions
-- Added Docker CLI workflow import method
-- Enhanced troubleshooting with network/firewall diagnostics
-
-### 0.1.0 (Initial Release)
-- Basic Home Assistant integration
-- 5 core tools (getStates, getState, callService, getEntitiesByDomain, searchEntities)
-- Multiple transport modes (stdio, SSE, HTTP streaming)
-- Full TypeScript support
+[`docs/CHANGELOG.md`](docs/CHANGELOG.md)

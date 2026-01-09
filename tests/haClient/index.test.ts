@@ -92,12 +92,12 @@ vi.mock('../../src/haClient/config.js', () => ({ ConfigOperations: configModule.
 vi.mock('../../src/haClient/request.js', () => ({ RequestHandler: requestModule.RequestHandler }));
 
 const baseConfig: EnvironmentConfig = {
-  baseUrl: 'http://homeassistant.local:8123',
+  baseUrl: 'http://homeassistant.10.0.0.19.nip.io:8123',
   token: 'test-token',
   strictSsl: false,
   timeout: 30000,
   aiProvider: 'ollama',
-  aiUrl: 'http://localhost:11434',
+  aiUrl: 'http://ollama.10.0.0.17.nip.io:11434',
   aiModel: 'phi4:14b',
   aiTimeout: 60000,
   logLevel: 'error',
@@ -120,14 +120,18 @@ describe('HaClient aggregator', () => {
 
     expect(requestModule.RequestHandler).toHaveBeenCalledWith(
       expect.objectContaining({
-        baseUrl: 'http://homeassistant.local:8123',
+        baseUrl: 'http://homeassistant.10.0.0.19.nip.io:8123',
         token: 'test-token',
       })
     );
     expect(statesModule.StateOperations).toHaveBeenCalledWith(requestModule.instance);
     expect(servicesModule.ServiceOperations).toHaveBeenCalledWith(requestModule.instance);
     expect(entitiesModule.EntityOperations).toHaveBeenCalledWith(statesModule.instance);
-    expect(automationsModule.AutomationOperations).toHaveBeenCalledWith(statesModule.instance);
+    expect(automationsModule.AutomationOperations).toHaveBeenCalledWith(
+      statesModule.instance,
+      servicesModule.instance,
+      requestModule.instance
+    );
     expect(historyModule.HistoryOperations).toHaveBeenCalledWith(requestModule.instance);
     expect(updatesModule.UpdateOperations).toHaveBeenCalledWith(entitiesModule.instance);
     expect(configModule.ConfigOperations).toHaveBeenCalledWith(requestModule.instance);

@@ -263,6 +263,349 @@ export function registerAllTools(server: Server, client: HaClient, aiClient?: Lo
             required: [],
           },
         },
+        {
+          name: 'triggerAutomation',
+          description: 'Manually trigger a Home Assistant automation. Can optionally pass variables to the automation.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity_id: {
+                type: 'string',
+                description: 'The automation entity ID (e.g., "automation.turn_on_lights")',
+              },
+              variables: {
+                type: 'object',
+                description: 'Optional variables to pass to the automation',
+              },
+            },
+            required: ['entity_id'],
+          },
+        },
+        {
+          name: 'enableAutomation',
+          description: 'Enable a disabled Home Assistant automation.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity_id: {
+                type: 'string',
+                description: 'The automation entity ID to enable',
+              },
+            },
+            required: ['entity_id'],
+          },
+        },
+        {
+          name: 'disableAutomation',
+          description: 'Disable a Home Assistant automation.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity_id: {
+                type: 'string',
+                description: 'The automation entity ID to disable',
+              },
+            },
+            required: ['entity_id'],
+          },
+        },
+        {
+          name: 'toggleAutomation',
+          description: 'Toggle a Home Assistant automation (enable if disabled, disable if enabled).',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity_id: {
+                type: 'string',
+                description: 'The automation entity ID to toggle',
+              },
+            },
+            required: ['entity_id'],
+          },
+        },
+        {
+          name: 'reloadAutomations',
+          description: 'Reload all automations from the Home Assistant configuration. Useful after editing automation YAML files.',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+            required: [],
+          },
+        },
+        {
+          name: 'createAutomation',
+          description: 'Create a new Home Assistant automation. Requires specifying triggers, conditions (optional), and actions.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              alias: {
+                type: 'string',
+                description: 'Friendly name for the automation',
+              },
+              description: {
+                type: 'string',
+                description: 'Optional description of what the automation does',
+              },
+              mode: {
+                type: 'string',
+                enum: ['single', 'restart', 'queued', 'parallel'],
+                description: 'Execution mode (default: single)',
+              },
+              trigger: {
+                type: ['object', 'array'],
+                description: 'Trigger(s) that start the automation. Each trigger needs a "platform" property.',
+              },
+              condition: {
+                type: ['object', 'array'],
+                description: 'Optional condition(s) that must be true for actions to run.',
+              },
+              action: {
+                type: ['object', 'array'],
+                description: 'Action(s) to perform when triggered. Each action typically has "service" and "target" properties.',
+              },
+            },
+            required: ['alias', 'trigger', 'action'],
+          },
+        },
+        {
+          name: 'deleteAutomation',
+          description: 'Delete a Home Assistant automation. Only works for automations created via the UI/API.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              automation_id: {
+                type: 'string',
+                description: 'The unique ID of the automation to delete',
+              },
+            },
+            required: ['automation_id'],
+          },
+        },
+        {
+          name: 'getAutomationTrace',
+          description: 'Get the execution trace (history) of an automation. Shows when it was triggered and what actions were executed.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity_id: {
+                type: 'string',
+                description: 'The automation entity ID to get trace for',
+              },
+            },
+            required: ['entity_id'],
+          },
+        },
+        {
+          name: 'controlLight',
+          description: 'Control a light with advanced options like brightness, color, and color temperature.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity_id: {
+                type: 'string',
+                description: 'The light entity ID (e.g., "light.living_room")',
+              },
+              action: {
+                type: 'string',
+                enum: ['turn_on', 'turn_off', 'toggle'],
+                description: 'The action to perform',
+              },
+              brightness_pct: {
+                type: 'number',
+                description: 'Brightness percentage (0-100)',
+              },
+              color_temp_kelvin: {
+                type: 'number',
+                description: 'Color temperature in Kelvin (e.g., 2700 for warm, 6500 for cool)',
+              },
+              rgb_color: {
+                type: 'array',
+                items: { type: 'number' },
+                description: 'RGB color as [red, green, blue] (0-255 each)',
+              },
+              transition: {
+                type: 'number',
+                description: 'Transition time in seconds',
+              },
+            },
+            required: ['entity_id', 'action'],
+          },
+        },
+        {
+          name: 'controlClimate',
+          description: 'Control a climate/thermostat device with temperature and mode settings.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity_id: {
+                type: 'string',
+                description: 'The climate entity ID (e.g., "climate.living_room")',
+              },
+              temperature: {
+                type: 'number',
+                description: 'Target temperature',
+              },
+              hvac_mode: {
+                type: 'string',
+                enum: ['off', 'heat', 'cool', 'heat_cool', 'auto', 'dry', 'fan_only'],
+                description: 'HVAC mode',
+              },
+              fan_mode: {
+                type: 'string',
+                description: 'Fan mode (device-specific)',
+              },
+              preset_mode: {
+                type: 'string',
+                description: 'Preset mode (e.g., "home", "away", "eco")',
+              },
+            },
+            required: ['entity_id'],
+          },
+        },
+        {
+          name: 'controlMediaPlayer',
+          description: 'Control a media player with playback, volume, and media selection.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity_id: {
+                type: 'string',
+                description: 'The media player entity ID',
+              },
+              action: {
+                type: 'string',
+                enum: ['play', 'pause', 'stop', 'next', 'previous', 'volume_set', 'volume_mute'],
+                description: 'The action to perform',
+              },
+              volume_level: {
+                type: 'number',
+                description: 'Volume level (0.0 to 1.0)',
+              },
+              is_volume_muted: {
+                type: 'boolean',
+                description: 'Mute state',
+              },
+            },
+            required: ['entity_id', 'action'],
+          },
+        },
+        {
+          name: 'controlCover',
+          description: 'Control a cover/blind with position and tilt settings.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity_id: {
+                type: 'string',
+                description: 'The cover entity ID (e.g., "cover.living_room_blinds")',
+              },
+              action: {
+                type: 'string',
+                enum: ['open', 'close', 'stop', 'set_position', 'set_tilt'],
+                description: 'The action to perform',
+              },
+              position: {
+                type: 'number',
+                description: 'Cover position (0 = closed, 100 = open)',
+              },
+              tilt_position: {
+                type: 'number',
+                description: 'Tilt position (0-100)',
+              },
+            },
+            required: ['entity_id', 'action'],
+          },
+        },
+        {
+          name: 'controlFan',
+          description: 'Control a fan with speed, oscillation, and direction settings.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity_id: {
+                type: 'string',
+                description: 'The fan entity ID',
+              },
+              action: {
+                type: 'string',
+                enum: ['turn_on', 'turn_off', 'toggle', 'set_speed', 'oscillate', 'set_direction'],
+                description: 'The action to perform',
+              },
+              percentage: {
+                type: 'number',
+                description: 'Speed percentage (0-100)',
+              },
+              oscillating: {
+                type: 'boolean',
+                description: 'Oscillation state',
+              },
+              direction: {
+                type: 'string',
+                enum: ['forward', 'reverse'],
+                description: 'Fan direction',
+              },
+            },
+            required: ['entity_id', 'action'],
+          },
+        },
+        {
+          name: 'activateScene',
+          description: 'Activate a Home Assistant scene.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity_id: {
+                type: 'string',
+                description: 'The scene entity ID (e.g., "scene.movie_night")',
+              },
+            },
+            required: ['entity_id'],
+          },
+        },
+        {
+          name: 'runScript',
+          description: 'Run a Home Assistant script with optional variables.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity_id: {
+                type: 'string',
+                description: 'The script entity ID (e.g., "script.morning_routine")',
+              },
+              variables: {
+                type: 'object',
+                description: 'Optional variables to pass to the script',
+              },
+            },
+            required: ['entity_id'],
+          },
+        },
+        {
+          name: 'sendNotification',
+          description: 'Send a notification through Home Assistant.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              message: {
+                type: 'string',
+                description: 'The notification message',
+              },
+              title: {
+                type: 'string',
+                description: 'Optional notification title',
+              },
+              target: {
+                type: 'string',
+                description: 'Notification service target (e.g., "mobile_app_phone")',
+              },
+              data: {
+                type: 'object',
+                description: 'Additional notification data (device-specific)',
+              },
+            },
+            required: ['message'],
+          },
+        },
       ],
     };
   });
@@ -624,6 +967,521 @@ export function registerAllTools(server: Server, client: HaClient, aiClient?: Lo
           };
         }
 
+        case 'triggerAutomation': {
+          const { entity_id, variables } = request.params.arguments as {
+            entity_id: string;
+            variables?: Record<string, unknown>;
+          };
+          if (!entity_id) {
+            throw new Error('entity_id is required');
+          }
+
+          const result = await client.triggerAutomation(entity_id, variables);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  entity_id,
+                  message: 'Automation triggered successfully',
+                  context: result.context,
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'enableAutomation': {
+          const { entity_id } = request.params.arguments as { entity_id: string };
+          if (!entity_id) {
+            throw new Error('entity_id is required');
+          }
+
+          const result = await client.enableAutomation(entity_id);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  entity_id,
+                  action: 'enabled',
+                  context: result.context,
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'disableAutomation': {
+          const { entity_id } = request.params.arguments as { entity_id: string };
+          if (!entity_id) {
+            throw new Error('entity_id is required');
+          }
+
+          const result = await client.disableAutomation(entity_id);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  entity_id,
+                  action: 'disabled',
+                  context: result.context,
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'toggleAutomation': {
+          const { entity_id } = request.params.arguments as { entity_id: string };
+          if (!entity_id) {
+            throw new Error('entity_id is required');
+          }
+
+          const result = await client.toggleAutomation(entity_id);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  entity_id,
+                  action: 'toggled',
+                  context: result.context,
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'reloadAutomations': {
+          await client.reloadAutomations();
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  message: 'Automations reloaded from configuration',
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'createAutomation': {
+          const config = request.params.arguments as {
+            alias: string;
+            description?: string;
+            mode?: 'single' | 'restart' | 'queued' | 'parallel';
+            trigger: unknown;
+            condition?: unknown;
+            action: unknown;
+          };
+          if (!config.alias || !config.trigger || !config.action) {
+            throw new Error('alias, trigger, and action are required');
+          }
+
+          const result = await client.createAutomation({
+            alias: config.alias,
+            description: config.description,
+            mode: config.mode,
+            trigger: config.trigger as import('../types/index.js').AutomationTrigger | import('../types/index.js').AutomationTrigger[],
+            condition: config.condition as import('../types/index.js').AutomationCondition | import('../types/index.js').AutomationCondition[] | undefined,
+            action: config.action as import('../types/index.js').AutomationAction | import('../types/index.js').AutomationAction[],
+          });
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  automation_id: result.id,
+                  alias: config.alias,
+                  message: 'Automation created successfully',
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'deleteAutomation': {
+          const { automation_id } = request.params.arguments as { automation_id: string };
+          if (!automation_id) {
+            throw new Error('automation_id is required');
+          }
+
+          await client.deleteAutomation(automation_id);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  automation_id,
+                  message: 'Automation deleted successfully',
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'getAutomationTrace': {
+          const { entity_id } = request.params.arguments as { entity_id: string };
+          if (!entity_id) {
+            throw new Error('entity_id is required');
+          }
+
+          const trace = await client.getAutomationTrace(entity_id);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  entity_id,
+                  trace_count: Array.isArray(trace) ? trace.length : 0,
+                  traces: trace,
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'controlLight': {
+          const args = request.params.arguments as {
+            entity_id: string;
+            action: 'turn_on' | 'turn_off' | 'toggle';
+            brightness_pct?: number;
+            color_temp_kelvin?: number;
+            rgb_color?: [number, number, number];
+            transition?: number;
+          };
+          if (!args.entity_id || !args.action) {
+            throw new Error('entity_id and action are required');
+          }
+
+          let result;
+          if (args.action === 'turn_off') {
+            result = await client.devices.turnOffLight(args.entity_id, args.transition);
+          } else if (args.action === 'toggle') {
+            result = await client.devices.toggleLight(args.entity_id);
+          } else {
+            result = await client.devices.turnOnLight(args.entity_id, {
+              brightness_pct: args.brightness_pct,
+              color_temp_kelvin: args.color_temp_kelvin,
+              rgb_color: args.rgb_color,
+              transition: args.transition,
+            });
+          }
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  entity_id: args.entity_id,
+                  action: args.action,
+                  context: result.context,
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'controlClimate': {
+          const args = request.params.arguments as {
+            entity_id: string;
+            temperature?: number;
+            hvac_mode?: 'off' | 'heat' | 'cool' | 'heat_cool' | 'auto' | 'dry' | 'fan_only';
+            fan_mode?: string;
+            preset_mode?: string;
+          };
+          if (!args.entity_id) {
+            throw new Error('entity_id is required');
+          }
+
+          const results: Array<{ action: string; success: boolean }> = [];
+
+          if (args.hvac_mode) {
+            await client.devices.setClimateMode(args.entity_id, args.hvac_mode);
+            results.push({ action: 'set_hvac_mode', success: true });
+          }
+
+          if (args.temperature !== undefined) {
+            await client.devices.setClimateTemperature(args.entity_id, args.temperature);
+            results.push({ action: 'set_temperature', success: true });
+          }
+
+          if (args.fan_mode) {
+            await client.devices.setClimateFanMode(args.entity_id, args.fan_mode);
+            results.push({ action: 'set_fan_mode', success: true });
+          }
+
+          if (args.preset_mode) {
+            await client.devices.setClimatePreset(args.entity_id, args.preset_mode);
+            results.push({ action: 'set_preset_mode', success: true });
+          }
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  entity_id: args.entity_id,
+                  actions: results,
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'controlMediaPlayer': {
+          const args = request.params.arguments as {
+            entity_id: string;
+            action: 'play' | 'pause' | 'stop' | 'next' | 'previous' | 'volume_set' | 'volume_mute';
+            volume_level?: number;
+            is_volume_muted?: boolean;
+          };
+          if (!args.entity_id || !args.action) {
+            throw new Error('entity_id and action are required');
+          }
+
+          let result;
+          switch (args.action) {
+            case 'play':
+              result = await client.devices.mediaPlay(args.entity_id);
+              break;
+            case 'pause':
+              result = await client.devices.mediaPause(args.entity_id);
+              break;
+            case 'stop':
+              result = await client.devices.mediaStop(args.entity_id);
+              break;
+            case 'next':
+              result = await client.devices.mediaNext(args.entity_id);
+              break;
+            case 'previous':
+              result = await client.devices.mediaPrevious(args.entity_id);
+              break;
+            case 'volume_set':
+              if (args.volume_level === undefined) {
+                throw new Error('volume_level is required for volume_set action');
+              }
+              result = await client.devices.setMediaVolume(args.entity_id, args.volume_level);
+              break;
+            case 'volume_mute':
+              if (args.is_volume_muted === undefined) {
+                throw new Error('is_volume_muted is required for volume_mute action');
+              }
+              result = await client.devices.setMediaMute(args.entity_id, args.is_volume_muted);
+              break;
+          }
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  entity_id: args.entity_id,
+                  action: args.action,
+                  context: result?.context,
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'controlCover': {
+          const args = request.params.arguments as {
+            entity_id: string;
+            action: 'open' | 'close' | 'stop' | 'set_position' | 'set_tilt';
+            position?: number;
+            tilt_position?: number;
+          };
+          if (!args.entity_id || !args.action) {
+            throw new Error('entity_id and action are required');
+          }
+
+          let result;
+          switch (args.action) {
+            case 'open':
+              result = await client.devices.openCover(args.entity_id);
+              break;
+            case 'close':
+              result = await client.devices.closeCover(args.entity_id);
+              break;
+            case 'stop':
+              result = await client.devices.stopCover(args.entity_id);
+              break;
+            case 'set_position':
+              if (args.position === undefined) {
+                throw new Error('position is required for set_position action');
+              }
+              result = await client.devices.setCoverPosition(args.entity_id, args.position);
+              break;
+            case 'set_tilt':
+              if (args.tilt_position === undefined) {
+                throw new Error('tilt_position is required for set_tilt action');
+              }
+              result = await client.devices.setCoverTilt(args.entity_id, args.tilt_position);
+              break;
+          }
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  entity_id: args.entity_id,
+                  action: args.action,
+                  context: result?.context,
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'controlFan': {
+          const args = request.params.arguments as {
+            entity_id: string;
+            action: 'turn_on' | 'turn_off' | 'toggle' | 'set_speed' | 'oscillate' | 'set_direction';
+            percentage?: number;
+            oscillating?: boolean;
+            direction?: 'forward' | 'reverse';
+          };
+          if (!args.entity_id || !args.action) {
+            throw new Error('entity_id and action are required');
+          }
+
+          let result;
+          switch (args.action) {
+            case 'turn_on':
+              result = await client.devices.turnOnFan(args.entity_id, { percentage: args.percentage });
+              break;
+            case 'turn_off':
+              result = await client.devices.turnOffFan(args.entity_id);
+              break;
+            case 'toggle':
+              result = await client.callService({ domain: 'fan', service: 'toggle', target: { entity_id: args.entity_id } });
+              break;
+            case 'set_speed':
+              if (args.percentage === undefined) {
+                throw new Error('percentage is required for set_speed action');
+              }
+              result = await client.devices.setFanSpeed(args.entity_id, args.percentage);
+              break;
+            case 'oscillate':
+              if (args.oscillating === undefined) {
+                throw new Error('oscillating is required for oscillate action');
+              }
+              result = await client.devices.setFanOscillation(args.entity_id, args.oscillating);
+              break;
+            case 'set_direction':
+              if (!args.direction) {
+                throw new Error('direction is required for set_direction action');
+              }
+              result = await client.devices.setFanDirection(args.entity_id, args.direction);
+              break;
+          }
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  entity_id: args.entity_id,
+                  action: args.action,
+                  context: result?.context,
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'activateScene': {
+          const { entity_id } = request.params.arguments as { entity_id: string };
+          if (!entity_id) {
+            throw new Error('entity_id is required');
+          }
+
+          const result = await client.devices.activateScene(entity_id);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  entity_id,
+                  message: 'Scene activated',
+                  context: result.context,
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'runScript': {
+          const { entity_id, variables } = request.params.arguments as {
+            entity_id: string;
+            variables?: Record<string, unknown>;
+          };
+          if (!entity_id) {
+            throw new Error('entity_id is required');
+          }
+
+          const result = await client.devices.runScript(entity_id, variables);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  entity_id,
+                  message: 'Script started',
+                  context: result.context,
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'sendNotification': {
+          const { message, title, target, data } = request.params.arguments as {
+            message: string;
+            title?: string;
+            target?: string;
+            data?: Record<string, unknown>;
+          };
+          if (!message) {
+            throw new Error('message is required');
+          }
+
+          const result = await client.devices.sendNotification(message, title, target, data);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  message: 'Notification sent',
+                  target: target ?? 'notify',
+                  context: result.context,
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
         default:
           return {
             content: [
@@ -657,7 +1515,7 @@ export function registerAllTools(server: Server, client: HaClient, aiClient?: Lo
   });
 
   logger.info('All tools registered successfully', {
-    toolCount: 16,
+    toolCount: 33,
     aiEnabled: !!aiClient,
   });
 }

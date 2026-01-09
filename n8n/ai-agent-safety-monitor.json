@@ -23,7 +23,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:3000/mcp",
+        "url": "http://mcpserver.10.0.0.18.nip.io:3000/mcp",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -76,7 +76,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:11434/api/generate",
+        "url": "http://ollama.10.0.0.17.nip.io:11434/api/generate",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\"model\":\"ministral-3:14b\",\"prompt\":\"Home safety AI monitoring 278 sensors.\\n\\nISSUES (3):\\n[\\n  {\\n    \\\"sensor\\\": \\\"sensor.nas_station_s5_drive_1_temperature\\\",\\n    \\\"issue\\\": \\\"Very high temp: 42C\\\",\\n    \\\"severity\\\": \\\"high\\\",\\n    \\\"state\\\": \\\"42\\\",\\n    \\\"name\\\": \\\"nas-station-s5 (Drive 1) Temperature\\\"\\n  },\\n  {\\n    \\\"sensor\\\": \\\"sensor.nas_station_s5_m_2_drive_2_temperature\\\",\\n    \\\"issue\\\": \\\"Very high temp: 41C\\\",\\n    \\\"severity\\\": \\\"high\\\",\\n    \\\"state\\\": \\\"41\\\",\\n    \\\"name\\\": \\\"nas-station-s5 (M.2 Drive 2) Temperature\\\"\\n  },\\n  {\\n    \\\"sensor\\\": \\\"sensor.nas_station_s5_temperature\\\",\\n    \\\"issue\\\": \\\"Very high temp: 60C\\\",\\n    \\\"severity\\\": \\\"high\\\",\\n    \\\"state\\\": \\\"60\\\",\\n    \\\"name\\\": \\\"nas-station-s5 Temperature\\\"\\n  }\\n]\\n\\nCritical: 0\\n\\nIMPORTANT: Create notification WITHOUT emojis or special characters. Plain text only.\\n\\nJSON:\\n{\\n  \\\"should_notify\\\": true,\\n  \\\"notification\\\": {\\n    \\\"title\\\": \\\"System Notice\\\",\\n    \\\"message\\\": \\\"Plain text summary and actions needed\\\"\\n  },\\n  \\\"reasoning\\\": \\\"brief\\\"\\n}\",\"stream\":false}",
@@ -153,7 +153,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:3000/mcp",
+        "url": "http://mcpserver.10.0.0.18.nip.io:3000/mcp",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [

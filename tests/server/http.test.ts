@@ -29,12 +29,12 @@ describe('HTTP Server', () => {
     } as any;
 
     mockConfig = {
-      baseUrl: 'http://homeassistant.local:8123',
+      baseUrl: 'http://homeassistant.10.0.0.19.nip.io:8123',
       token: 'test-token',
       strictSsl: false,
       timeout: 30000,
       aiProvider: 'ollama',
-      aiUrl: 'http://localhost:11434',
+      aiUrl: 'http://ollama.10.0.0.17.nip.io:11434',
       aiModel: 'qwen3:14b',
       aiTimeout: 60000,
       logLevel: 'info',
@@ -101,10 +101,10 @@ describe('HTTP Server', () => {
     });
 
     it('should allow specific origins', () => {
-      const allowedOrigins = ['http://localhost:3000', 'http://192.168.0.10:8080'];
+      const allowedOrigins = ['http://mcpserver.10.0.0.18.nip.io:3000', 'http://192.168.0.10:8080'];
       const corsConfig = { ...mockConfig, httpAllowedOrigins: allowedOrigins };
 
-      expect(corsConfig.httpAllowedOrigins).toContain('http://localhost:3000');
+      expect(corsConfig.httpAllowedOrigins).toContain('http://mcpserver.10.0.0.18.nip.io:3000');
       expect(corsConfig.httpAllowedOrigins).toContain('http://192.168.0.10:8080');
     });
 
@@ -117,7 +117,7 @@ describe('HTTP Server', () => {
 
     it('should set correct CORS headers', () => {
       const expectedHeaders = {
-        'Access-Control-Allow-Origin': 'http://localhost:3000',
+        'Access-Control-Allow-Origin': 'http://mcpserver.10.0.0.18.nip.io:3000',
         'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Mcp-Session-Id',
         'Access-Control-Max-Age': '86400',

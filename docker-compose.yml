@@ -4,7 +4,7 @@ services:
     container_name: mcp-ha-connect
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3000:3000"
+      - "3000:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:

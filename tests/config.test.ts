@@ -15,7 +15,7 @@ describe('loadConfig', () => {
 
   it('should load valid configuration from environment', () => {
     const env = {
-      HA_URL: 'http://homeassistant.local:8123',
+      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
       HA_TOKEN: 'test-token-12345',
       HA_STRICT_SSL: 'false',
       HA_TIMEOUT: '30000',
@@ -27,7 +27,7 @@ describe('loadConfig', () => {
 
     const config = loadConfig(env);
 
-    expect(config.baseUrl).toBe('http://homeassistant.local:8123');
+    expect(config.baseUrl).toBe('http://homeassistant.10.0.0.19.nip.io:8123');
     expect(config.token).toBe('test-token-12345');
     expect(config.strictSsl).toBe(false);
     expect(config.timeout).toBe(30000);
@@ -39,7 +39,7 @@ describe('loadConfig', () => {
 
   it('should apply default values for optional fields', () => {
     const env = {
-      HA_URL: 'http://homeassistant.local:8123',
+      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
       HA_TOKEN: 'test-token-12345',
     };
 
@@ -58,13 +58,13 @@ describe('loadConfig', () => {
 
   it('should remove trailing slash from baseUrl', () => {
     const env = {
-      HA_URL: 'http://homeassistant.local:8123/',
+      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123/',
       HA_TOKEN: 'test-token-12345',
     };
 
     const config = loadConfig(env);
 
-    expect(config.baseUrl).toBe('http://homeassistant.local:8123');
+    expect(config.baseUrl).toBe('http://homeassistant.10.0.0.19.nip.io:8123');
   });
 
   it('should throw error for missing HA_URL', () => {
@@ -77,7 +77,7 @@ describe('loadConfig', () => {
 
   it('should throw error for missing HA_TOKEN', () => {
     const env = {
-      HA_URL: 'http://homeassistant.local:8123',
+      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
     };
 
     expect(() => loadConfig(env)).toThrow('Invalid environment configuration');
@@ -94,7 +94,7 @@ describe('loadConfig', () => {
 
   it('should parse HTTP configuration when USE_HTTP is true', () => {
     const env = {
-      HA_URL: 'http://homeassistant.local:8123',
+      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
       HA_TOKEN: 'test-token-12345',
       MCP_SERVER_USE_HTTP: 'true',
       MCP_HTTP_PORT: '3000',
@@ -122,7 +122,7 @@ describe('loadConfig', () => {
 
   it('should use default httpPath based on transport', () => {
     const envStream = {
-      HA_URL: 'http://homeassistant.local:8123',
+      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
       HA_TOKEN: 'test-token-12345',
       MCP_HTTP_TRANSPORT: 'stream',
     };
@@ -131,7 +131,7 @@ describe('loadConfig', () => {
     expect(configStream.httpPath).toBe('/mcp');
 
     const envSse = {
-      HA_URL: 'http://homeassistant.local:8123',
+      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
       HA_TOKEN: 'test-token-12345',
       MCP_HTTP_TRANSPORT: 'sse',
     };
@@ -142,7 +142,7 @@ describe('loadConfig', () => {
 
   it('should handle wildcard in allowed origins', () => {
     const env = {
-      HA_URL: 'http://homeassistant.local:8123',
+      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
       HA_TOKEN: 'test-token-12345',
       MCP_HTTP_ALLOWED_ORIGINS: '*',
     };
@@ -155,15 +155,15 @@ describe('loadConfig', () => {
 
   it('should parse comma-separated origins', () => {
     const env = {
-      HA_URL: 'http://homeassistant.local:8123',
+      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
       HA_TOKEN: 'test-token-12345',
-      MCP_HTTP_ALLOWED_ORIGINS: 'http://localhost:3000,http://192.168.0.10:8080,localhost',
+      MCP_HTTP_ALLOWED_ORIGINS: 'http://mcpserver.10.0.0.18.nip.io:3000,http://192.168.0.10:8080,localhost',
     };
 
     const config = loadConfig(env);
 
     expect(config.httpAllowedOrigins).toEqual([
-      'http://localhost:3000',
+      'http://mcpserver.10.0.0.18.nip.io:3000',
       'http://192.168.0.10:8080',
       'localhost',
     ]);
@@ -171,7 +171,7 @@ describe('loadConfig', () => {
 
   it('should throw error for invalid bind address', () => {
     const env = {
-      HA_URL: 'http://homeassistant.local:8123',
+      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
       HA_TOKEN: 'test-token-12345',
       MCP_HTTP_BIND_ADDR: 'invalid-ip',
     };
@@ -181,7 +181,7 @@ describe('loadConfig', () => {
 
   it('should accept valid IPv4 bind address', () => {
     const env = {
-      HA_URL: 'http://homeassistant.local:8123',
+      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
       HA_TOKEN: 'test-token-12345',
       MCP_HTTP_BIND_ADDR: '192.168.1.100',
     };
@@ -192,7 +192,7 @@ describe('loadConfig', () => {
 
   it('should accept valid IPv6 bind address', () => {
     const env = {
-      HA_URL: 'http://homeassistant.local:8123',
+      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
       HA_TOKEN: 'test-token-12345',
       MCP_HTTP_BIND_ADDR: '::1',
     };
@@ -203,7 +203,7 @@ describe('loadConfig', () => {
 
   it('should parse numeric timeout', () => {
     const env = {
-      HA_URL: 'http://homeassistant.local:8123',
+      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
       HA_TOKEN: 'test-token-12345',
       HA_TIMEOUT: '45000',
     };
@@ -217,7 +217,7 @@ describe('loadConfig', () => {
 
     for (const level of levels) {
       const env = {
-        HA_URL: 'http://homeassistant.local:8123',
+        HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
         HA_TOKEN: 'test-token-12345',
         MCP_SERVER_LOG_LEVEL: level,
       };
@@ -232,7 +232,7 @@ describe('loadConfig', () => {
 
     for (const format of formats) {
       const env = {
-        HA_URL: 'http://homeassistant.local:8123',
+        HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
         HA_TOKEN: 'test-token-12345',
         MCP_SERVER_LOG_FORMAT: format,
       };
@@ -247,7 +247,7 @@ describe('loadConfig', () => {
 
     for (const transport of transports) {
       const env = {
-        HA_URL: 'http://homeassistant.local:8123',
+        HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
         HA_TOKEN: 'test-token-12345',
         MCP_HTTP_TRANSPORT: transport,
       };
@@ -259,7 +259,7 @@ describe('loadConfig', () => {
 
   it('should parse boolean strings correctly', () => {
     const envTrue = {
-      HA_URL: 'http://homeassistant.local:8123',
+      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
       HA_TOKEN: 'test-token-12345',
       HA_STRICT_SSL: 'true',
       MCP_SERVER_USE_HTTP: 'true',
@@ -272,7 +272,7 @@ describe('loadConfig', () => {
     expect(configTrue.stateful).toBe(true);
 
     const envFalse = {
-      HA_URL: 'http://homeassistant.local:8123',
+      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
       HA_TOKEN: 'test-token-12345',
       HA_STRICT_SSL: 'false',
       MCP_SERVER_USE_HTTP: 'false',
@@ -289,12 +289,12 @@ describe('loadConfig', () => {
 describe('validateConfig', () => {
   it('should validate valid configuration', () => {
     const config: EnvironmentConfig = {
-      baseUrl: 'http://homeassistant.local:8123',
+      baseUrl: 'http://homeassistant.10.0.0.19.nip.io:8123',
       token: 'test-token-12345',
       strictSsl: false,
       timeout: 30000,
       aiProvider: 'ollama',
-      aiUrl: 'http://localhost:11434',
+      aiUrl: 'http://ollama.10.0.0.17.nip.io:11434',
       aiModel: 'qwen3:14b',
       aiTimeout: 60000,
       logLevel: 'info',
@@ -304,6 +304,11 @@ describe('validateConfig', () => {
       httpTransport: 'stream',
       httpEnableHealthcheck: true,
       httpAllowCors: true,
+      sseEventsEnabled: true,
+      sseEventsPath: '/subscribe_events',
+      rateLimitEnabled: true,
+      rateLimitWindowMs: 60000,
+      rateLimitMaxRequests: 100,
     };
 
     expect(() => validateConfig(config)).not.toThrow();
@@ -319,7 +324,7 @@ describe('validateConfig', () => {
 
   it('should throw error for missing token', () => {
     const config = {
-      baseUrl: 'http://homeassistant.local:8123',
+      baseUrl: 'http://homeassistant.10.0.0.19.nip.io:8123',
     } as EnvironmentConfig;
 
     expect(() => validateConfig(config)).toThrow('Invalid configuration');

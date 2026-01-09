@@ -30,12 +30,12 @@ describe('LocalAIClient', () => {
   const createConfig = (provider: AIProviderType = 'ollama'): EnvironmentConfig =>
     ({
       aiProvider: provider,
-      aiUrl: 'http://localhost:11434',
+      aiUrl: 'http://ollama.10.0.0.17.nip.io:11434',
       aiModel: 'qwen3:14b',
       aiTimeout: 60000,
       aiApiKey: undefined,
       // Other required config fields
-      baseUrl: 'http://localhost:8123',
+      baseUrl: 'http://homeassistant.10.0.0.19.nip.io:8123',
       token: 'test-token',
       strictSsl: true,
       timeout: 30000,
@@ -148,7 +148,7 @@ describe('LocalAIClient', () => {
       const providerConfig = client.getConfig();
 
       expect(providerConfig.provider).toBe('ollama');
-      expect(providerConfig.baseUrl).toBe('http://localhost:11434');
+      expect(providerConfig.baseUrl).toBe('http://ollama.10.0.0.17.nip.io:11434');
       expect(providerConfig.model).toBe('qwen3:14b');
       expect(providerConfig.timeout).toBe(60000);
       expect(providerConfig.apiKey).toBe('test-key');

@@ -9,7 +9,7 @@ global.fetch = mockFetch;
 describe('OllamaProvider', () => {
   const defaultConfig: AIProviderConfig = {
     provider: 'ollama',
-    baseUrl: 'http://localhost:11434',
+    baseUrl: 'http://ollama.10.0.0.17.nip.io:11434',
     model: 'qwen3:14b',
     timeout: 60000,
   };
@@ -34,7 +34,7 @@ describe('OllamaProvider', () => {
 
       expect(result).toBe(true);
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:11434/api/tags',
+        'http://ollama.10.0.0.17.nip.io:11434/api/tags',
         expect.objectContaining({
           signal: expect.any(AbortSignal),
         })

@@ -62,6 +62,15 @@ const envSchema = z
     httpHealthcheckPath: z.string().optional(),
     httpAllowCors: createBooleanStringSchema(true),
     httpAllowedOrigins: listStringSchema,
+
+    // SSE Event Subscription Configuration
+    sseEventsEnabled: createBooleanStringSchema(true),
+    sseEventsPath: z.string().optional(),
+
+    // Rate Limiting Configuration
+    rateLimitEnabled: createBooleanStringSchema(true),
+    rateLimitWindowMs: numericStringSchema,
+    rateLimitMaxRequests: numericStringSchema,
   })
   .refine(
     (data) => {
@@ -126,6 +135,15 @@ export interface EnvironmentConfig {
   httpHealthcheckPath?: string;
   httpAllowCors: boolean;
   httpAllowedOrigins?: string[];
+
+  // SSE Event Subscription Configuration
+  sseEventsEnabled: boolean;
+  sseEventsPath: string;
+
+  // Rate Limiting Configuration
+  rateLimitEnabled: boolean;
+  rateLimitWindowMs: number;
+  rateLimitMaxRequests: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentConfig {
@@ -158,6 +176,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     httpHealthcheckPath: env.MCP_HTTP_HEALTHCHECK_PATH,
     httpAllowCors: env.MCP_HTTP_ALLOW_CORS,
     httpAllowedOrigins: env.MCP_HTTP_ALLOWED_ORIGINS,
+
+    // SSE Event Subscription Configuration
+    sseEventsEnabled: env.MCP_SSE_EVENTS_ENABLED,
+    sseEventsPath: env.MCP_SSE_EVENTS_PATH,
+
+    // Rate Limiting Configuration
+    rateLimitEnabled: env.MCP_RATE_LIMIT_ENABLED,
+    rateLimitWindowMs: env.MCP_RATE_LIMIT_WINDOW_MS,
+    rateLimitMaxRequests: env.MCP_RATE_LIMIT_MAX_REQUESTS,
   });
 
   if (!parsed.success) {
@@ -208,6 +235,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     httpHealthcheckPath: parsed.data.httpHealthcheckPath,
     httpAllowCors: parsed.data.httpAllowCors,
     httpAllowedOrigins,
+
+    // SSE Event Subscription Configuration
+    sseEventsEnabled: parsed.data.sseEventsEnabled,
+    sseEventsPath: parsed.data.sseEventsPath ?? '/subscribe_events',
+
+    // Rate Limiting Configuration
+    rateLimitEnabled: parsed.data.rateLimitEnabled,
+    rateLimitWindowMs: parsed.data.rateLimitWindowMs ?? 60000,
+    rateLimitMaxRequests: parsed.data.rateLimitMaxRequests ?? 100,
   };
 }
 

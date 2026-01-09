@@ -44,7 +44,7 @@ if (configErrors.length > 0) {
   console.error('\nConfiguration Errors:\n');
   configErrors.forEach(err => console.error(err));
   console.error('\nFix these issues before starting:');
-  console.error('export HA_URL=http://127.0.0.1:8123');
+  console.error('export HA_URL=http://homeassistant.10.0.0.19.nip.io:8123');
   console.error('export HA_TOKEN=your_long_lived_access_token\n');
   process.exit(1);
 }

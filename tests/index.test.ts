@@ -9,12 +9,12 @@ describe('Main entry point', () => {
   describe('Configuration loading', () => {
     it('should require baseUrl and token', () => {
       const validConfig: EnvironmentConfig = {
-        baseUrl: 'http://homeassistant.local:8123',
+        baseUrl: 'http://homeassistant.10.0.0.19.nip.io:8123',
         token: 'test-token',
         strictSsl: false,
         timeout: 30000,
         aiProvider: 'ollama',
-        aiUrl: 'http://localhost:11434',
+        aiUrl: 'http://ollama.10.0.0.17.nip.io:11434',
         aiModel: 'qwen3:14b',
         aiTimeout: 60000,
         logLevel: 'info',
@@ -74,7 +74,7 @@ describe('Main entry point', () => {
   describe('Configuration logging', () => {
     it('should log configuration without exposing token', () => {
       const config = {
-        baseUrl: 'http://homeassistant.local:8123',
+        baseUrl: 'http://homeassistant.10.0.0.19.nip.io:8123',
         token: 'super-secret-token',
         strictSsl: false,
         timeout: 30000,
