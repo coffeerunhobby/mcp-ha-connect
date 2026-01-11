@@ -149,26 +149,38 @@ export class AutomationOperations {
 
   /**
    * Create a new automation via the config API
-   * Note: Requires Home Assistant 2023.7+ with config flow support
+   * Note: Requires automation: !include automations.yaml in configuration.yaml
    */
   async createAutomation(config: AutomationConfig): Promise<{ id: string }> {
     if (!this.request) {
       throw new Error('RequestHandler not available');
     }
 
-    logger.info('Creating automation', { alias: config.alias });
+    // Generate a unique ID for the automation (timestamp-based like HA UI does)
+    const automationId = config.id || String(Date.now());
 
-    // Use the config/automation/config endpoint to create automations
-    const result = await this.request.post<{ result: string }>('/config/automation/config', {
+    logger.info('Creating automation', { alias: config.alias, id: automationId });
+
+    // POST to /config/automation/config/{id} - the ID must be in the URL path
+    await this.request.post<{ result: string }>(`/config/automation/config/${automationId}`, {
+      id: automationId,
       alias: config.alias,
-      description: config.description,
+      description: config.description || '',
       mode: config.mode ?? 'single',
       trigger: config.trigger,
-      condition: config.condition,
+      condition: config.condition || [],
       action: config.action,
     });
 
-    return { id: result.result };
+    // Reload automations to pick up the new one
+    if (this.serviceOps) {
+      await this.serviceOps.callService({
+        domain: 'automation',
+        service: 'reload',
+      });
+    }
+
+    return { id: automationId };
   }
 
   /**

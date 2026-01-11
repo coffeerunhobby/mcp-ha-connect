@@ -47,6 +47,7 @@ export interface AutomationAction {
 }
 
 export interface AutomationConfig {
+  id?: string;
   alias: string;
   description?: string;
   mode?: 'single' | 'restart' | 'queued' | 'parallel';
