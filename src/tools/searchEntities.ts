@@ -1,92 +1,21 @@
 /**
- * Search Entities Tool
- * Search for entities by name or entity_id
+ * searchEntities tool - Search for entities by name or entity_id
  */
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HaClient } from '../haClient/index.js';
-import { logger } from '../utils/logger.js';
+import { searchSchema, toToolResult, wrapToolHandler } from './common.js';
 
-export function registerSearchEntitiesTool(server: Server, client: HaClient): void {
-  logger.debug('Registering searchEntities tool');
-
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools: [
-        {
-          name: 'searchEntities',
-          description: 'Search for entities by name or entity_id. Returns all matching entities.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              query: {
-                type: 'string',
-                description: 'Search query (searches in entity_id and friendly_name)',
-              },
-            },
-            required: ['query'],
-          },
-        },
-      ],
-    };
-  });
-
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    if (request.params.name !== 'searchEntities') {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({ error: 'Unknown tool' }),
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    try {
-      const { query } = request.params.arguments as { query: string };
-
-      if (!query) {
-        throw new Error('query is required');
-      }
-
-      logger.info('Executing searchEntities tool', { query });
+export function registerSearchEntitiesTool(server: McpServer, client: HaClient): void {
+  server.registerTool(
+    'searchEntities',
+    {
+      description: 'Search for entities by name or entity_id. Returns all matching entities.',
+      inputSchema: searchSchema.shape,
+    },
+    wrapToolHandler('searchEntities', async ({ query }: { query: string }) => {
       const entities = await client.searchEntities(query);
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              query,
-              count: entities.length,
-              entities,
-            }, null, 2),
-          },
-        ],
-      };
-    } catch (error) {
-      logger.error('Failed to search entities', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              error: 'Failed to search entities',
-              message: error instanceof Error ? error.message : String(error),
-            }),
-          },
-        ],
-        isError: true,
-      };
-    }
-  });
+      return toToolResult({ query, count: entities.length, entities });
+    })
+  );
 }

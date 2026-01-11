@@ -1,11 +1,75 @@
 # Local Client
 
+Configuration file locations:
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+---
+
+## Mode: npx (Recommended)
+
+The fastest way to get started - no installation required:
+
+```json
+{
+  "mcpServers": {
+    "homeassistant": {
+      "command": "npx",
+      "args": ["-y", "@coffeerunhobby/mcp-ha-connect@0.5.0"],
+      "env": {
+        "HA_URL": "http://homeassistant.10.0.0.19.nip.io:8123",
+        "HA_TOKEN": "your_token"
+      }
+    }
+  }
+}
+```
+
+With AI analysis (Ollama):
+
+```json
+{
+  "mcpServers": {
+    "homeassistant": {
+      "command": "npx",
+      "args": ["-y", "@coffeerunhobby/mcp-ha-connect@0.5.0"],
+      "env": {
+        "HA_URL": "http://homeassistant.10.0.0.19.nip.io:8123",
+        "HA_TOKEN": "your_token",
+        "AI_PROVIDER": "ollama",
+        "AI_URL": "http://ollama.10.0.0.17.nip.io:11434",
+        "AI_MODEL": "qwen3:14b"
+      }
+    }
+  }
+}
+```
+
+---
+
+## Mode: Global npm Install
+
+```bash
+npm install -g @coffeerunhobby/mcp-ha-connect
+```
+
+```json
+{
+  "mcpServers": {
+    "homeassistant": {
+      "command": "mcp-ha-connect",
+      "env": {
+        "HA_URL": "http://homeassistant.10.0.0.19.nip.io:8123",
+        "HA_TOKEN": "your_token"
+      }
+    }
+  }
+}
+```
+
+---
+
 ## Mode: Standalone Node JS version
-
-Add to your Claude Desktop configuration file:
-
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`  
-**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -36,7 +100,8 @@ Or specify environment variables directly:
         "HA_TOKEN": "your_long_lived_access_token",
         "HA_STRICT_SSL": "false",
         "MCP_SERVER_LOG_LEVEL": "info",
-        "AI_URL": "http://ollama.10.0.0.1.nip.io:11434",
+        "AI_PROVIDER": "ollama",
+        "AI_URL": "http://ollama.10.0.0.17.nip.io:11434",
         "AI_MODEL": "phi4:14b"
       }
     }
@@ -44,7 +109,9 @@ Or specify environment variables directly:
 }
 ```
 
-### Mode: Docker container with .env
+---
+
+## Mode: Docker container with .env
 
 You need docker runtime installed locally
 
@@ -66,7 +133,9 @@ You need docker runtime installed locally
 }
 ```
 
-### Mode: UVX proxy to a working mcp-ha-connect server
+---
+
+## Mode: UVX proxy to a working mcp-ha-connect server
 
 You can use mcp-remote via uvx to proxy to your remote MCP server.
 
@@ -77,27 +146,16 @@ You can use mcp-remote via uvx to proxy to your remote MCP server.
       "command": "uvx",
       "args": [
         "mcp-remote",
-        "http://mcp-ha.10.0.0.1.nip.io:3000/mcp"
+        "http://mcpserver.10.0.0.18.nip.io:3000/mcp"
       ]
     }
   }
 }
 ```
 
-**nip.io Examples:**
+---
 
-[nip.io](https://nip.io) provides wildcard DNS for any IP address. Supported formats:
-
-| Format | Example | Resolves To |
-|--------|---------|-------------|
-| Dot notation | `mcp.10.0.0.1.nip.io` | 10.0.0.1 |
-| Dash notation | `mcp-10-0-0-1.nip.io` | 10.0.0.1 |
-| Hex notation | `mcp-0a000001.nip.io` | 10.0.0.1 |
-| With subdomain | `ha.mcp.10.0.0.1.nip.io` | 10.0.0.1 |
-
-Replace `10.0.0.1` with your actual server IP address.
-
-### Mode: Claude Desktop with Docker (Stdio Transport)
+## Mode: Claude Desktop with Docker (Stdio Transport)
 
 If you prefer to run the MCP server in Docker and connect Claude Desktop to it via stdio, you can use `docker exec`.
 
@@ -125,11 +183,6 @@ docker run -d --name mcp-ha-connect \
 **Note:** The `tail -f /dev/null` keeps the container running. The MCP server will be executed via `docker exec` by Claude Desktop.
 
 **Step 2: Configure Claude Desktop**
-
-Add to your Claude Desktop configuration file:
-
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`  
-**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -193,7 +246,9 @@ docker exec mcp-ha-connect curl http://homeassistant.10.0.0.19.nip.io:8123/api/
 docker exec mcp-ha-connect env | grep HA_
 ```
 
-### Mode: Claude Desktop with Docker Compose
+---
+
+## Mode: Claude Desktop with Docker Compose
 
 For a more robust Docker setup, use Docker Compose:
 
@@ -266,3 +321,18 @@ docker-compose ps
 - Environment variable management via .env
 - Network isolation
 - Easy updates: `docker-compose pull && docker-compose up -d`
+
+---
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `HA_URL` | Yes | Home Assistant URL |
+| `HA_TOKEN` | Yes | Long-lived access token |
+| `HA_STRICT_SSL` | No | Validate SSL (default: true) |
+| `AI_PROVIDER` | No | `ollama` or `openai-compatible` |
+| `AI_URL` | No | AI server URL |
+| `AI_MODEL` | No | Model name |
+
+See [.env.example](../.env.example) for all options.

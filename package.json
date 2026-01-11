@@ -1,6 +1,6 @@
 {
   "name": "@coffeerunhobby/mcp-ha-connect",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Smart home MCP server for Home Assistant plus Local AI integration",
   "type": "module",
   "main": "dist/index.js",
@@ -10,14 +10,14 @@
   "scripts": {
     "dev": "tsx watch --env-file=.env src/index.ts",
     "dev:http": "tsx watch --env-file=.env src/index.ts",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.json",
+    "check": "npm run lint && tsc --noEmit",
     "start": "node --env-file=.env dist/index.js",
     "start:http": "node --env-file=.env dist/index.js",
     "test": "vitest run --no-color",
     "test:watch": "vitest --no-color",
     "test:coverage": "vitest run --coverage --no-color",
-    "lint": "eslint src tests",
-    "type-check": "tsc --noEmit"
+    "lint": "eslint src tests"
   },
   "keywords": [
     "mcp",
@@ -39,9 +39,10 @@
     "@typescript-eslint/eslint-plugin": "^8.19.1",
     "@typescript-eslint/parser": "^8.19.1",
     "@vitest/coverage-v8": "^2.1.8",
+    "esbuild": "^0.27.2",
     "eslint": "^9.18.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
+    "typescript": "^5.9.3",
     "typescript-eslint": "^8.52.0",
     "vitest": "^2.1.8"
   },

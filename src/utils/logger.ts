@@ -46,8 +46,9 @@ function createLogger(level: LogLevel = 'info', format: LogFormat = 'plain', use
 }
 
 // Initialize with default, will be reconfigured by calling initLogger
+// Default to stderr to avoid interfering with MCP stdio protocol
 const defaultLevel = (process.env.MCP_SERVER_LOG_LEVEL as LogLevel | undefined) ?? 'info';
-instance = createLogger(defaultLevel);
+instance = createLogger(defaultLevel, 'plain', true);
 
 /**
  * Initialize the logger with a specific log level and format.

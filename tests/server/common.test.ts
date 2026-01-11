@@ -7,8 +7,8 @@ import { createServer } from '../../src/server/common.js';
 import { HaClient } from '../../src/haClient/index.js';
 import type { EnvironmentConfig } from '../../src/config.js';
 
-// Mock the tools registry
-vi.mock('../../src/tools/registry.js', () => ({
+// Mock the tools index
+vi.mock('../../src/tools/index.js', () => ({
   registerAllTools: vi.fn(),
 }));
 
@@ -47,10 +47,10 @@ describe('createServer', () => {
   });
 
   it('should register all tools on server creation', async () => {
-    const { registerAllTools } = await import('../../src/tools/registry.js');
+    const { registerAllTools } = await import('../../src/tools/index.js');
     const server = createServer(mockClient);
 
-    // Third argument (ollamaClient) is optional
+    // Third argument (aiClient) is optional
     expect(registerAllTools).toHaveBeenCalledWith(server, mockClient, undefined);
   });
 

@@ -3,28 +3,20 @@
  * Shared across all transport types (stdio, SSE, stream)
  */
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HaClient } from '../haClient/index.js';
 import type { LocalAIClient } from '../localAI/index.js';
-import { registerAllTools } from '../tools/registry.js';
+import { registerAllTools } from '../tools/index.js';
 import { registerAllResources } from '../resources/index.js';
 import { logger } from '../utils/logger.js';
 
-export function createServer(client: HaClient, aiClient?: LocalAIClient): Server {
+export function createServer(client: HaClient, aiClient?: LocalAIClient): McpServer {
   logger.debug('Creating MCP server instance');
 
-  const server = new Server(
-    {
-      name: 'mcp-ha-connect',
-      version: '0.4.0',
-    },
-    {
-      capabilities: {
-        tools: {},
-        resources: {},
-      },
-    }
-  );
+  const server = new McpServer({
+    name: 'mcp-ha-connect',
+    version: '0.5.0',
+  });
 
   // Register all Home Assistant tools
   registerAllTools(server, client, aiClient);
@@ -32,7 +24,7 @@ export function createServer(client: HaClient, aiClient?: LocalAIClient): Server
   // Register all Home Assistant resources
   registerAllResources(server, client);
 
-  logger.debug('MCP server instance created with 15 tools and 5 resources registered');
+  logger.debug('MCP server instance created');
 
   return server;
 }
