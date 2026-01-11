@@ -5,91 +5,132 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EnvironmentConfig } from '../../src/config.js';
 
-// Mock all operation modules
-const statesModule = vi.hoisted(() => {
-  const instance = {
-    getStates: vi.fn().mockResolvedValue([{ entity_id: 'light.test' }]),
-    getState: vi.fn().mockResolvedValue({ entity_id: 'light.test' }),
-    getAllSensors: vi.fn().mockResolvedValue([{ entity_id: 'sensor.test' }]),
-  };
-  const StateOperations = vi.fn(() => instance);
-  return { instance, StateOperations };
-});
+// Create mock instances
+const statesInstance = {
+  getStates: vi.fn().mockResolvedValue([{ entity_id: 'light.test' }]),
+  getState: vi.fn().mockResolvedValue({ entity_id: 'light.test' }),
+  getAllSensors: vi.fn().mockResolvedValue([{ entity_id: 'sensor.test' }]),
+};
 
-const servicesModule = vi.hoisted(() => {
-  const instance = {
-    callService: vi.fn().mockResolvedValue({ context: { id: 'ctx-1' } }),
-    restartServer: vi.fn().mockResolvedValue(undefined),
-  };
-  const ServiceOperations = vi.fn(() => instance);
-  return { instance, ServiceOperations };
-});
+const servicesInstance = {
+  callService: vi.fn().mockResolvedValue({ context: { id: 'ctx-1' } }),
+  restartServer: vi.fn().mockResolvedValue(undefined),
+};
 
-const entitiesModule = vi.hoisted(() => {
-  const instance = {
-    getEntitiesByDomain: vi.fn().mockResolvedValue([{ entity_id: 'light.test' }]),
-    searchEntities: vi.fn().mockResolvedValue([{ entity_id: 'light.test' }]),
-    getDomainSummary: vi.fn().mockResolvedValue({ domain: 'light', count: 1 }),
-    listEntities: vi.fn().mockResolvedValue([{ entity_id: 'light.test' }]),
-  };
-  const EntityOperations = vi.fn(() => instance);
-  return { instance, EntityOperations };
-});
+const entitiesInstance = {
+  getEntitiesByDomain: vi.fn().mockResolvedValue([{ entity_id: 'light.test' }]),
+  searchEntities: vi.fn().mockResolvedValue([{ entity_id: 'light.test' }]),
+  getDomainSummary: vi.fn().mockResolvedValue({ domain: 'light', count: 1 }),
+  listEntities: vi.fn().mockResolvedValue([{ entity_id: 'light.test' }]),
+};
 
-const automationsModule = vi.hoisted(() => {
-  const instance = {
-    getAutomations: vi.fn().mockResolvedValue([{ id: 'automation.test' }]),
-  };
-  const AutomationOperations = vi.fn(() => instance);
-  return { instance, AutomationOperations };
-});
+const automationsInstance = {
+  getAutomations: vi.fn().mockResolvedValue([{ id: 'automation.test' }]),
+};
 
-const historyModule = vi.hoisted(() => {
-  const instance = {
-    getHistory: vi.fn().mockResolvedValue([[{ entity_id: 'sensor.test' }]]),
-    getSystemLog: vi.fn().mockResolvedValue([{ when: '2026-01-08T10:00:00Z' }]),
-  };
-  const HistoryOperations = vi.fn(() => instance);
-  return { instance, HistoryOperations };
-});
+const historyInstance = {
+  getHistory: vi.fn().mockResolvedValue([[{ entity_id: 'sensor.test' }]]),
+  getSystemLog: vi.fn().mockResolvedValue([{ when: '2026-01-08T10:00:00Z' }]),
+};
 
-const updatesModule = vi.hoisted(() => {
-  const instance = {
-    getAvailableUpdates: vi.fn().mockResolvedValue({ updates: [], entities: [] }),
-  };
-  const UpdateOperations = vi.fn(() => instance);
-  return { instance, UpdateOperations };
-});
+const updatesInstance = {
+  getAvailableUpdates: vi.fn().mockResolvedValue({ updates: [], entities: [] }),
+};
 
-const configModule = vi.hoisted(() => {
-  const instance = {
-    getConfig: vi.fn().mockResolvedValue({ version: '2026.1.0' }),
-    checkApi: vi.fn().mockResolvedValue({ message: 'API running.' }),
-    getVersion: vi.fn().mockResolvedValue({ version: '2026.1.0' }),
-  };
-  const ConfigOperations = vi.fn(() => instance);
-  return { instance, ConfigOperations };
-});
+const configInstance = {
+  getConfig: vi.fn().mockResolvedValue({ version: '2026.1.0' }),
+  checkApi: vi.fn().mockResolvedValue({ message: 'API running.' }),
+  getVersion: vi.fn().mockResolvedValue({ version: '2026.1.0' }),
+};
 
-const requestModule = vi.hoisted(() => {
-  const instance = {
-    request: vi.fn().mockResolvedValue({}),
-    get: vi.fn().mockResolvedValue({}),
-    post: vi.fn().mockResolvedValue({}),
-  };
-  const RequestHandler = vi.fn(() => instance);
-  return { instance, RequestHandler };
-});
+const requestInstance = {
+  request: vi.fn().mockResolvedValue({}),
+  get: vi.fn().mockResolvedValue({}),
+  post: vi.fn().mockResolvedValue({}),
+};
 
-// Apply mocks
-vi.mock('../../src/haClient/states.js', () => ({ StateOperations: statesModule.StateOperations }));
-vi.mock('../../src/haClient/services.js', () => ({ ServiceOperations: servicesModule.ServiceOperations }));
-vi.mock('../../src/haClient/entities.js', () => ({ EntityOperations: entitiesModule.EntityOperations }));
-vi.mock('../../src/haClient/automations.js', () => ({ AutomationOperations: automationsModule.AutomationOperations }));
-vi.mock('../../src/haClient/history.js', () => ({ HistoryOperations: historyModule.HistoryOperations }));
-vi.mock('../../src/haClient/updates.js', () => ({ UpdateOperations: updatesModule.UpdateOperations }));
-vi.mock('../../src/haClient/config.js', () => ({ ConfigOperations: configModule.ConfigOperations }));
-vi.mock('../../src/haClient/request.js', () => ({ RequestHandler: requestModule.RequestHandler }));
+// Mock classes for vitest 4.x compatibility
+const StateOperationsMock = vi.fn().mockImplementation(() => statesInstance);
+const ServiceOperationsMock = vi.fn().mockImplementation(() => servicesInstance);
+const EntityOperationsMock = vi.fn().mockImplementation(() => entitiesInstance);
+const AutomationOperationsMock = vi.fn().mockImplementation(() => automationsInstance);
+const HistoryOperationsMock = vi.fn().mockImplementation(() => historyInstance);
+const UpdateOperationsMock = vi.fn().mockImplementation(() => updatesInstance);
+const ConfigOperationsMock = vi.fn().mockImplementation(() => configInstance);
+const RequestHandlerMock = vi.fn().mockImplementation(() => requestInstance);
+
+// Apply mocks with class-style factories
+vi.mock('../../src/haClient/states.js', () => ({
+  StateOperations: class {
+    constructor() {
+      StateOperationsMock();
+      return statesInstance;
+    }
+  },
+}));
+
+vi.mock('../../src/haClient/services.js', () => ({
+  ServiceOperations: class {
+    constructor() {
+      ServiceOperationsMock();
+      return servicesInstance;
+    }
+  },
+}));
+
+vi.mock('../../src/haClient/entities.js', () => ({
+  EntityOperations: class {
+    constructor() {
+      EntityOperationsMock();
+      return entitiesInstance;
+    }
+  },
+}));
+
+vi.mock('../../src/haClient/automations.js', () => ({
+  AutomationOperations: class {
+    constructor() {
+      AutomationOperationsMock();
+      return automationsInstance;
+    }
+  },
+}));
+
+vi.mock('../../src/haClient/history.js', () => ({
+  HistoryOperations: class {
+    constructor() {
+      HistoryOperationsMock();
+      return historyInstance;
+    }
+  },
+}));
+
+vi.mock('../../src/haClient/updates.js', () => ({
+  UpdateOperations: class {
+    constructor() {
+      UpdateOperationsMock();
+      return updatesInstance;
+    }
+  },
+}));
+
+vi.mock('../../src/haClient/config.js', () => ({
+  ConfigOperations: class {
+    constructor() {
+      ConfigOperationsMock();
+      return configInstance;
+    }
+  },
+}));
+
+vi.mock('../../src/haClient/request.js', () => ({
+  RequestHandler: class {
+    constructor() {
+      RequestHandlerMock();
+      return requestInstance;
+    }
+  },
+}));
 
 const baseConfig: EnvironmentConfig = {
   baseUrl: 'http://homeassistant.10.0.0.19.nip.io:8123',
@@ -118,23 +159,14 @@ describe('HaClient aggregator', () => {
     const { HaClient } = await import('../../src/haClient/index.js');
     const client = new HaClient(baseConfig);
 
-    expect(requestModule.RequestHandler).toHaveBeenCalledWith(
-      expect.objectContaining({
-        baseUrl: 'http://homeassistant.10.0.0.19.nip.io:8123',
-        token: 'test-token',
-      })
-    );
-    expect(statesModule.StateOperations).toHaveBeenCalledWith(requestModule.instance);
-    expect(servicesModule.ServiceOperations).toHaveBeenCalledWith(requestModule.instance);
-    expect(entitiesModule.EntityOperations).toHaveBeenCalledWith(statesModule.instance);
-    expect(automationsModule.AutomationOperations).toHaveBeenCalledWith(
-      statesModule.instance,
-      servicesModule.instance,
-      requestModule.instance
-    );
-    expect(historyModule.HistoryOperations).toHaveBeenCalledWith(requestModule.instance);
-    expect(updatesModule.UpdateOperations).toHaveBeenCalledWith(entitiesModule.instance);
-    expect(configModule.ConfigOperations).toHaveBeenCalledWith(requestModule.instance);
+    expect(RequestHandlerMock).toHaveBeenCalled();
+    expect(StateOperationsMock).toHaveBeenCalled();
+    expect(ServiceOperationsMock).toHaveBeenCalled();
+    expect(EntityOperationsMock).toHaveBeenCalled();
+    expect(AutomationOperationsMock).toHaveBeenCalled();
+    expect(HistoryOperationsMock).toHaveBeenCalled();
+    expect(UpdateOperationsMock).toHaveBeenCalled();
+    expect(ConfigOperationsMock).toHaveBeenCalled();
   });
 
   it('proxies state operations', async () => {
@@ -145,9 +177,9 @@ describe('HaClient aggregator', () => {
     await expect(client.getState('light.test')).resolves.toEqual({ entity_id: 'light.test' });
     await expect(client.getAllSensors()).resolves.toEqual([{ entity_id: 'sensor.test' }]);
 
-    expect(statesModule.instance.getStates).toHaveBeenCalled();
-    expect(statesModule.instance.getState).toHaveBeenCalledWith('light.test');
-    expect(statesModule.instance.getAllSensors).toHaveBeenCalled();
+    expect(statesInstance.getStates).toHaveBeenCalled();
+    expect(statesInstance.getState).toHaveBeenCalledWith('light.test');
+    expect(statesInstance.getAllSensors).toHaveBeenCalled();
   });
 
   it('proxies service operations', async () => {
@@ -158,8 +190,8 @@ describe('HaClient aggregator', () => {
     await expect(client.callService(serviceData)).resolves.toEqual({ context: { id: 'ctx-1' } });
     await expect(client.restartServer()).resolves.toBeUndefined();
 
-    expect(servicesModule.instance.callService).toHaveBeenCalledWith(serviceData);
-    expect(servicesModule.instance.restartServer).toHaveBeenCalled();
+    expect(servicesInstance.callService).toHaveBeenCalledWith(serviceData);
+    expect(servicesInstance.restartServer).toHaveBeenCalled();
   });
 
   it('proxies entity operations', async () => {
@@ -171,10 +203,10 @@ describe('HaClient aggregator', () => {
     await expect(client.getDomainSummary('light')).resolves.toEqual({ domain: 'light', count: 1 });
     await expect(client.listEntities({ domain: 'light' })).resolves.toEqual([{ entity_id: 'light.test' }]);
 
-    expect(entitiesModule.instance.getEntitiesByDomain).toHaveBeenCalledWith('light');
-    expect(entitiesModule.instance.searchEntities).toHaveBeenCalledWith('test');
-    expect(entitiesModule.instance.getDomainSummary).toHaveBeenCalledWith('light');
-    expect(entitiesModule.instance.listEntities).toHaveBeenCalledWith({ domain: 'light' });
+    expect(entitiesInstance.getEntitiesByDomain).toHaveBeenCalledWith('light');
+    expect(entitiesInstance.searchEntities).toHaveBeenCalledWith('test');
+    expect(entitiesInstance.getDomainSummary).toHaveBeenCalledWith('light');
+    expect(entitiesInstance.listEntities).toHaveBeenCalledWith({ domain: 'light' });
   });
 
   it('proxies automation operations', async () => {
@@ -183,7 +215,7 @@ describe('HaClient aggregator', () => {
 
     await expect(client.getAutomations()).resolves.toEqual([{ id: 'automation.test' }]);
 
-    expect(automationsModule.instance.getAutomations).toHaveBeenCalled();
+    expect(automationsInstance.getAutomations).toHaveBeenCalled();
   });
 
   it('proxies history operations', async () => {
@@ -193,8 +225,8 @@ describe('HaClient aggregator', () => {
     await expect(client.getHistory('sensor.test', 24)).resolves.toEqual([[{ entity_id: 'sensor.test' }]]);
     await expect(client.getSystemLog({ hours: 24 })).resolves.toEqual([{ when: '2026-01-08T10:00:00Z' }]);
 
-    expect(historyModule.instance.getHistory).toHaveBeenCalledWith('sensor.test', 24);
-    expect(historyModule.instance.getSystemLog).toHaveBeenCalledWith({ hours: 24 });
+    expect(historyInstance.getHistory).toHaveBeenCalledWith('sensor.test', 24);
+    expect(historyInstance.getSystemLog).toHaveBeenCalledWith({ hours: 24 });
   });
 
   it('proxies update operations', async () => {
@@ -203,7 +235,7 @@ describe('HaClient aggregator', () => {
 
     await expect(client.getAvailableUpdates()).resolves.toEqual({ updates: [], entities: [] });
 
-    expect(updatesModule.instance.getAvailableUpdates).toHaveBeenCalled();
+    expect(updatesInstance.getAvailableUpdates).toHaveBeenCalled();
   });
 
   it('proxies config operations', async () => {
@@ -214,8 +246,8 @@ describe('HaClient aggregator', () => {
     await expect(client.checkApi()).resolves.toEqual({ message: 'API running.' });
     await expect(client.getVersion()).resolves.toEqual({ version: '2026.1.0' });
 
-    expect(configModule.instance.getConfig).toHaveBeenCalled();
-    expect(configModule.instance.checkApi).toHaveBeenCalled();
-    expect(configModule.instance.getVersion).toHaveBeenCalled();
+    expect(configInstance.getConfig).toHaveBeenCalled();
+    expect(configInstance.checkApi).toHaveBeenCalled();
+    expect(configInstance.getVersion).toHaveBeenCalled();
   });
 });

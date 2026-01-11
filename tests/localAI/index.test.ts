@@ -1,30 +1,39 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { EnvironmentConfig } from '../../src/config.js';
+import type { AIProviderType } from '../../src/localAI/types.js';
 
-// Mock the providers before importing LocalAIClient
+// Create mock functions that will be used by the mock implementations
 const mockOllamaAnalyze = vi.fn();
 const mockOllamaHealth = vi.fn();
 const mockOpenAIAnalyze = vi.fn();
 const mockOpenAIHealth = vi.fn();
 
-vi.mock('../../src/localAI/providers/ollama.js', () => ({
-  OllamaProvider: vi.fn().mockImplementation(() => ({
-    analyzeSensors: mockOllamaAnalyze,
-    checkHealth: mockOllamaHealth,
-    getProviderName: () => 'ollama',
-  })),
-}));
+// Mock the providers with class-style constructors
+vi.mock('../../src/localAI/providers/ollama.js', () => {
+  return {
+    OllamaProvider: class MockOllamaProvider {
+      analyzeSensors = mockOllamaAnalyze;
+      checkHealth = mockOllamaHealth;
+      getProviderName() {
+        return 'ollama';
+      }
+    },
+  };
+});
 
-vi.mock('../../src/localAI/providers/openai.js', () => ({
-  OpenAICompatibleProvider: vi.fn().mockImplementation(() => ({
-    analyzeSensors: mockOpenAIAnalyze,
-    checkHealth: mockOpenAIHealth,
-    getProviderName: () => 'openai-compatible',
-  })),
-}));
+vi.mock('../../src/localAI/providers/openai.js', () => {
+  return {
+    OpenAICompatibleProvider: class MockOpenAIProvider {
+      analyzeSensors = mockOpenAIAnalyze;
+      checkHealth = mockOpenAIHealth;
+      getProviderName() {
+        return 'openai-compatible';
+      }
+    },
+  };
+});
 
 import { LocalAIClient } from '../../src/localAI/index.js';
-import type { EnvironmentConfig } from '../../src/config.js';
-import type { AIProviderType } from '../../src/localAI/types.js';
 
 describe('LocalAIClient', () => {
   const createConfig = (provider: AIProviderType = 'ollama'): EnvironmentConfig =>

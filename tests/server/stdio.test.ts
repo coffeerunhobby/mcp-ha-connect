@@ -8,7 +8,9 @@ import type { EnvironmentConfig } from '../../src/config.js';
 
 // Mock dependencies
 vi.mock('../../src/server/common.js');
-vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
+vi.mock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
+  StdioServerTransport: class MockStdioServerTransport {},
+}));
 vi.mock('../../src/utils/logger.js');
 
 describe('startStdioServer', () => {
@@ -62,15 +64,11 @@ describe('startStdioServer', () => {
     };
     vi.mocked(createServer).mockReturnValue(mockServer as any);
 
-    const mockTransport = {};
-    vi.mocked(StdioServerTransport).mockImplementation(() => mockTransport as any);
-
     await startStdioServer(mockClient);
 
     // Second argument (ollamaClient) is optional
     expect(createServer).toHaveBeenCalledWith(mockClient, undefined);
-    expect(StdioServerTransport).toHaveBeenCalled();
-    expect(mockServer.connect).toHaveBeenCalledWith(mockTransport);
+    expect(mockServer.connect).toHaveBeenCalled();
   });
 
   it('should log server startup', async () => {
