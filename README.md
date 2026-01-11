@@ -2,37 +2,15 @@
 
 A production-ready Model Context Protocol (MCP) server for Home Assistant integration with AI assistants like Claude.
 
-## Version 0.5.0 Features
+## Autonomous safety monitoring system:
 
-- **Real-time Updates**: Get instant updates through Server-Sent Events (SSE) - subscribe to state changes, automations, and service calls
-- **Device Control**: Control any Home Assistant device through natural language with advanced options
-- **Automation Management**: Create, update, delete, trigger, and manage automations programmatically
-- **State Monitoring**: Track and query device states in real-time
-- **Rate Limiting**: Built-in rate limiting to protect your Home Assistant instance
-- **Secure**: Token-based authentication and configurable rate limits
-- **Mobile Ready**: Works with any HTTP-capable client
+1. **JS Pre-filter**: Tier A triggers + basic anomaly detection
+2. **Issue Objects**: Structured alerts (entity, area, threshold, observed, last_changed)
+3. **LLM Decision**: Single JSON verdict from local model
+4. **Smart Notifications**: Dedupe + cooldown to prevent alert fatigue
+5. **Acknowledgment**: HA notification, Telegram, mobile app action, or voice
+6. **Auto-Response**: Water/gas shutoff via HA valves/switches
 
-## Real-time Updates with SSE
-
-The server includes a powerful Server-Sent Events (SSE) system that provides real-time updates from your Home Assistant instance:
-
-- **Get instant state changes** for any device
-- **Monitor automation triggers** and executions
-- **Subscribe to specific domains** or entities
-- **Track service calls** and script executions
-
-### Quick SSE Example
-
-```javascript
-const eventSource = new EventSource(
-  'http://mcpserver.10.0.0.18.nip.io:3000/subscribe_events?domain=light'
-);
-
-eventSource.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log('Update received:', data);
-};
-```
 
 See [docs/SSE_API.md](docs/SSE_API.md) for complete documentation of the SSE system.
 
@@ -78,7 +56,7 @@ See [docs/SSE_API.md](docs/SSE_API.md) for complete documentation of the SSE sys
 - Full type safety with TypeScript
 - Stateful and stateless session support
 
-## Available Tools (33 Total)
+## Available Tools (34 Total)
 
 ### State & Entity Tools
 
@@ -111,7 +89,8 @@ See [docs/SSE_API.md](docs/SSE_API.md) for complete documentation of the SSE sys
 | `controlFan` | Control fans with speed, oscillation, direction |
 | `activateScene` | Activate a Home Assistant scene |
 | `runScript` | Run a Home Assistant script |
-| `sendNotification` | Send notifications through Home Assistant |
+| `sendNotification` | Send notifications with full mobile app support (actions, priority, images) |
+| `listNotificationTargets` | Discover available mobile app notification targets |
 
 ### Automation Tools
 
@@ -251,33 +230,6 @@ docker run -d --name mcp-ha-connect \
   mcp-ha-connect
 ```
 
-## Development
-
-### Running Tests
-
-```bash
-npm test              # Run all tests
-npm run test:watch    # Watch mode
-npm run test:coverage # Coverage report
-```
-
-### Type Checking
-
-```bash
-npm run type-check
-```
-
-### Linting
-
-```bash
-npm run lint
-```
-
-### Building
-
-```bash
-npm run build
-```
 
 ## Integration Examples
 
@@ -387,7 +339,7 @@ Coffee Run Hobby (github.com/coffeerunhobby)
 
 ## Version
 
-0.5.0
+0.6.0
 
 ## Changelog
 

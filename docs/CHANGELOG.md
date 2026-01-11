@@ -1,3 +1,22 @@
+### 0.6.0 (January 2026)
+- **Mobile App Notifications**: Full support for Home Assistant mobile app notifications
+  - `sendNotification`: Enhanced with action buttons, priority, images, videos
+  - `listNotificationTargets`: Discover available mobile app notification targets
+  - Android-specific options: priority, channel, LED color, vibration patterns
+  - iOS-specific options: interruption level, badge count, critical alerts
+  - Sticky and persistent notification support
+- **Fixed Automation API**: `createAutomation` now works correctly
+  - Uses correct endpoint: `POST /config/automation/config/{id}`
+  - Auto-generates timestamp-based IDs (like HA UI)
+  - Auto-reloads automations after creation
+  - Added optional `id` field to AutomationConfig type
+- **Refactored Tools Architecture**: Split monolithic registry into individual tool files
+  - Each tool now in its own file under `src/tools/`
+  - Improved maintainability and code organization
+  - Shared schemas and utilities in `src/tools/common.ts`
+- Switched to NodeNext module resolution for TypeScript
+- All 310 tests passing
+
 ### 0.5.0 (January 2026)
 - **Real-time SSE Event Subscription**: Subscribe to Home Assistant events via Server-Sent Events
   - Filter by domain, entity_id, or event types
