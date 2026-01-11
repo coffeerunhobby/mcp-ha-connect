@@ -1,3 +1,13 @@
+### 0.7.0 (January 2026)
+- **Calendar Tools**: Access Home Assistant calendar entities
+  - `listCalendars`: Get all calendar entities
+  - `getCalendarEvents`: Get events from one or all calendars with date filtering
+- **Person Tracking Tool**: Track household members
+  - `listPersons`: List all person entities with location state (home/away)
+  - Optimized description for small LLM tool selection
+  - Returns onsite/away counts and linked device trackers
+- Total tools increased from 34 to 37
+
 ### 0.6.0 (January 2026)
 - **Mobile App Notifications**: Full support for Home Assistant mobile app notifications
   - `sendNotification`: Enhanced with action buttons, priority, images, videos

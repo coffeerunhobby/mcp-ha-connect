@@ -2,11 +2,13 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Home Assistant MCP Wrapper",
-    "version": "1.2",
-    "description": "Pretty REST endpoints that call MCP tools under the hood. Raw JSON-RPC passthrough remains available at POST / for n8n compatibility."
+    "version": "0.7.0",
+    "description": "REST endpoints that wrap MCP tools for Home Assistant integration. Raw JSON-RPC passthrough available at POST / for n8n compatibility."
   },
   "servers": [
-    { "url": "http://mcpserver.10.0.0.18.nip.io:3000", "description": "MCP Server (nip.io)" },
+    { "url": "http://mcpserver.10.0.0.18.nip.io:3000", "description": "MCP Server" },
+    { "url": "http://homeassistant.10.0.0.19.nip.io:8123", "description": "Home Assistant" },
+    { "url": "http://ollama.10.0.0.17.nip.io:11434", "description": "Ollama AI" },
     { "url": "http://127.0.0.1:3000", "description": "Local development" }
   ],
   "paths": {
@@ -14,6 +16,7 @@
       "get": {
         "operationId": "health",
         "summary": "Health check",
+        "tags": ["System"],
         "responses": {
           "200": {
             "description": "OK",
@@ -35,25 +38,21 @@
       }
     },
 
-    "/get_all_sensors": {
+    "/get_states": {
       "post": {
-        "operationId": "get_all_sensors",
-        "summary": "Get all sensors from Home Assistant",
+        "operationId": "get_states",
+        "summary": "Get all entity states from Home Assistant",
+        "tags": ["State & Entity"],
         "responses": {
           "200": {
-            "description": "Sensors list",
+            "description": "All entities",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["count", "sensors"],
                   "properties": {
-                    "count": { "type": "integer", "example": 271 },
-                    "sensors": {
-                      "type": "array",
-                      "items": { "type": "object" }
-                    },
-                    "raw": { "type": "object", "description": "Original MCP response (debug)" }
+                    "count": { "type": "integer" },
+                    "entities": { "type": "array", "items": { "type": "object" } }
                   }
                 }
               }
@@ -63,10 +62,11 @@
       }
     },
 
-    "/get_sensor_state": {
+    "/get_state": {
       "post": {
-        "operationId": "get_sensor_state",
-        "summary": "Get state for a Home Assistant entity_id",
+        "operationId": "get_state",
+        "summary": "Get state of a specific entity",
+        "tags": ["State & Entity"],
         "requestBody": {
           "required": true,
           "content": {
@@ -75,7 +75,7 @@
                 "type": "object",
                 "required": ["entity_id"],
                 "properties": {
-                  "entity_id": { "type": "string", "example": "sensor.nas_station_s5_temperature" }
+                  "entity_id": { "type": "string", "example": "light.living_room" }
                 }
               }
             }
@@ -86,12 +86,43 @@
             "description": "Entity state",
             "content": {
               "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/get_entities_by_domain": {
+      "post": {
+        "operationId": "get_entities_by_domain",
+        "summary": "Get all entities for a specific domain",
+        "tags": ["State & Entity"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["domain"],
+                "properties": {
+                  "domain": { "type": "string", "example": "light" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Entities in domain",
+            "content": {
+              "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["entity"],
                   "properties": {
-                    "entity": { "type": "object" },
-                    "raw": { "type": "object", "description": "Original MCP response (debug)" }
+                    "count": { "type": "integer" },
+                    "entities": { "type": "array", "items": { "type": "object" } }
                   }
                 }
               }
@@ -101,10 +132,231 @@
       }
     },
 
-    "/control_device": {
+    "/search_entities": {
       "post": {
-        "operationId": "control_device",
-        "summary": "Call a Home Assistant service (domain/service) with data",
+        "operationId": "search_entities",
+        "summary": "Search for entities by name or entity_id",
+        "tags": ["State & Entity"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                  "query": { "type": "string", "example": "bedroom" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Matching entities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "query": { "type": "string" },
+                    "count": { "type": "integer" },
+                    "entities": { "type": "array", "items": { "type": "object" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/get_all_sensors": {
+      "post": {
+        "operationId": "get_all_sensors",
+        "summary": "Get all sensor and binary_sensor entities",
+        "tags": ["State & Entity"],
+        "responses": {
+          "200": {
+            "description": "All sensors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "count": { "type": "integer" },
+                    "sensors": { "type": "array", "items": { "type": "object" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/list_entities": {
+      "post": {
+        "operationId": "list_entities",
+        "summary": "List entities with optional filtering",
+        "tags": ["State & Entity"],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "domain": { "type": "string", "example": "light" },
+                  "search": { "type": "string", "example": "kitchen" },
+                  "state": { "type": "string", "example": "on" },
+                  "limit": { "type": "integer", "example": 10 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Filtered entities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "count": { "type": "integer" },
+                    "filters": { "type": "object" },
+                    "entities": { "type": "array", "items": { "type": "object" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/get_domain_summary": {
+      "post": {
+        "operationId": "get_domain_summary",
+        "summary": "Get summary statistics for a domain",
+        "tags": ["State & Entity"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["domain"],
+                "properties": {
+                  "domain": { "type": "string", "example": "light" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Domain summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "domain": { "type": "string" },
+                    "total": { "type": "integer" },
+                    "states": { "type": "object" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/get_history": {
+      "post": {
+        "operationId": "get_history",
+        "summary": "Get historical data for an entity",
+        "tags": ["State & Entity"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["entity_id"],
+                "properties": {
+                  "entity_id": { "type": "string", "example": "sensor.temperature" },
+                  "hours": { "type": "integer", "example": 24 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Historical data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entity_id": { "type": "string" },
+                    "history": { "type": "array", "items": { "type": "object" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/list_persons": {
+      "post": {
+        "operationId": "list_persons",
+        "summary": "List all household members (person entities)",
+        "description": "Returns all person entities with location state (home/away/unknown) and linked device trackers.",
+        "tags": ["State & Entity"],
+        "responses": {
+          "200": {
+            "description": "Persons list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "count": { "type": "integer" },
+                    "onsite": { "type": "integer" },
+                    "away": { "type": "integer" },
+                    "persons": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "entity_id": { "type": "string" },
+                          "name": { "type": "string" },
+                          "state": { "type": "string" },
+                          "device_trackers": { "type": "array", "items": { "type": "string" } }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/call_service": {
+      "post": {
+        "operationId": "call_service",
+        "summary": "Call any Home Assistant service",
+        "tags": ["Service & Control"],
         "requestBody": {
           "required": true,
           "content": {
@@ -113,12 +365,16 @@
                 "type": "object",
                 "required": ["domain", "service"],
                 "properties": {
-                  "domain": { "type": "string", "example": "notify" },
-                  "service": { "type": "string", "example": "persistent_notification" },
-                  "data": {
+                  "domain": { "type": "string", "example": "light" },
+                  "service": { "type": "string", "example": "turn_on" },
+                  "service_data": { "type": "object" },
+                  "target": {
                     "type": "object",
-                    "additionalProperties": true,
-                    "example": { "title": "Alert", "message": "Hello" }
+                    "properties": {
+                      "entity_id": { "type": "string" },
+                      "device_id": { "type": "string" },
+                      "area_id": { "type": "string" }
+                    }
                   }
                 }
               }
@@ -130,13 +386,858 @@
             "description": "Service result",
             "content": {
               "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/entity_action": {
+      "post": {
+        "operationId": "entity_action",
+        "summary": "Simple turn_on/turn_off/toggle actions",
+        "tags": ["Service & Control"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["entity_id", "action"],
+                "properties": {
+                  "entity_id": { "type": "string", "example": "light.living_room" },
+                  "action": { "type": "string", "enum": ["turn_on", "turn_off", "toggle"] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Action result",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/control_light": {
+      "post": {
+        "operationId": "control_light",
+        "summary": "Control lights with brightness, color, temperature",
+        "tags": ["Device Control"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["entity_id", "action"],
+                "properties": {
+                  "entity_id": { "type": "string", "example": "light.living_room" },
+                  "action": { "type": "string", "enum": ["turn_on", "turn_off", "toggle"] },
+                  "brightness_pct": { "type": "integer", "minimum": 0, "maximum": 100 },
+                  "color_temp_kelvin": { "type": "integer", "example": 4000 },
+                  "rgb_color": { "type": "array", "items": { "type": "integer" }, "example": [255, 128, 0] },
+                  "transition": { "type": "number", "example": 2.0 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Light control result",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/control_climate": {
+      "post": {
+        "operationId": "control_climate",
+        "summary": "Control thermostats with temperature, HVAC mode",
+        "tags": ["Device Control"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["entity_id"],
+                "properties": {
+                  "entity_id": { "type": "string", "example": "climate.living_room" },
+                  "temperature": { "type": "number", "example": 72 },
+                  "hvac_mode": { "type": "string", "enum": ["off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only"] },
+                  "fan_mode": { "type": "string" },
+                  "preset_mode": { "type": "string", "example": "eco" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Climate control result",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/control_media_player": {
+      "post": {
+        "operationId": "control_media_player",
+        "summary": "Control media players with playback, volume",
+        "tags": ["Device Control"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["entity_id", "action"],
+                "properties": {
+                  "entity_id": { "type": "string", "example": "media_player.living_room" },
+                  "action": { "type": "string", "enum": ["play", "pause", "stop", "next", "previous", "volume_set", "volume_mute"] },
+                  "volume_level": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "is_volume_muted": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Media player control result",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/control_cover": {
+      "post": {
+        "operationId": "control_cover",
+        "summary": "Control covers/blinds with position, tilt",
+        "tags": ["Device Control"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["entity_id", "action"],
+                "properties": {
+                  "entity_id": { "type": "string", "example": "cover.living_room_blinds" },
+                  "action": { "type": "string", "enum": ["open", "close", "stop", "set_position", "set_tilt"] },
+                  "position": { "type": "integer", "minimum": 0, "maximum": 100 },
+                  "tilt_position": { "type": "integer", "minimum": 0, "maximum": 100 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cover control result",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/control_fan": {
+      "post": {
+        "operationId": "control_fan",
+        "summary": "Control fans with speed, oscillation, direction",
+        "tags": ["Device Control"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["entity_id", "action"],
+                "properties": {
+                  "entity_id": { "type": "string", "example": "fan.bedroom" },
+                  "action": { "type": "string", "enum": ["turn_on", "turn_off", "toggle", "set_speed", "oscillate", "set_direction"] },
+                  "percentage": { "type": "integer", "minimum": 0, "maximum": 100 },
+                  "oscillating": { "type": "boolean" },
+                  "direction": { "type": "string", "enum": ["forward", "reverse"] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fan control result",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/activate_scene": {
+      "post": {
+        "operationId": "activate_scene",
+        "summary": "Activate a Home Assistant scene",
+        "tags": ["Device Control"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["entity_id"],
+                "properties": {
+                  "entity_id": { "type": "string", "example": "scene.movie_time" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scene activation result",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/run_script": {
+      "post": {
+        "operationId": "run_script",
+        "summary": "Run a Home Assistant script",
+        "tags": ["Device Control"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["entity_id"],
+                "properties": {
+                  "entity_id": { "type": "string", "example": "script.morning_routine" },
+                  "variables": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Script execution result",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/send_notification": {
+      "post": {
+        "operationId": "send_notification",
+        "summary": "Send notifications with full mobile app support",
+        "tags": ["Device Control"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["message"],
+                "properties": {
+                  "message": { "type": "string", "example": "Hello from MCP!" },
+                  "title": { "type": "string", "example": "Alert" },
+                  "target": { "type": "string", "example": "mobile_app_iphone" },
+                  "tag": { "type": "string" },
+                  "group": { "type": "string" },
+                  "priority": { "type": "string", "enum": ["high", "normal", "low", "min"] },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "action": { "type": "string" },
+                        "title": { "type": "string" },
+                        "uri": { "type": "string" }
+                      }
+                    }
+                  },
+                  "image": { "type": "string" },
+                  "sticky": { "type": "boolean" },
+                  "data": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Notification result",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/list_notification_targets": {
+      "post": {
+        "operationId": "list_notification_targets",
+        "summary": "Discover available mobile app notification targets",
+        "tags": ["Device Control"],
+        "responses": {
+          "200": {
+            "description": "Available notification targets",
+            "content": {
+              "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["ok"],
                   "properties": {
-                    "ok": { "type": "boolean", "example": true },
-                    "result": { "description": "Parsed HA/MCP result", "nullable": true },
-                    "raw": { "type": "object", "description": "Original MCP response (debug)" }
+                    "targets": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/list_automations": {
+      "post": {
+        "operationId": "list_automations",
+        "summary": "List all automations with status",
+        "tags": ["Automation"],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "state": { "type": "string", "enum": ["on", "off"] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Automations list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "count": { "type": "integer" },
+                    "automations": { "type": "array", "items": { "type": "object" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/trigger_automation": {
+      "post": {
+        "operationId": "trigger_automation",
+        "summary": "Manually trigger an automation",
+        "tags": ["Automation"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["entity_id"],
+                "properties": {
+                  "entity_id": { "type": "string", "example": "automation.morning_lights" },
+                  "variables": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Trigger result",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/enable_automation": {
+      "post": {
+        "operationId": "enable_automation",
+        "summary": "Enable a disabled automation",
+        "tags": ["Automation"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["entity_id"],
+                "properties": {
+                  "entity_id": { "type": "string", "example": "automation.morning_lights" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Enable result",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/disable_automation": {
+      "post": {
+        "operationId": "disable_automation",
+        "summary": "Disable an automation",
+        "tags": ["Automation"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["entity_id"],
+                "properties": {
+                  "entity_id": { "type": "string", "example": "automation.morning_lights" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Disable result",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/toggle_automation": {
+      "post": {
+        "operationId": "toggle_automation",
+        "summary": "Toggle automation state",
+        "tags": ["Automation"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["entity_id"],
+                "properties": {
+                  "entity_id": { "type": "string", "example": "automation.morning_lights" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Toggle result",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/reload_automations": {
+      "post": {
+        "operationId": "reload_automations",
+        "summary": "Reload automations from config",
+        "tags": ["Automation"],
+        "responses": {
+          "200": {
+            "description": "Reload result",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/create_automation": {
+      "post": {
+        "operationId": "create_automation",
+        "summary": "Create a new automation",
+        "tags": ["Automation"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["alias", "trigger", "action"],
+                "properties": {
+                  "alias": { "type": "string", "example": "Turn on lights at sunset" },
+                  "description": { "type": "string" },
+                  "mode": { "type": "string", "enum": ["single", "restart", "queued", "parallel"] },
+                  "trigger": { "type": "array", "items": { "type": "object" } },
+                  "condition": { "type": "array", "items": { "type": "object" } },
+                  "action": { "type": "array", "items": { "type": "object" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Creation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/delete_automation": {
+      "post": {
+        "operationId": "delete_automation",
+        "summary": "Delete an automation",
+        "tags": ["Automation"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["automation_id"],
+                "properties": {
+                  "automation_id": { "type": "string", "example": "1234567890" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deletion result",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/get_automation_trace": {
+      "post": {
+        "operationId": "get_automation_trace",
+        "summary": "Get automation execution history",
+        "tags": ["Automation"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["entity_id"],
+                "properties": {
+                  "entity_id": { "type": "string", "example": "automation.morning_lights" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Execution traces",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "traces": { "type": "array", "items": { "type": "object" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/get_version": {
+      "post": {
+        "operationId": "get_version",
+        "summary": "Get Home Assistant version and config info",
+        "tags": ["System"],
+        "responses": {
+          "200": {
+            "description": "Version info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "version": { "type": "string" },
+                    "location_name": { "type": "string" },
+                    "time_zone": { "type": "string" },
+                    "components": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/restart_home_assistant": {
+      "post": {
+        "operationId": "restart_home_assistant",
+        "summary": "Restart the Home Assistant server",
+        "tags": ["System"],
+        "responses": {
+          "200": {
+            "description": "Restart initiated",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/get_system_log": {
+      "post": {
+        "operationId": "get_system_log",
+        "summary": "Get system log entries from logbook",
+        "tags": ["System"],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "hours": { "type": "integer", "example": 24 },
+                  "entity_id": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Log entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entries": { "type": "array", "items": { "type": "object" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/check_updates": {
+      "post": {
+        "operationId": "check_updates",
+        "summary": "Check for available updates",
+        "tags": ["System"],
+        "responses": {
+          "200": {
+            "description": "Available updates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "updates": { "type": "array", "items": { "type": "object" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/analyze_sensors": {
+      "post": {
+        "operationId": "analyze_sensors",
+        "summary": "AI-powered sensor analysis using Ollama",
+        "tags": ["AI"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["sensors"],
+                "properties": {
+                  "sensors": {
+                    "type": "object",
+                    "description": "Sensor data to analyze. Object with entity_id keys and {state, unit, attributes} values."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Analysis result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "analysis": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/list_calendars": {
+      "post": {
+        "operationId": "list_calendars",
+        "summary": "List all calendar entities",
+        "tags": ["Calendar"],
+        "responses": {
+          "200": {
+            "description": "Calendars list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "count": { "type": "integer" },
+                    "calendars": { "type": "array", "items": { "type": "object" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/get_calendar_events": {
+      "post": {
+        "operationId": "get_calendar_events",
+        "summary": "Get events from one or all calendars",
+        "tags": ["Calendar"],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "entity_id": { "type": "string", "example": "calendar.my_calendar" },
+                  "start_date": { "type": "string", "example": "2026-01-01" },
+                  "end_date": { "type": "string", "example": "2026-01-31" },
+                  "days": { "type": "integer", "example": 30 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Calendar events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": { "type": "array", "items": { "type": "object" } }
                   }
                 }
               }
@@ -149,7 +1250,8 @@
     "/": {
       "post": {
         "operationId": "mcp_tools_call_raw",
-        "summary": "Raw JSON-RPC passthrough (kept for n8n compatibility)",
+        "summary": "Raw JSON-RPC passthrough (for n8n compatibility)",
+        "tags": ["Raw"],
         "requestBody": {
           "required": true,
           "content": { "application/json": { "schema": { "type": "object" } } }
@@ -162,5 +1264,15 @@
         }
       }
     }
-  }
+  },
+  "tags": [
+    { "name": "System", "description": "Health check and system info" },
+    { "name": "State & Entity", "description": "Entity state and search tools" },
+    { "name": "Service & Control", "description": "Generic service calls and entity actions" },
+    { "name": "Device Control", "description": "Specialized device control tools" },
+    { "name": "Automation", "description": "Automation management tools" },
+    { "name": "AI", "description": "AI-powered analysis tools" },
+    { "name": "Calendar", "description": "Calendar and event tools" },
+    { "name": "Raw", "description": "Raw JSON-RPC passthrough" }
+  ]
 }

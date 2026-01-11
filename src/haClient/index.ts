@@ -14,6 +14,8 @@ import type {
   HaVersion,
   LogbookEntry,
   UpdateInfo,
+  Calendar,
+  CalendarEvent,
 } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 
@@ -26,6 +28,7 @@ import { RequestHandler } from './request.js';
 import { ServiceOperations } from './services.js';
 import { StateOperations } from './states.js';
 import { UpdateOperations } from './updates.js';
+import { CalendarOperations } from './calendars.js';
 
 /**
  * Main client for interacting with the Home Assistant API.
@@ -40,6 +43,7 @@ export class HaClient {
   private readonly historyOps: HistoryOperations;
   private readonly updateOps: UpdateOperations;
   private readonly configOps: ConfigOperations;
+  private readonly calendarOps: CalendarOperations;
   public readonly devices: DeviceOperations;
 
   constructor(config: EnvironmentConfig) {
@@ -61,6 +65,7 @@ export class HaClient {
     this.historyOps = new HistoryOperations(this.request);
     this.updateOps = new UpdateOperations(this.entityOps);
     this.configOps = new ConfigOperations(this.request);
+    this.calendarOps = new CalendarOperations(this.request);
     this.devices = new DeviceOperations(this.serviceOps, this.stateOps);
 
     logger.info('HaClient initialized');
@@ -272,6 +277,36 @@ export class HaClient {
   async getVersion(): Promise<HaVersion> {
     return this.configOps.getVersion();
   }
+
+  // ===== Calendar Operations =====
+
+  /**
+   * Get all calendar entities
+   */
+  async getCalendars(): Promise<Calendar[]> {
+    return this.calendarOps.getCalendars();
+  }
+
+  /**
+   * Get events from a calendar
+   */
+  async getCalendarEvents(
+    entityId: string,
+    startDate?: Date,
+    endDate?: Date
+  ): Promise<CalendarEvent[]> {
+    return this.calendarOps.getCalendarEvents(entityId, startDate, endDate);
+  }
+
+  /**
+   * Get events from all calendars
+   */
+  async getAllCalendarEvents(
+    startDate?: Date,
+    endDate?: Date
+  ): Promise<Array<{ calendar: string; events: CalendarEvent[] }>> {
+    return this.calendarOps.getAllCalendarEvents(startDate, endDate);
+  }
 }
 
 // Re-export operation classes for testing
@@ -284,4 +319,5 @@ export { HistoryOperations } from './history.js';
 export { UpdateOperations } from './updates.js';
 export { ConfigOperations } from './config.js';
 export { DeviceOperations } from './devices.js';
+export { CalendarOperations } from './calendars.js';
 export type { LightControlOptions, ClimateControlOptions, MediaPlayerControlOptions, CoverControlOptions, FanControlOptions } from './devices.js';

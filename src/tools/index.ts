@@ -54,10 +54,17 @@ import {
 // AI Tools
 import { registerAnalyzeSensorsTool } from './analyzeSensors.js';
 
+// Calendar Tools
+import { registerListCalendarsTool, registerGetCalendarEventsTool } from './calendar.js';
+
+// Person Tools
+import { registerListPersonsTool } from './listPersons.js';
+
 export function registerAllTools(server: McpServer, client: HaClient, aiClient?: LocalAIClient): void {
   logger.debug('Registering all tools');
+  let toolCount = 0;
 
-  // State & Entity Tools (8)
+  // State & Entity Tools
   registerGetStatesTool(server, client);
   registerGetStateTool(server, client);
   registerGetEntitiesByDomainTool(server, client);
@@ -66,12 +73,14 @@ export function registerAllTools(server: McpServer, client: HaClient, aiClient?:
   registerListEntitiesTool(server, client);
   registerGetDomainSummaryTool(server, client);
   registerGetHistoryTool(server, client);
+  toolCount += 8;
 
-  // Service & Control Tools (2)
+  // Service & Control Tools
   registerCallServiceTool(server, client);
   registerEntityActionTool(server, client);
+  toolCount += 2;
 
-  // Device Control Tools (9)
+  // Device Control Tools
   registerControlLightTool(server, client);
   registerControlClimateTool(server, client);
   registerControlMediaPlayerTool(server, client);
@@ -81,8 +90,9 @@ export function registerAllTools(server: McpServer, client: HaClient, aiClient?:
   registerRunScriptTool(server, client);
   registerSendNotificationTool(server, client);
   registerListNotificationTargetsTool(server, client);
+  toolCount += 9;
 
-  // Automation Tools (9)
+  // Automation Tools
   registerListAutomationsTool(server, client);
   registerTriggerAutomationTool(server, client);
   registerEnableAutomationTool(server, client);
@@ -92,17 +102,28 @@ export function registerAllTools(server: McpServer, client: HaClient, aiClient?:
   registerCreateAutomationTool(server, client);
   registerDeleteAutomationTool(server, client);
   registerGetAutomationTraceTool(server, client);
+  toolCount += 9;
 
-  // System Tools (4)
+  // System Tools
   registerGetVersionTool(server, client);
   registerRestartHomeAssistantTool(server, client);
   registerGetSystemLogTool(server, client);
   registerCheckUpdatesTool(server, client);
+  toolCount += 4;
 
-  // AI Tools (1)
+  // AI Tools
   registerAnalyzeSensorsTool(server, aiClient);
+  toolCount += 1;
 
-  const toolCount = 8 + 2 + 9 + 9 + 4 + 1; // 33 tools
+  // Calendar Tools
+  registerListCalendarsTool(server, client);
+  registerGetCalendarEventsTool(server, client);
+  toolCount += 2;
+
+  // Person Tools
+  registerListPersonsTool(server, client);
+  toolCount += 1;
+
   logger.info('All tools registered successfully', { toolCount, aiEnabled: !!aiClient });
 }
 

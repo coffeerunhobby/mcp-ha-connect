@@ -247,3 +247,14 @@ export const sendNotificationSchema = z.object({
 
 // List notification targets schema (empty - no params needed)
 export const listNotificationTargetsSchema = z.object({});
+
+// List calendars schema (empty - no params needed)
+export const listCalendarsSchema = z.object({});
+
+// Get calendar events schema
+export const getCalendarEventsSchema = z.object({
+  entity_id: z.string().optional().describe('Calendar entity ID (e.g., "calendar.my_calendar"). If not provided, gets events from all calendars.'),
+  start_date: z.string().optional().describe('Start date in ISO format (e.g., "2026-01-01"). Defaults to today.'),
+  end_date: z.string().optional().describe('End date in ISO format (e.g., "2026-12-31"). Defaults to 30 days from start.'),
+  days: z.number().optional().describe('Alternative: number of days from start_date (overrides end_date if provided)'),
+});

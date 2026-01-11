@@ -1,6 +1,6 @@
 {
   "name": "@coffeerunhobby/mcp-ha-connect",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Smart home MCP server for Home Assistant plus Local AI integration",
   "type": "module",
   "main": "dist/index.js",
@@ -34,6 +34,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@amiceli/vitest-cucumber": "^4.6.0",
     "@types/node": "^22.10.5",
     "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.19.1",
