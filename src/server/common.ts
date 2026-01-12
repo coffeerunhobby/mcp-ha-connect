@@ -15,7 +15,7 @@ export function createServer(client: HaClient, aiClient?: LocalAIClient): McpSer
 
   const server = new McpServer({
     name: 'mcp-ha-connect',
-    version: '0.5.0',
+    version: '0.8.0',
   });
 
   // Register all Home Assistant tools

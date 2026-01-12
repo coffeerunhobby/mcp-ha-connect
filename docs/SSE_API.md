@@ -273,7 +273,7 @@ Response:
 ```json
 {
   "status": "healthy",
-  "version": "0.5.0",
+  "version": "0.8.0",
   "sseEventsEnabled": true,
   "sseEventsPath": "/subscribe_events",
   "sseConnectedClients": 3

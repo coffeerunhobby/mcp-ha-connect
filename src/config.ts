@@ -71,6 +71,10 @@ const envSchema = z
     rateLimitEnabled: createBooleanStringSchema(true),
     rateLimitWindowMs: numericStringSchema,
     rateLimitMaxRequests: numericStringSchema,
+
+    // Authentication Configuration
+    authMethod: z.enum(['none', 'bearer']).optional().default('none'),
+    authToken: listStringSchema,
   })
   .refine(
     (data) => {
@@ -103,6 +107,19 @@ const envSchema = z
         message: `MCP_HTTP_ALLOWED_ORIGINS contains invalid origin: ${invalidOrigin}`,
         path: ['httpAllowedOrigins'],
       };
+    }
+  )
+  .refine(
+    (data) => {
+      // If bearer auth is enabled, token must be provided
+      if (data.authMethod === 'bearer' && !data.authToken) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message: 'MCP_AUTH_TOKEN is required when MCP_AUTH_METHOD is "bearer"',
+      path: ['authToken'],
     }
   );
 
@@ -144,6 +161,10 @@ export interface EnvironmentConfig {
   rateLimitEnabled: boolean;
   rateLimitWindowMs: number;
   rateLimitMaxRequests: number;
+
+  // Authentication Configuration
+  authMethod: 'none' | 'bearer';
+  authToken?: Set<string>;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentConfig {
@@ -185,6 +206,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     rateLimitEnabled: env.MCP_RATE_LIMIT_ENABLED,
     rateLimitWindowMs: env.MCP_RATE_LIMIT_WINDOW_MS,
     rateLimitMaxRequests: env.MCP_RATE_LIMIT_MAX_REQUESTS,
+
+    // Authentication Configuration
+    authMethod: env.MCP_AUTH_METHOD,
+    authToken: env.MCP_AUTH_TOKEN,
   });
 
   if (!parsed.success) {
@@ -244,6 +269,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     rateLimitEnabled: parsed.data.rateLimitEnabled,
     rateLimitWindowMs: parsed.data.rateLimitWindowMs ?? 60000,
     rateLimitMaxRequests: parsed.data.rateLimitMaxRequests ?? 100,
+
+    // Authentication Configuration
+    authMethod: parsed.data.authMethod,
+    authToken: parsed.data.authToken ? new Set(parsed.data.authToken) : undefined,
   };
 }
 

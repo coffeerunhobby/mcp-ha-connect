@@ -13,9 +13,43 @@ import { handleSseConnection, handleSseMessage, getSseMessagePath, type SSETrans
 import { handleStreamRequest, type StreamTransportState } from './stream.js';
 import { handleEventSubscription, getClientCount } from './eventSubscription.js';
 import { RateLimiter } from './rateLimiter.js';
+import { createAuthMiddleware } from './auth.js';
 
 // Session storage for stateful mode
 const sessions = new Map<string, SSETransportState | StreamTransportState>();
+
+/**
+ * Wrap response to add Server-Timing header with request duration
+ * The timing is calculated and header set just before res.end() is called
+ */
+function wrapResponseWithTiming(res: ServerResponse): { res: ServerResponse; startTime: number } {
+  const startTime = performance.now();
+  const originalEnd = res.end.bind(res);
+
+  // Override res.end to set timing header before sending
+  res.end = function (
+    chunk?: unknown,
+    encodingOrCallback?: BufferEncoding | (() => void),
+    callback?: () => void
+  ): ServerResponse {
+    // Set Server-Timing header if headers haven't been sent
+    if (!res.headersSent) {
+      const durationMs = Math.round(performance.now() - startTime);
+      res.setHeader('Server-Timing', `total;dur=${durationMs}`);
+    }
+
+    // Call original end with proper overload handling
+    if (typeof encodingOrCallback === 'function') {
+      return originalEnd(chunk, encodingOrCallback);
+    }
+    if (encodingOrCallback !== undefined) {
+      return originalEnd(chunk, encodingOrCallback, callback);
+    }
+    return originalEnd(chunk, callback);
+  } as typeof res.end;
+
+  return { res, startTime };
+}
 
 /**
  * Parse JSON body from request
@@ -43,7 +77,8 @@ function parseBody(req: IncomingMessage): Promise<unknown> {
  * Send JSON response
  */
 function sendJson(res: ServerResponse, statusCode: number, data: unknown): void {
-  res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+  res.statusCode = statusCode;
+  res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify(data));
 }
 
@@ -53,9 +88,10 @@ function sendJson(res: ServerResponse, statusCode: number, data: unknown): void 
 function handleHealthCheck(res: ServerResponse, config: EnvironmentConfig, aiEnabled: boolean, sseEnabled: boolean): void {
   sendJson(res, 200, {
     status: 'healthy',
-    version: '0.5.0',
+    version: '0.8.0',
     transport: config.httpTransport,
     stateful: config.stateful,
+    authMethod: config.authMethod,
     aiEnabled,
     aiProvider: aiEnabled ? config.aiProvider : undefined,
     aiUrl: aiEnabled ? config.aiUrl : undefined,
@@ -197,7 +233,7 @@ function getOpenApiSpec(baseUrl: string): object {
     info: {
       title: 'Home Assistant MCP Tools',
       description: 'MCP server for Home Assistant - exposes entity states and service calls',
-      version: '0.2.0',
+      version: '0.8.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -361,6 +397,13 @@ export async function startHttpServer(client: HaClient, config: EnvironmentConfi
       })
     : null;
 
+  // Initialize auth middleware
+  const authMiddleware = createAuthMiddleware({
+    method: config.authMethod,
+    tokens: config.authToken,
+    skipPaths: [healthPath, '/openapi.json'],
+  });
+
   // Initialize event subscriber if SSE events are enabled
   let eventSubscriber: EventSubscriber | null = null;
   if (config.sseEventsEnabled) {
@@ -394,7 +437,10 @@ export async function startHttpServer(client: HaClient, config: EnvironmentConfi
     sseEventsEnabled: config.sseEventsEnabled && !!eventSubscriber,
   });
 
-  const server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
+  const server = createHttpServer(async (req: IncomingMessage, originalRes: ServerResponse) => {
+    // Wrap response to add Server-Timing header
+    const { res } = wrapResponseWithTiming(originalRes);
+
     const url = req.url ?? '/';
     const urlPath = url.split('?')[0];
 
@@ -416,6 +462,11 @@ export async function startHttpServer(client: HaClient, config: EnvironmentConfi
       if (!allowed) {
         return; // Response already sent by rate limiter
       }
+    }
+
+    // Apply authentication (skip health checks and openapi.json)
+    if (!authMiddleware(req, res)) {
+      return; // Response already sent by auth middleware
     }
 
     // Add CORS headers for MCP endpoints

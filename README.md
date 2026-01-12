@@ -297,6 +297,13 @@ See [docs/SSE_API.md](docs/SSE_API.md) for complete documentation of the SSE sys
 | `MCP_RATE_LIMIT_WINDOW_MS` | `60000` | Rate limit window (ms) |
 | `MCP_RATE_LIMIT_MAX_REQUESTS` | `100` | Max requests per window |
 
+### Optional - Authentication
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_AUTH_METHOD` | `none` | Auth method: `none` or `bearer` |
+| `MCP_AUTH_TOKEN` | - | Bearer token(s), can be comma-separated for multiple clients |
+
 ### Optional - AI Provider
 
 | Variable | Default | Description |

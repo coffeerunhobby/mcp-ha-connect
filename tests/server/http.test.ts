@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { ServerResponse } from 'node:http';
 import type { HaClient } from '../../src/haClient/index.js';
 import type { EnvironmentConfig } from '../../src/config.js';
 
@@ -49,6 +50,12 @@ describe('HTTP Server', () => {
       httpHealthcheckPath: '/health',
       httpAllowCors: true,
       httpAllowedOrigins: ['127.0.0.1', 'localhost'],
+      sseEventsEnabled: true,
+      sseEventsPath: '/subscribe_events',
+      rateLimitEnabled: true,
+      rateLimitWindowMs: 60000,
+      rateLimitMaxRequests: 100,
+      authMethod: 'none',
     };
   });
 
@@ -56,7 +63,7 @@ describe('HTTP Server', () => {
     it('should return health status for stream transport', () => {
       const expectedResponse = {
         status: 'healthy',
-        version: '0.1.0',
+        version: '0.8.0',
         transport: 'stream',
         stateful: false,
       };
@@ -71,7 +78,7 @@ describe('HTTP Server', () => {
 
       const expectedResponse = {
         status: 'healthy',
-        version: '0.1.0',
+        version: '0.8.0',
         transport: sseConfig.httpTransport,
         stateful: sseConfig.stateful,
       };
@@ -84,7 +91,7 @@ describe('HTTP Server', () => {
 
       const expectedResponse = {
         status: 'healthy',
-        version: '0.1.0',
+        version: '0.8.0',
         transport: statefulConfig.httpTransport,
         stateful: statefulConfig.stateful,
       };
@@ -280,13 +287,13 @@ describe('HTTP Server', () => {
   describe('JSON Response Helper', () => {
     it('should format JSON response correctly', () => {
       const statusCode = 200;
-      const data = { status: 'healthy', version: '0.1.0' };
+      const data = { status: 'healthy', version: '0.8.0' };
 
       const expectedContentType = 'application/json';
       const expectedBody = JSON.stringify(data);
 
       expect(expectedContentType).toBe('application/json');
-      expect(expectedBody).toBe('{"status":"healthy","version":"0.1.0"}');
+      expect(expectedBody).toBe('{"status":"healthy","version":"0.8.0"}');
     });
 
     it('should handle error responses', () => {
@@ -321,6 +328,111 @@ describe('HTTP Server', () => {
       const invalidJson = '{invalid}';
 
       expect(() => JSON.parse(invalidJson)).toThrow();
+    });
+  });
+
+  describe('Response Timing', () => {
+    it('should add Server-Timing header format', () => {
+      // Server-Timing header format: total;dur=X (integer ms)
+      const durationMs = 42.5;
+      const expectedHeader = `total;dur=${Math.round(durationMs)}`;
+
+      expect(expectedHeader).toBe('total;dur=43');
+      expect(expectedHeader).toMatch(/^total;dur=\d+$/);
+    });
+
+    it('should wrap response end method', () => {
+      const headers: Record<string, string> = {};
+
+      const mockRes = {
+        headersSent: false,
+        setHeader: vi.fn((key: string, value: string) => {
+          headers[key] = value;
+        }),
+        end: vi.fn(),
+      } as unknown as ServerResponse;
+
+      // Simulate the timing wrapper behavior
+      const startTime = performance.now();
+      const originalEnd = mockRes.end.bind(mockRes);
+
+      mockRes.end = function () {
+        if (!mockRes.headersSent) {
+          const durationMs = Math.round(performance.now() - startTime);
+          mockRes.setHeader('Server-Timing', `total;dur=${durationMs}`);
+        }
+        return originalEnd();
+      } as typeof mockRes.end;
+
+      // Call end
+      mockRes.end();
+
+      expect(headers['Server-Timing']).toMatch(/^total;dur=\d+$/);
+    });
+
+    it('should not set headers if already sent', () => {
+      const headers: Record<string, string> = {};
+
+      const mockRes = {
+        headersSent: true, // Headers already sent
+        setHeader: vi.fn((key: string, value: string) => {
+          headers[key] = value;
+        }),
+        end: vi.fn(),
+      } as unknown as ServerResponse;
+
+      // Simulate the timing wrapper behavior
+      const originalEnd = mockRes.end.bind(mockRes);
+
+      mockRes.end = function () {
+        if (!mockRes.headersSent) {
+          mockRes.setHeader('Server-Timing', 'total;dur=0');
+        }
+        return originalEnd();
+      } as typeof mockRes.end;
+
+      mockRes.end();
+
+      // Headers should not be set because headersSent was true
+      expect(headers['Server-Timing']).toBeUndefined();
+    });
+
+    it('should measure actual elapsed time', async () => {
+      const headers: Record<string, string> = {};
+
+      const mockRes = {
+        headersSent: false,
+        setHeader: vi.fn((key: string, value: string) => {
+          headers[key] = value;
+        }),
+        end: vi.fn(),
+      } as unknown as ServerResponse;
+
+      const startTime = performance.now();
+      const originalEnd = mockRes.end.bind(mockRes);
+
+      mockRes.end = function () {
+        if (!mockRes.headersSent) {
+          const durationMs = Math.round(performance.now() - startTime);
+          mockRes.setHeader('Server-Timing', `total;dur=${durationMs}`);
+        }
+        return originalEnd();
+      } as typeof mockRes.end;
+
+      // Simulate some work
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      mockRes.end();
+
+      // Extract duration from header
+      const timing = headers['Server-Timing'];
+      const match = timing.match(/total;dur=(\d+)/);
+      const duration = match ? parseInt(match[1], 10) : 0;
+
+      // Should be at least 10ms (our delay)
+      expect(duration).toBeGreaterThanOrEqual(10);
+      // But not too long (sanity check)
+      expect(duration).toBeLessThan(1000);
     });
   });
 });

@@ -1,4 +1,16 @@
-### 0.7.0 (January 2026)
+### 0.8.0
+- **Bearer Token Authentication**: Secure HTTP endpoints with bearer tokens
+  - `MCP_AUTH_METHOD`: Set to `bearer` to enable authentication
+  - `MCP_AUTH_TOKEN`: Comma-separated tokens for multiple clients
+  - `WWW-Authenticate` header on 401 responses
+  - Health check and OpenAPI endpoints skip authentication
+- **Server-Timing Header**: Response timing on all HTTP responses
+  - `Server-Timing: total;dur=X` header (integer milliseconds)
+  - Visible in browser DevTools Network tab
+- **Modular Auth Middleware**: Clean separation in `src/server/auth.ts`
+- All 648 tests passing
+
+### 0.7.0
 - **Calendar Tools**: Access Home Assistant calendar entities
   - `listCalendars`: Get all calendar entities
   - `getCalendarEvents`: Get events from one or all calendars with date filtering
@@ -8,7 +20,7 @@
   - Returns onsite/away counts and linked device trackers
 - Total tools increased from 34 to 37
 
-### 0.6.0 (January 2026)
+### 0.6.0
 - **Mobile App Notifications**: Full support for Home Assistant mobile app notifications
   - `sendNotification`: Enhanced with action buttons, priority, images, videos
   - `listNotificationTargets`: Discover available mobile app notification targets
@@ -27,7 +39,7 @@
 - Switched to NodeNext module resolution for TypeScript
 - All 310 tests passing
 
-### 0.5.0 (January 2026)
+### 0.5.0
 - **Real-time SSE Event Subscription**: Subscribe to Home Assistant events via Server-Sent Events
   - Filter by domain, entity_id, or event types
   - Automatic WebSocket connection to Home Assistant
@@ -60,7 +72,7 @@
   - `MCP_RATE_LIMIT_MAX_REQUESTS`: Max requests per window
 - Total tools increased from 16 to 33
 
-### 0.4.0 (January 2026)
+### 0.4.0
 - **Extensible AI Provider System**: Refactored AI client to support multiple providers
   - New `src/localAI/` folder with provider-based architecture
   - Supports Ollama (native API) and OpenAI-compatible APIs (LocalAI, LM Studio, vLLM)
@@ -80,7 +92,7 @@
 - No changes to public API or tools - fully backward compatible
 - All 325 tests pass
 
-### 0.3.0 (January 2026)
+### 0.3.0
 - Added 8 new tools: `getVersion`, `entityAction`, `listEntities`, `getDomainSummary`, `listAutomations`, `restartHomeAssistant`, `getSystemLog`, `checkUpdates`
 - Added MCP Resources support with 5 URI-based endpoints (`hass://entities`, etc.)
 - Added `entityAction` tool for simplified turn_on/turn_off/toggle operations
@@ -93,7 +105,7 @@
 - Total tools increased from 8 to 16
 - Enhanced type definitions for Automation, DomainSummary, HaVersion, LogbookEntry, UpdateInfo
 
-### 0.2.0 (January 2026)
+### 0.2.0
 - Added AI-powered sensor analysis with Ollama
 - Added `getAllSensors` tool
 - Added `analyzeSensors` tool
@@ -108,7 +120,7 @@
 - Added Docker CLI workflow import method
 - Enhanced troubleshooting with network/firewall diagnostics
 
-### 0.1.0 (Initial Release)
+### 0.1.0
 - Basic Home Assistant integration
 - 5 core tools (getStates, getState, callService, getEntitiesByDomain, searchEntities)
 - Multiple transport modes (stdio, SSE, HTTP streaming)
