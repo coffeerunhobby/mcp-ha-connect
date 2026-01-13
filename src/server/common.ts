@@ -9,13 +9,14 @@ import type { LocalAIClient } from '../localAI/index.js';
 import { registerAllTools } from '../tools/index.js';
 import { registerAllResources } from '../resources/index.js';
 import { logger } from '../utils/logger.js';
+import { VERSION } from '../version.js';
 
 export function createServer(client: HaClient, aiClient?: LocalAIClient): McpServer {
   logger.debug('Creating MCP server instance');
 
   const server = new McpServer({
     name: 'mcp-ha-connect',
-    version: '0.8.0',
+    version: VERSION,
   });
 
   // Register all Home Assistant tools

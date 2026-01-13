@@ -21,7 +21,7 @@ describe('Main entry point', () => {
         logFormat: 'plain',
         useHttp: false,
         stateful: false,
-        httpTransport: 'stream',
+        
         httpEnableHealthcheck: true,
         httpAllowCors: true,
       };
@@ -95,32 +95,28 @@ describe('Main entry point', () => {
       expect(JSON.stringify(logData)).not.toContain('super-secret-token');
     });
 
-    it('should include transport type in HTTP mode logs', () => {
+    it('should include useHttp in logs', () => {
       const config = {
         useHttp: true,
-        httpTransport: 'stream',
       };
 
       const logData = {
         useHttp: config.useHttp,
-        httpTransport: config.useHttp ? config.httpTransport : undefined,
       };
 
-      expect(logData.httpTransport).toBe('stream');
+      expect(logData.useHttp).toBe(true);
     });
 
-    it('should not include transport type in stdio mode logs', () => {
+    it('should show useHttp as false in stdio mode logs', () => {
       const config = {
         useHttp: false,
-        httpTransport: 'stream',
       };
 
       const logData = {
         useHttp: config.useHttp,
-        httpTransport: config.useHttp ? config.httpTransport : undefined,
       };
 
-      expect(logData.httpTransport).toBeUndefined();
+      expect(logData.useHttp).toBe(false);
     });
   });
 

@@ -53,7 +53,6 @@ describe('loadConfig', () => {
     expect(config.stateful).toBe(false); // default
     expect(config.httpEnableHealthcheck).toBe(true); // default
     expect(config.httpAllowCors).toBe(true); // default
-    expect(config.httpTransport).toBe('stream'); // default
   });
 
   it('should remove trailing slash from baseUrl', () => {
@@ -98,7 +97,6 @@ describe('loadConfig', () => {
       HA_TOKEN: 'test-token-12345',
       MCP_SERVER_USE_HTTP: 'true',
       MCP_HTTP_PORT: '3000',
-      MCP_HTTP_TRANSPORT: 'stream',
       MCP_HTTP_BIND_ADDR: '127.0.0.1',
       MCP_HTTP_PATH: '/mcp',
       MCP_HTTP_ENABLE_HEALTHCHECK: 'true',
@@ -111,7 +109,6 @@ describe('loadConfig', () => {
 
     expect(config.useHttp).toBe(true);
     expect(config.httpPort).toBe(3000);
-    expect(config.httpTransport).toBe('stream');
     expect(config.httpBindAddr).toBe('127.0.0.1');
     expect(config.httpPath).toBe('/mcp');
     expect(config.httpEnableHealthcheck).toBe(true);
@@ -120,24 +117,14 @@ describe('loadConfig', () => {
     expect(config.httpAllowedOrigins).toEqual(['127.0.0.1', 'localhost']);
   });
 
-  it('should use default httpPath based on transport', () => {
-    const envStream = {
+  it('should use default httpPath /mcp', () => {
+    const env = {
       HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
       HA_TOKEN: 'test-token-12345',
-      MCP_HTTP_TRANSPORT: 'stream',
     };
 
-    const configStream = loadConfig(envStream);
-    expect(configStream.httpPath).toBe('/mcp');
-
-    const envSse = {
-      HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
-      HA_TOKEN: 'test-token-12345',
-      MCP_HTTP_TRANSPORT: 'sse',
-    };
-
-    const configSse = loadConfig(envSse);
-    expect(configSse.httpPath).toBe('/sse');
+    const config = loadConfig(env);
+    expect(config.httpPath).toBe('/mcp');
   });
 
   it('should handle wildcard in allowed origins', () => {
@@ -242,20 +229,6 @@ describe('loadConfig', () => {
     }
   });
 
-  it('should support both HTTP transports', () => {
-    const transports = ['stream', 'sse'] as const;
-
-    for (const transport of transports) {
-      const env = {
-        HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
-        HA_TOKEN: 'test-token-12345',
-        MCP_HTTP_TRANSPORT: transport,
-      };
-
-      const config = loadConfig(env);
-      expect(config.httpTransport).toBe(transport);
-    }
-  });
 
   it('should parse boolean strings correctly', () => {
     const envTrue = {
@@ -301,7 +274,7 @@ describe('validateConfig', () => {
       logFormat: 'plain',
       useHttp: false,
       stateful: false,
-      httpTransport: 'stream',
+      
       httpEnableHealthcheck: true,
       httpAllowCors: true,
       sseEventsEnabled: true,
@@ -309,6 +282,7 @@ describe('validateConfig', () => {
       rateLimitEnabled: true,
       rateLimitWindowMs: 60000,
       rateLimitMaxRequests: 100,
+      authMethod: 'none',
     };
 
     expect(() => validateConfig(config)).not.toThrow();

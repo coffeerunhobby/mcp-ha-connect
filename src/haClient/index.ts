@@ -239,6 +239,7 @@ export class HaClient {
   async getSystemLog(options: {
     hours?: number;
     entity_id?: string;
+    limit?: number;
   } = {}): Promise<LogbookEntry[]> {
     return this.historyOps.getSystemLog(options);
   }

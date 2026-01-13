@@ -163,7 +163,6 @@ describeFeature(feature, ({ Scenario }) => {
         HA_TOKEN: 'test-token',
         MCP_SERVER_USE_HTTP: 'true',
         MCP_HTTP_PORT: '3000',
-        MCP_HTTP_TRANSPORT: 'stream',
       };
     });
 
@@ -177,10 +176,6 @@ describeFeature(feature, ({ Scenario }) => {
 
     And('httpPort should be set', () => {
       expect(config.httpPort).toBe(3000);
-    });
-
-    And('httpTransport should be set', () => {
-      expect(config.httpTransport).toBe('stream');
     });
   });
 

@@ -43,7 +43,6 @@ Feature: Server Configuration
     When I load the configuration
     Then useHttp should be true
     And httpPort should be set
-    And httpTransport should be set
 
   Scenario: Validate bind address format
     Given an invalid bind address "invalid-ip"

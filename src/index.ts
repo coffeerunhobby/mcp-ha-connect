@@ -2,7 +2,7 @@
 /**
  * Home Assistant MCP Server
  * Entry point for the Model Context Protocol server
- * Supports multiple transport modes: stdio, HTTP+SSE, HTTP+Stream
+ * Supports transport modes: stdio, HTTP (Streamable HTTP)
  */
 
 import { loadConfig } from './config.js';
@@ -29,7 +29,6 @@ async function main(): Promise<void> {
       strictSsl: config.strictSsl,
       timeout: config.timeout,
       useHttp: config.useHttp,
-      httpTransport: config.useHttp ? config.httpTransport : undefined,
       aiProvider: config.aiProvider,
       aiUrl: config.aiUrl,
       aiModel: config.aiModel,

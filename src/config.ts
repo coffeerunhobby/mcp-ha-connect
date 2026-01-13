@@ -55,7 +55,6 @@ const envSchema = z
 
     // MCP Server HTTP Configuration
     httpPort: numericStringSchema,
-    httpTransport: z.enum(['stream', 'sse']).optional().default('stream'),
     httpBindAddr: z.string().optional(),
     httpPath: z.string().optional(),
     httpEnableHealthcheck: createBooleanStringSchema(true),
@@ -145,7 +144,6 @@ export interface EnvironmentConfig {
 
   // MCP Server HTTP Configuration
   httpPort?: number;
-  httpTransport: 'stream' | 'sse';
   httpBindAddr?: string;
   httpPath?: string;
   httpEnableHealthcheck: boolean;
@@ -190,7 +188,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
 
     // MCP Server HTTP Configuration
     httpPort: env.MCP_HTTP_PORT,
-    httpTransport: env.MCP_HTTP_TRANSPORT,
     httpBindAddr: env.MCP_HTTP_BIND_ADDR,
     httpPath: env.MCP_HTTP_PATH,
     httpEnableHealthcheck: env.MCP_HTTP_ENABLE_HEALTHCHECK,
@@ -217,9 +214,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     throw new Error(`Invalid environment configuration:\n${messages.join('\n')}`);
   }
 
-  // Determine default httpPath based on transport if not explicitly set
-  const defaultPath = parsed.data.httpTransport === 'sse' ? '/sse' : '/mcp';
-  const httpPath = parsed.data.httpPath ?? defaultPath;
+  // Default MCP endpoint path
+  const httpPath = parsed.data.httpPath ?? '/mcp';
 
   // Set default bind address and allowed origins for security
   const httpBindAddr = parsed.data.httpBindAddr ?? '127.0.0.1';
@@ -253,7 +249,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
 
     // MCP Server HTTP Configuration
     httpPort: parsed.data.httpPort,
-    httpTransport: parsed.data.httpTransport,
     httpBindAddr,
     httpPath,
     httpEnableHealthcheck: parsed.data.httpEnableHealthcheck,

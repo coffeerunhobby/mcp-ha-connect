@@ -6,10 +6,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ServerResponse } from 'node:http';
 import type { HaClient } from '../../src/haClient/index.js';
 import type { EnvironmentConfig } from '../../src/config.js';
+import { VERSION } from '../../src/version.js';
 
 // Mock dependencies
 vi.mock('node:http');
-vi.mock('../../src/server/sse.js');
 vi.mock('../../src/server/stream.js');
 vi.mock('../../src/utils/logger.js');
 
@@ -43,7 +43,6 @@ describe('HTTP Server', () => {
       useHttp: true,
       stateful: false,
       httpPort: 3000,
-      httpTransport: 'stream',
       httpBindAddr: '127.0.0.1',
       httpPath: '/mcp',
       httpEnableHealthcheck: true,
@@ -63,7 +62,7 @@ describe('HTTP Server', () => {
     it('should return health status for stream transport', () => {
       const expectedResponse = {
         status: 'healthy',
-        version: '0.8.0',
+        version: VERSION,
         transport: 'stream',
         stateful: false,
       };
@@ -73,26 +72,13 @@ describe('HTTP Server', () => {
       expect(expectedResponse.stateful).toBe(false);
     });
 
-    it('should return health status for SSE transport', () => {
-      const sseConfig = { ...mockConfig, httpTransport: 'sse' as const };
-
-      const expectedResponse = {
-        status: 'healthy',
-        version: '0.8.0',
-        transport: sseConfig.httpTransport,
-        stateful: sseConfig.stateful,
-      };
-
-      expect(expectedResponse.transport).toBe('sse');
-    });
-
     it('should include stateful flag when enabled', () => {
       const statefulConfig = { ...mockConfig, stateful: true };
 
       const expectedResponse = {
         status: 'healthy',
-        version: '0.8.0',
-        transport: statefulConfig.httpTransport,
+        version: VERSION,
+        transport: 'stream',
         stateful: statefulConfig.stateful,
       };
 
@@ -185,20 +171,11 @@ describe('HTTP Server', () => {
       expect(requestUrl).toBe(healthPath);
     });
 
-    it('should route to MCP endpoint for stream transport', () => {
+    it('should route to MCP endpoint', () => {
       const mcpPath = mockConfig.httpPath;
       const requestUrl = '/mcp';
 
       expect(requestUrl).toBe(mcpPath);
-      expect(mockConfig.httpTransport).toBe('stream');
-    });
-
-    it('should route to SSE endpoint for SSE transport', () => {
-      const sseConfig = { ...mockConfig, httpTransport: 'sse' as const, httpPath: '/sse' };
-      const requestUrl = '/sse';
-
-      expect(requestUrl).toBe(sseConfig.httpPath);
-      expect(sseConfig.httpTransport).toBe('sse');
     });
 
     it('should handle OPTIONS requests for CORS preflight', () => {
@@ -229,15 +206,13 @@ describe('HTTP Server', () => {
       // Should maintain sessions in Map
     });
 
-    it('should require Mcp-Session-Id header for stateful SSE', () => {
-      const statefulSseConfig = {
+    it('should require Mcp-Session-Id header for stateful mode', () => {
+      const statefulConfig = {
         ...mockConfig,
-        httpTransport: 'sse' as const,
         stateful: true,
       };
 
-      expect(statefulSseConfig.stateful).toBe(true);
-      expect(statefulSseConfig.httpTransport).toBe('sse');
+      expect(statefulConfig.stateful).toBe(true);
       // Should validate session ID from header
     });
 
@@ -287,13 +262,13 @@ describe('HTTP Server', () => {
   describe('JSON Response Helper', () => {
     it('should format JSON response correctly', () => {
       const statusCode = 200;
-      const data = { status: 'healthy', version: '0.8.0' };
+      const data = { status: 'healthy', version: VERSION };
 
       const expectedContentType = 'application/json';
       const expectedBody = JSON.stringify(data);
 
       expect(expectedContentType).toBe('application/json');
-      expect(expectedBody).toBe('{"status":"healthy","version":"0.8.0"}');
+      expect(expectedBody).toBe(`{"status":"healthy","version":"${VERSION}"}`);
     });
 
     it('should handle error responses', () => {

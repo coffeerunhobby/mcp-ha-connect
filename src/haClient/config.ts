@@ -31,11 +31,22 @@ export class ConfigOperations {
 
   /**
    * Get Home Assistant version and configuration info
+   * Returns only safe, public information (filters out internal config details)
    */
   async getVersion(): Promise<HaVersion> {
     logger.debug('Fetching Home Assistant version');
-    const config = await this.request.get<HaVersion>('/config');
+    const config = await this.request.get<Record<string, unknown>>('/config');
     logger.info('Fetched version', { version: config.version });
-    return config;
+
+    // Return only safe, public information
+    // Excludes: components, allowlist_external_dirs, allowlist_external_urls,
+    // config_dir, whitelist_external_dirs, safe_mode, state, external_url, internal_url,
+    // currency, country, language, latitude, longitude, elevation
+    return {
+      version: config.version as string,
+      location_name: config.location_name as string | undefined,
+      time_zone: config.time_zone as string | undefined,
+      unit_system: config.unit_system as Record<string, string> | undefined,
+    };
   }
 }

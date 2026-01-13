@@ -11,7 +11,8 @@ describe('ConfigOperations', () => {
   let mockRequest: RequestHandler;
   let configOps: ConfigOperations;
 
-  const mockConfig: HaVersion = {
+  // Full config response from HA (includes sensitive fields)
+  const mockFullConfig = {
     version: '2026.1.0',
     config_dir: '/config',
     location_name: 'Home',
@@ -24,6 +25,21 @@ describe('ConfigOperations', () => {
     },
     components: ['homeassistant', 'frontend', 'light', 'switch', 'sensor', 'automation'],
     state: 'RUNNING',
+    allowlist_external_dirs: ['/media'],
+    allowlist_external_urls: [],
+  };
+
+  // Sanitized version (only safe, public info)
+  const expectedSanitizedVersion: HaVersion = {
+    version: '2026.1.0',
+    location_name: 'Home',
+    time_zone: 'Europe/London',
+    unit_system: {
+      length: 'km',
+      mass: 'kg',
+      temperature: '°C',
+      volume: 'L',
+    },
   };
 
   beforeEach(() => {
@@ -36,11 +52,11 @@ describe('ConfigOperations', () => {
 
   describe('getConfig', () => {
     it('should fetch configuration', async () => {
-      (mockRequest.get as ReturnType<typeof vi.fn>).mockResolvedValue(mockConfig);
+      (mockRequest.get as ReturnType<typeof vi.fn>).mockResolvedValue(mockFullConfig);
 
       const config = await configOps.getConfig();
 
-      expect(config).toEqual(mockConfig);
+      expect(config).toEqual(mockFullConfig);
       expect(mockRequest.get).toHaveBeenCalledWith('/config');
     });
   });
@@ -58,30 +74,35 @@ describe('ConfigOperations', () => {
   });
 
   describe('getVersion', () => {
-    it('should return version information', async () => {
-      (mockRequest.get as ReturnType<typeof vi.fn>).mockResolvedValue(mockConfig);
+    it('should return sanitized version information', async () => {
+      (mockRequest.get as ReturnType<typeof vi.fn>).mockResolvedValue(mockFullConfig);
 
       const version = await configOps.getVersion();
 
-      expect(version).toEqual(mockConfig);
+      expect(version).toEqual(expectedSanitizedVersion);
       expect(version.version).toBe('2026.1.0');
       expect(mockRequest.get).toHaveBeenCalledWith('/config');
     });
 
-    it('should include all config fields', async () => {
-      (mockRequest.get as ReturnType<typeof vi.fn>).mockResolvedValue(mockConfig);
+    it('should filter out sensitive config fields', async () => {
+      (mockRequest.get as ReturnType<typeof vi.fn>).mockResolvedValue(mockFullConfig);
 
       const version = await configOps.getVersion();
 
-      expect(version.config_dir).toBe('/config');
+      // Should include safe fields
       expect(version.location_name).toBe('Home');
       expect(version.time_zone).toBe('Europe/London');
-      expect(version.state).toBe('RUNNING');
-      expect(version.components).toContain('homeassistant');
+
+      // Should NOT include sensitive fields
+      expect((version as Record<string, unknown>).config_dir).toBeUndefined();
+      expect((version as Record<string, unknown>).state).toBeUndefined();
+      expect((version as Record<string, unknown>).components).toBeUndefined();
+      expect((version as Record<string, unknown>).allowlist_external_dirs).toBeUndefined();
+      expect((version as Record<string, unknown>).allowlist_external_urls).toBeUndefined();
     });
 
     it('should include unit_system', async () => {
-      (mockRequest.get as ReturnType<typeof vi.fn>).mockResolvedValue(mockConfig);
+      (mockRequest.get as ReturnType<typeof vi.fn>).mockResolvedValue(mockFullConfig);
 
       const version = await configOps.getVersion();
 

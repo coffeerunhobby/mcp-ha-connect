@@ -44,9 +44,11 @@ export class HistoryOperations {
   async getSystemLog(options: {
     hours?: number;
     entity_id?: string;
+    limit?: number;
   } = {}): Promise<LogbookEntry[]> {
-    const hours = options.hours || 24;
-    logger.debug('Fetching system log', { hours, entity_id: options.entity_id });
+    const hours = Math.min(options.hours || 24, 168); // Cap at 1 week
+    const limit = options.limit || 100;
+    logger.debug('Fetching system log', { hours, entity_id: options.entity_id, limit });
 
     const endTime = new Date();
     const startTime = new Date(endTime.getTime() - hours * 60 * 60 * 1000);
@@ -62,7 +64,10 @@ export class HistoryOperations {
 
     const entries = await this.request.get<LogbookEntry[]>(path, params);
 
-    logger.info('Fetched system log', { count: entries.length, hours });
-    return entries;
+    // Apply limit - return most recent entries first
+    const limited = entries.slice(-limit);
+
+    logger.info('Fetched system log', { count: entries.length, returned: limited.length, hours, limit });
+    return limited;
   }
 }

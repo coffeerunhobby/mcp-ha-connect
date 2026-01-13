@@ -1,5 +1,5 @@
 /**
- * HTTP server for MCP with SSE or Streamable transports
+ * HTTP server for MCP with Streamable HTTP transport
  * Includes health check, CORS support, rate limiting, and real-time event subscriptions
  */
 
@@ -9,14 +9,14 @@ import type { HaClient } from '../haClient/index.js';
 import { EventSubscriber } from '../haClient/events.js';
 import type { LocalAIClient } from '../localAI/index.js';
 import { logger } from '../utils/logger.js';
-import { handleSseConnection, handleSseMessage, getSseMessagePath, type SSETransportState } from './sse.js';
 import { handleStreamRequest, type StreamTransportState } from './stream.js';
 import { handleEventSubscription, getClientCount } from './eventSubscription.js';
 import { RateLimiter } from './rateLimiter.js';
 import { createAuthMiddleware } from './auth.js';
+import { VERSION } from '../version.js';
 
 // Session storage for stateful mode
-const sessions = new Map<string, SSETransportState | StreamTransportState>();
+const sessions = new Map<string, StreamTransportState>();
 
 /**
  * Wrap response to add Server-Timing header with request duration
@@ -74,31 +74,33 @@ function parseBody(req: IncomingMessage): Promise<unknown> {
 }
 
 /**
- * Send JSON response
+ * Send JSON response with proper Content-Length header
  */
 function sendJson(res: ServerResponse, statusCode: number, data: unknown): void {
+  const payload = JSON.stringify(data);
   res.statusCode = statusCode;
   res.setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify(data));
+  res.setHeader('Content-Length', Buffer.byteLength(payload).toString());
+  res.end(payload);
 }
 
 /**
  * Handle health check endpoint
  */
-function handleHealthCheck(res: ServerResponse, config: EnvironmentConfig, aiEnabled: boolean, sseEnabled: boolean): void {
+function handleHealthCheck(res: ServerResponse, config: EnvironmentConfig, aiEnabled: boolean, eventsEnabled: boolean): void {
   sendJson(res, 200, {
     status: 'healthy',
-    version: '0.8.0',
-    transport: config.httpTransport,
+    version: VERSION,
+    transport: 'stream',
     stateful: config.stateful,
     authMethod: config.authMethod,
     aiEnabled,
     aiProvider: aiEnabled ? config.aiProvider : undefined,
     aiUrl: aiEnabled ? config.aiUrl : undefined,
     aiModel: aiEnabled ? config.aiModel : undefined,
-    sseEventsEnabled: sseEnabled,
-    sseEventsPath: sseEnabled ? config.sseEventsPath : undefined,
-    sseConnectedClients: sseEnabled ? getClientCount() : undefined,
+    eventsEnabled,
+    eventsPath: eventsEnabled ? config.sseEventsPath : undefined,
+    eventsConnectedClients: eventsEnabled ? getClientCount() : undefined,
     rateLimitEnabled: config.rateLimitEnabled,
   });
 }
@@ -197,6 +199,16 @@ async function handleRestApi(
       return;
     }
 
+    // GET /api/version - Get HA and MCP version
+    if (req.method === 'GET' && pathname === '/api/version') {
+      const haConfig = await client.getVersion();
+      sendJson(res, 200, {
+        ha_version: haConfig.version,
+        mcp_version: VERSION,
+      });
+      return;
+    }
+
     // POST /api/services/{domain}/{service} - Call a service
     const serviceMatch = pathname.match(/^\/api\/services\/([^/]+)\/([^/]+)$/);
     if (req.method === 'POST' && serviceMatch) {
@@ -233,7 +245,7 @@ function getOpenApiSpec(baseUrl: string): object {
     info: {
       title: 'Home Assistant MCP Tools',
       description: 'MCP server for Home Assistant - exposes entity states and service calls',
-      version: '0.8.0',
+      version: VERSION,
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -340,6 +352,28 @@ function getOpenApiSpec(baseUrl: string): object {
           },
         },
       },
+      '/api/version': {
+        get: {
+          operationId: 'getVersion',
+          summary: 'Get Home Assistant version information',
+          responses: {
+            '200': {
+              description: 'Version information',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      ha_version: { type: 'string', description: 'Home Assistant version' },
+                      mcp_version: { type: 'string', description: 'MCP server version' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     },
     components: {
       schemas: {
@@ -427,14 +461,14 @@ export async function startHttpServer(client: HaClient, config: EnvironmentConfi
   logger.info('Starting HTTP server', {
     port,
     bindAddr,
-    transport: config.httpTransport,
+    transport: 'stream',
     mcpPath,
     healthPath,
-    sseEventsPath: config.sseEventsEnabled ? sseEventsPath : undefined,
+    eventsPath: config.sseEventsEnabled ? sseEventsPath : undefined,
     stateful: config.stateful,
     aiEnabled: !!aiClient,
     rateLimitEnabled: config.rateLimitEnabled,
-    sseEventsEnabled: config.sseEventsEnabled && !!eventSubscriber,
+    eventsEnabled: config.sseEventsEnabled && !!eventSubscriber,
   });
 
   const server = createHttpServer(async (req: IncomingMessage, originalRes: ServerResponse) => {
@@ -504,49 +538,18 @@ export async function startHttpServer(client: HaClient, config: EnvironmentConfi
         return;
       }
 
-      // SSE Transport
-      if (config.httpTransport === 'sse') {
-        const messagePath = getSseMessagePath();
+      // Streamable HTTP Transport (MCP endpoint)
+      if (urlPath === mcpPath) {
+        const sessionId = req.headers['mcp-session-id'] as string | undefined;
+        const existingState = sessionId ? sessions.get(sessionId) : undefined;
 
-        // SSE connection (GET)
-        if (req.method === 'GET' && url === mcpPath) {
-          const state = await handleSseConnection(client, config, mcpPath, req, res, aiClient);
-          if (config.stateful && state.transport.sessionId) {
-            sessions.set(state.transport.sessionId, state);
-          }
-          return;
+        const body = req.method !== 'GET' ? await parseBody(req) : undefined;
+        const state = await handleStreamRequest(client, config, req, res, body, existingState, aiClient);
+
+        if (state && config.stateful && sessionId) {
+          sessions.set(sessionId, state);
         }
-
-        // SSE message (POST)
-        if (req.method === 'POST' && url === messagePath) {
-          const sessionId = req.headers['mcp-session-id'] as string | undefined;
-          const state = sessionId ? sessions.get(sessionId) as SSETransportState | undefined : undefined;
-
-          if (!state || !('sessionId' in state.transport)) {
-            sendJson(res, 400, { error: 'Invalid or missing session' });
-            return;
-          }
-
-          const body = await parseBody(req);
-          await handleSseMessage(state.transport, req, res, body);
-          return;
-        }
-      }
-
-      // Streamable HTTP Transport
-      if (config.httpTransport === 'stream') {
-        if (url === mcpPath) {
-          const sessionId = req.headers['mcp-session-id'] as string | undefined;
-          const existingState = sessionId ? sessions.get(sessionId) : undefined;
-
-          const body = req.method !== 'GET' ? await parseBody(req) : undefined;
-          const state = await handleStreamRequest(client, config, req, res, body, existingState as StreamTransportState, aiClient);
-
-          if (state && config.stateful && sessionId) {
-            sessions.set(sessionId, state);
-          }
-          return;
-        }
+        return;
       }
 
       // Not found
@@ -567,18 +570,54 @@ export async function startHttpServer(client: HaClient, config: EnvironmentConfi
     }
   });
 
-  // Handle server shutdown
-  const cleanup = () => {
+  // Graceful shutdown handler
+  let isShuttingDown = false;
+
+  const gracefulShutdown = async (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    logger.warn('Received shutdown signal, closing gracefully', { signal });
+
+    // Close all MCP sessions
+    for (const [sessionId, state] of sessions) {
+      try {
+        if ('server' in state) {
+          await state.server.close();
+        }
+        if ('transport' in state && typeof state.transport.close === 'function') {
+          await state.transport.close();
+        }
+        logger.info('Closed MCP session', { sessionId });
+      } catch (error) {
+        logger.error('Error closing MCP session', { sessionId, error });
+      }
+    }
+    sessions.clear();
+
+    // Close event subscriber
     if (eventSubscriber) {
       eventSubscriber.disconnect();
     }
+
+    // Stop rate limiter
     if (rateLimiter) {
       rateLimiter.stop();
     }
+
+    // Close HTTP server
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        logger.info('HTTP server closed');
+        resolve();
+      });
+    });
+
+    process.exit(0);
   };
 
-  process.on('SIGTERM', cleanup);
-  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
 
   // Start listening
   await new Promise<void>((resolve, reject) => {

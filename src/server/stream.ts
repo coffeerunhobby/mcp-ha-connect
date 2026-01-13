@@ -87,6 +87,13 @@ export async function handleStreamRequest(
     await state.server.connect(state.transport);
   }
 
+  // Ensure Accept header includes required MIME types for SDK compatibility
+  // Some MCP clients (like n8n) don't send the full Accept header
+  const acceptHeader = req.headers.accept ?? '';
+  if (!acceptHeader.includes('text/event-stream') || !acceptHeader.includes('application/json')) {
+    req.headers.accept = 'application/json, text/event-stream';
+  }
+
   try {
     await state.transport.handleRequest(req, res, parsedBody);
 

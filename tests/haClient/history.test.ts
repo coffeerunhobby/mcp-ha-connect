@@ -166,5 +166,63 @@ describe('HistoryOperations', () => {
 
       expect(entries).toEqual([]);
     });
+
+    it('should apply limit to results', async () => {
+      // Create 150 mock entries
+      const mockEntries: LogbookEntry[] = Array.from({ length: 150 }, (_, i) => ({
+        when: `2026-01-08T${String(i % 24).padStart(2, '0')}:00:00.000Z`,
+        name: `Entity ${i}`,
+        entity_id: `sensor.test_${i}`,
+        state: 'on',
+        domain: 'sensor',
+      }));
+
+      (mockRequest.get as ReturnType<typeof vi.fn>).mockResolvedValue(mockEntries);
+
+      // Default limit is 100
+      const entries = await historyOps.getSystemLog();
+
+      expect(entries).toHaveLength(100);
+      // Should return the LAST 100 entries (most recent)
+      expect(entries[0].entity_id).toBe('sensor.test_50');
+      expect(entries[99].entity_id).toBe('sensor.test_149');
+    });
+
+    it('should respect custom limit', async () => {
+      const mockEntries: LogbookEntry[] = Array.from({ length: 50 }, (_, i) => ({
+        when: `2026-01-08T${String(i % 24).padStart(2, '0')}:00:00.000Z`,
+        name: `Entity ${i}`,
+        entity_id: `sensor.test_${i}`,
+        state: 'on',
+        domain: 'sensor',
+      }));
+
+      (mockRequest.get as ReturnType<typeof vi.fn>).mockResolvedValue(mockEntries);
+
+      const entries = await historyOps.getSystemLog({ limit: 10 });
+
+      expect(entries).toHaveLength(10);
+      // Should return the LAST 10 entries
+      expect(entries[0].entity_id).toBe('sensor.test_40');
+      expect(entries[9].entity_id).toBe('sensor.test_49');
+    });
+
+    it('should cap hours at 168 (1 week)', async () => {
+      (mockRequest.get as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+      await historyOps.getSystemLog({ hours: 500 });
+
+      // Verify that the start time is capped at 168 hours ago
+      const call = (mockRequest.get as ReturnType<typeof vi.fn>).mock.calls[0];
+      const path = call[0] as string;
+      const startTimeStr = path.replace('/logbook/', '');
+      const startTime = new Date(startTimeStr);
+      const now = new Date();
+      const hoursDiff = (now.getTime() - startTime.getTime()) / (1000 * 60 * 60);
+
+      // Should be approximately 168 hours, not 500
+      expect(hoursDiff).toBeGreaterThan(160);
+      expect(hoursDiff).toBeLessThan(175);
+    });
   });
 });

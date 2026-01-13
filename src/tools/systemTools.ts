@@ -27,12 +27,12 @@ export function registerGetSystemLogTool(server: McpServer, client: HaClient): v
   server.registerTool(
     'getSystemLog',
     {
-      description: 'Get system log entries from the Home Assistant logbook. Shows recent events and state changes.',
+      description: 'Get system log entries from the Home Assistant logbook. Shows recent events and state changes. Default: last 24h, 100 entries.',
       inputSchema: systemLogSchema.shape,
     },
-    wrapToolHandler('getSystemLog', async ({ hours = 24, entity_id }: SystemLogArgs) => {
-      const log = await client.getSystemLog({ hours, entity_id });
-      return toToolResult({ hours, entity_id: entity_id || null, entries: log });
+    wrapToolHandler('getSystemLog', async ({ hours = 24, entity_id, limit = 100 }: SystemLogArgs) => {
+      const log = await client.getSystemLog({ hours, entity_id, limit });
+      return toToolResult({ hours, limit, entity_id: entity_id || null, entries: log });
     })
   );
 }

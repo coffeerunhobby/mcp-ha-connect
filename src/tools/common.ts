@@ -37,6 +37,7 @@ export function safeSerialize(value: unknown): string {
 
 /**
  * Wrap a tool handler with logging and error handling
+ * Includes session ID and args in logs for debugging
  */
 export function wrapToolHandler<T>(
   name: string,
@@ -44,7 +45,7 @@ export function wrapToolHandler<T>(
 ): (args: T, extra: ToolExtra) => Promise<CallToolResult> {
   return async (args: T, extra: ToolExtra): Promise<CallToolResult> => {
     const sessionId = extra.sessionId ?? 'unknown-session';
-    logger.info('Tool invoked', { tool: name, sessionId });
+    logger.info('Tool invoked', { tool: name, sessionId, args: safeSerialize(args) });
 
     try {
       const result = await handler(args, extra);
@@ -113,8 +114,9 @@ export const automationFilterSchema = z.object({
 
 // System log schema
 export const systemLogSchema = z.object({
-  hours: z.number().optional().describe('Number of hours of history to retrieve (default: 24)'),
+  hours: z.number().optional().describe('Number of hours of history to retrieve (default: 24, max: 168)'),
   entity_id: z.string().optional().describe('Optional entity ID to filter logs for a specific entity'),
+  limit: z.number().optional().describe('Maximum number of entries to return (default: 100)'),
 });
 
 // Automation ID schema

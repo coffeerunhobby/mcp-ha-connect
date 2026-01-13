@@ -28,7 +28,7 @@ describe('Tool Registration', () => {
       logFormat: 'plain',
       useHttp: false,
       stateful: false,
-      httpTransport: 'stream',
+      
       httpEnableHealthcheck: true,
       httpAllowCors: true,
     };

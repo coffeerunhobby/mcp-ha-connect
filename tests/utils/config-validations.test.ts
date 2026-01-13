@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { isValidBindAddress, isValidOrigin } from '../../src/utils/config-validations.js';
+import { isValidBindAddress, isValidHostname, isValidOrigin } from '../../src/utils/config-validations.js';
 
 describe('isValidBindAddress', () => {
   describe('Valid IPv4 addresses', () => {
@@ -94,11 +94,74 @@ describe('isValidBindAddress', () => {
       expect(isValidBindAddress('gggg::1')).toBe(false);
     });
 
-    it('should use simplified IPv6 validation', () => {
-      // Note: The current implementation uses a simplified IPv6 regex
-      // For strict validation, consider using a more comprehensive validator
-      // This test documents the current behavior
-      expect(isValidBindAddress(':::1')).toBe(true); // Simplified regex accepts this
+    it('should reject invalid IPv6 with extra colons', () => {
+      // Node's net.isIPv6 correctly rejects malformed addresses
+      expect(isValidBindAddress(':::1')).toBe(false);
+    });
+
+    it('should reject IPv6 with too many groups', () => {
+      expect(isValidBindAddress('2001:0db8:85a3:0000:0000:8a2e:0370:7334:1234')).toBe(false);
+    });
+  });
+});
+
+describe('isValidHostname', () => {
+  describe('Valid hostnames', () => {
+    it('should accept localhost', () => {
+      expect(isValidHostname('localhost')).toBe(true);
+    });
+
+    it('should accept simple domain', () => {
+      expect(isValidHostname('example.com')).toBe(true);
+    });
+
+    it('should accept subdomain', () => {
+      expect(isValidHostname('api.example.com')).toBe(true);
+    });
+
+    it('should accept hyphenated domain', () => {
+      expect(isValidHostname('my-app.example.com')).toBe(true);
+    });
+
+    it('should accept single character labels', () => {
+      expect(isValidHostname('a.b.c')).toBe(true);
+    });
+
+    it('should accept numeric labels', () => {
+      expect(isValidHostname('123.example.com')).toBe(true);
+    });
+  });
+
+  describe('Invalid hostnames', () => {
+    it('should reject empty string', () => {
+      expect(isValidHostname('')).toBe(false);
+    });
+
+    it('should reject hostname starting with hyphen', () => {
+      expect(isValidHostname('-example.com')).toBe(false);
+    });
+
+    it('should reject hostname ending with hyphen', () => {
+      expect(isValidHostname('example-.com')).toBe(false);
+    });
+
+    it('should reject hostname with consecutive dots', () => {
+      expect(isValidHostname('example..com')).toBe(false);
+    });
+
+    it('should reject hostname with special characters', () => {
+      expect(isValidHostname('example@com')).toBe(false);
+      expect(isValidHostname('example_com')).toBe(false);
+    });
+
+    it('should reject hostname exceeding 253 characters', () => {
+      const longHostname = 'a'.repeat(254);
+      expect(isValidHostname(longHostname)).toBe(false);
+    });
+
+    it('should reject label exceeding 63 characters', () => {
+      const longLabel = 'a'.repeat(64) + '.com';
+      expect(isValidHostname(longLabel)).toBe(false);
     });
   });
 });

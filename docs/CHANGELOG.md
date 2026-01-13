@@ -1,3 +1,14 @@
+### 0.9.0
+- **Streamable HTTP Only**: Removed deprecated SSE transport, keeping only Streamable HTTP
+  - Real-time HA event subscriptions still available at `/subscribe_events`
+- **Autonomic Priority System**: New tiered response architecture for home automation
+  - `Priority` enum with bitwise flags: REFLEX (1), SUPERVISED (32), INFORMATIONAL (64), LOG (128)
+  - `PriorityMask` for filtering: CRITICAL, ACTIONABLE, USER_FACING, ALL
+  - Helper functions: `matchesPriority`, `getPriorityTier`, `bypassesQuietHours`, etc.
+  - Based on MOQT priority model adapted for home automation tiers
+- Preparing for future QUIC transport (Node.js 25+ experimental support)
+- All 660 tests passing
+
 ### 0.8.0
 - **Bearer Token Authentication**: Secure HTTP endpoints with bearer tokens
   - `MCP_AUTH_METHOD`: Set to `bearer` to enable authentication

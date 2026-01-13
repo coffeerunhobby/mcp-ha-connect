@@ -41,7 +41,7 @@ describe('Stream Transport', () => {
       useHttp: true,
       stateful: false,
       httpPort: 3000,
-      httpTransport: 'stream',
+      
       httpBindAddr: '127.0.0.1',
       httpPath: '/mcp',
       httpEnableHealthcheck: true,
@@ -53,7 +53,6 @@ describe('Stream Transport', () => {
 
   describe('Stream Connection', () => {
     it('should create streamable HTTP transport', () => {
-      expect(mockConfig.httpTransport).toBe('stream');
       expect(mockConfig.httpPath).toBe('/mcp');
     });
 

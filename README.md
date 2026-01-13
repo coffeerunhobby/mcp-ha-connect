@@ -5,96 +5,6 @@ A production-ready Model Context Protocol (MCP) server for Home Assistant integr
 [![npm version](https://badge.fury.io/js/%40coffeerunhobby%2Fmcp-ha-connect.svg)](https://www.npmjs.com/package/@coffeerunhobby/mcp-ha-connect)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/coffeerunhobby/mcp-ha-connect/pkgs/container/mcp-ha-connect)
 
-## Quick Start
-
-Choose your preferred installation method:
-
-### Option 1: npx (Recommended - No Installation Required)
-
-```json
-{
-  "mcpServers": {
-    "homeassistant": {
-      "command": "npx",
-      "args": ["-y", "@coffeerunhobby/mcp-ha-connect"],
-      "env": {
-        "HA_URL": "http://homeassistant.10.0.0.19.nip.io:8123",
-        "HA_TOKEN": "your_long_lived_access_token"
-      }
-    }
-  }
-}
-```
-
-### Option 2: Global npm Install
-
-```bash
-npm install -g @coffeerunhobby/mcp-ha-connect
-```
-
-```json
-{
-  "mcpServers": {
-    "homeassistant": {
-      "command": "mcp-ha-connect",
-      "env": {
-        "HA_URL": "http://homeassistant.10.0.0.19.nip.io:8123",
-        "HA_TOKEN": "your_token"
-      }
-    }
-  }
-}
-```
-
-### Option 3: Docker
-
-```json
-{
-  "mcpServers": {
-    "homeassistant": {
-      "command": "docker",
-      "args": [
-        "run",
-        "--rm",
-        "-i",
-        "-e", "HA_URL=http://host.docker.internal:8123",
-        "-e", "HA_TOKEN=your_token",
-        "ghcr.io/coffeerunhobby/mcp-ha-connect:latest"
-      ]
-    }
-  }
-}
-```
-
-### Option 4: Local Development
-
-```json
-{
-  "mcpServers": {
-    "homeassistant": {
-      "command": "node",
-      "args": ["C:\\workspace\\mcp-homeassistant\\dist\\index.js"],
-      "env": {
-        "HA_URL": "http://homeassistant.10.0.0.19.nip.io:8123",
-        "HA_TOKEN": "your_token"
-      }
-    }
-  }
-}
-```
-
-## Configuration Locations
-
-### Claude Desktop
-- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Linux:** `~/.config/Claude/claude_desktop_config.json`
-
-### LM Studio
-- **Windows:** `%USERPROFILE%\.lmstudio\config.json`
-- **macOS:** `~/Library/Application Support/LM Studio/config.json`
-- **Linux:** `~/.config/lmstudio/config.json`
-
 ## Autonomous Safety Monitoring System
 
 1. **JS Pre-filter**: Tier A triggers + basic anomaly detection
@@ -106,21 +16,23 @@ npm install -g @coffeerunhobby/mcp-ha-connect
 
 See [docs/SSE_API.md](docs/SSE_API.md) for complete documentation of the SSE system.
 
+See [docs/QUICK_START.md](docs/QUICK_START.md) for Docker, HTTP server mode, n8n integration, and more installation options.
+
 ## Key Features
 
 ### Core Functionality
 
-- **Smart Device Control**
-  - Lights: Brightness, color temperature, RGB color, transitions
-  - Climate: Temperature, HVAC modes, fan modes, humidity
-  - Covers: Position and tilt control
-  - Switches: On/off control
-  - Sensors & Contacts: State monitoring
-  - Media Players: Playback control, volume, source selection
-  - Fans: Speed, oscillation, direction
-  - Locks: Lock/unlock control
-  - Vacuums: Start, stop, return to base
-  - Cameras: Motion detection, snapshots
+- Smart Device Control
+- Lights: Brightness, color temperature, RGB color, transitions
+- Climate: Temperature, HVAC modes, fan modes, humidity
+- Covers: Position and tilt control
+- Switches: On/off control
+- Sensors & Contacts: State monitoring
+- Media Players: Playback control, volume, source selection
+- Fans: Speed, oscillation, direction
+- Locks: Lock/unlock control
+- Vacuums: Start, stop, return to base
+- Cameras: Motion detection, snapshots
 
 ### Automation Management
 
@@ -140,7 +52,7 @@ See [docs/SSE_API.md](docs/SSE_API.md) for complete documentation of the SSE sys
 - Service call support
 - Advanced entity search
 - AI-powered sensor analysis with Ollama
-- Multiple transport modes (stdio, SSE, Streamable HTTP)
+- Multiple transport modes (stdio, Streamable HTTP)
 - HTTP server with health checks
 - CORS support for browser-based clients
 - Structured logging with pino (plain, JSON, GCP-JSON formats)
@@ -274,7 +186,6 @@ See [docs/SSE_API.md](docs/SSE_API.md) for complete documentation of the SSE sys
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MCP_HTTP_PORT` | `3000` | HTTP server port |
-| `MCP_HTTP_TRANSPORT` | `stream` | Transport: `stream` or `sse` |
 | `MCP_HTTP_BIND_ADDR` | `127.0.0.1` | Bind address |
 | `MCP_HTTP_PATH` | `/mcp` | MCP endpoint path |
 | `MCP_HTTP_ENABLE_HEALTHCHECK` | `true` | Enable health check endpoint |
@@ -664,10 +575,6 @@ MIT
 
 Coffee Run Hobby ([github.com/coffeerunhobby](https://github.com/coffeerunhobby))
 
-## Version
-
-0.7.0
-
 ## Links
 
 - **GitHub**: [https://github.com/coffeerunhobby/mcp-ha-connect](https://github.com/coffeerunhobby/mcp-ha-connect)
@@ -676,6 +583,7 @@ Coffee Run Hobby ([github.com/coffeerunhobby](https://github.com/coffeerunhobby)
 
 ## Documentation
 
+- [Quick Start Guide](docs/QUICK_START.md)
 - [Changelog](docs/CHANGELOG.md)
 - [Local Client Configuration](docs/LOCAL_CLIENT.md)
 - [SSE Event API](docs/SSE_API.md)
