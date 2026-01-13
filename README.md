@@ -5,17 +5,6 @@ A production-ready Model Context Protocol (MCP) server for Home Assistant integr
 [![npm version](https://badge.fury.io/js/%40coffeerunhobby%2Fmcp-ha-connect.svg)](https://www.npmjs.com/package/@coffeerunhobby/mcp-ha-connect)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/coffeerunhobby/mcp-ha-connect/pkgs/container/mcp-ha-connect)
 
-## Autonomous Safety Monitoring System
-
-1. **JS Pre-filter**: Tier A triggers + basic anomaly detection
-2. **Issue Objects**: Structured alerts (entity, area, threshold, observed, last_changed)
-3. **LLM Decision**: Single JSON verdict from local model
-4. **Smart Notifications**: Dedupe + cooldown to prevent alert fatigue
-5. **Acknowledgment**: HA notification, Telegram, mobile app action, or voice
-6. **Auto-Response**: Water/gas shutoff via HA valves/switches
-
-See [docs/SSE_API.md](docs/SSE_API.md) for complete documentation of the SSE system.
-
 See [docs/QUICK_START.md](docs/QUICK_START.md) for Docker, HTTP server mode, n8n integration, and more installation options.
 
 ## Key Features
@@ -585,8 +574,6 @@ Coffee Run Hobby ([github.com/coffeerunhobby](https://github.com/coffeerunhobby)
 
 - [Quick Start Guide](docs/QUICK_START.md)
 - [Changelog](docs/CHANGELOG.md)
-- [Local Client Configuration](docs/LOCAL_CLIENT.md)
-- [SSE Event API](docs/SSE_API.md)
 
 ## Contributing
 

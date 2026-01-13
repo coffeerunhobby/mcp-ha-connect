@@ -211,5 +211,4 @@ Once configured, ask Claude:
 
 - [Environment Variables](../README.md#environment-variables) - Full configuration reference
 - [Available Tools](../README.md#available-tools-37-total) - All 37 tools documented
-- [SSE Event API](SSE_API.md) - Real-time event subscriptions
-- [Local Client Configuration](LOCAL_CLIENT.md) - Advanced client setup
+- [Changelog](CHANGELOG.md) - Version history
