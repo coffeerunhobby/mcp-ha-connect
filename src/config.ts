@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isValidBindAddress, isValidOrigin } from './utils/config-validations.js';
+import { parsePermissionsConfig, type PermissionsConfig } from './permissions/index.js';
 import { logger } from './utils/logger.js';
 import type { AIProviderType } from './localAI/types.js';
 
@@ -20,25 +21,27 @@ const numericStringSchema = z
   .transform((value: string | undefined) => (value ? Number.parseInt(value, 10) : undefined))
   .pipe(z.number().positive().optional());
 
-const listStringSchema = z
-  .string()
-  .optional()
-  .transform((value: string | undefined) =>
-    value
-      ? value
-          .split(',')
-          .map((s: string) => s.trim())
-          .filter(Boolean)
-      : undefined
-  );
-
 const envSchema = z
   .object({
-    // Home Assistant Client Configuration
-    haUrl: z.string().url({ message: 'HA_URL must be a valid URL' }),
-    haToken: z.string().min(1, 'HA_TOKEN is required'),
+    // Plugin Enable Flags (default: false)
+    haPluginEnabled: createBooleanStringSchema(false),
+    aiPluginEnabled: createBooleanStringSchema(false),
+    omadaPluginEnabled: createBooleanStringSchema(false),
+
+    // Home Assistant Client Configuration (optional if using Omada only)
+    haUrl: z.string().url({ message: 'HA_URL must be a valid URL' }).optional(),
+    haToken: z.string().min(1).optional(),
     haStrictSsl: createBooleanStringSchema(true),
     haTimeout: numericStringSchema,
+
+    // Omada Client Configuration (optional)
+    omadaBaseUrl: z.string().url({ message: 'OMADA_BASE_URL must be a valid URL' }).optional(),
+    omadaClientId: z.string().min(1).optional(),
+    omadaClientSecret: z.string().min(1).optional(),
+    omadaOmadacId: z.string().min(1).optional(),
+    omadaSiteId: z.string().min(1).optional(),
+    omadaStrictSsl: createBooleanStringSchema(true),
+    omadaTimeout: numericStringSchema,
 
     // AI Provider Configuration (use 'none' to disable AI features)
     aiProvider: z.enum(['ollama', 'openai', 'none']).optional(),
@@ -60,7 +63,7 @@ const envSchema = z
     httpEnableHealthcheck: createBooleanStringSchema(true),
     httpHealthcheckPath: z.string().optional(),
     httpAllowCors: createBooleanStringSchema(true),
-    httpAllowedOrigins: listStringSchema,
+    httpAllowedOrigins: z.string().optional().transform((v) => v?.split(',').map((s) => s.trim()).filter(Boolean)),
 
     // SSE Event Subscription Configuration
     sseEventsEnabled: createBooleanStringSchema(true),
@@ -73,11 +76,11 @@ const envSchema = z
 
     // Authentication Configuration
     authMethod: z.enum(['none', 'bearer']).optional().default('none'),
-    authToken: listStringSchema,
+    authSecret: z.string().optional(),
+    permissionsConfig: z.string().optional(),
   })
   .refine(
     (data) => {
-      // Validate httpBindAddr if provided
       if (data.httpBindAddr && !isValidBindAddress(data.httpBindAddr)) {
         return false;
       }
@@ -90,7 +93,6 @@ const envSchema = z
   )
   .refine(
     (data) => {
-      // Validate httpAllowedOrigins if provided
       if (data.httpAllowedOrigins) {
         for (const origin of data.httpAllowedOrigins) {
           if (!isValidOrigin(origin)) {
@@ -110,24 +112,37 @@ const envSchema = z
   )
   .refine(
     (data) => {
-      // If bearer auth is enabled, token must be provided
-      if (data.authMethod === 'bearer' && !data.authToken) {
+      if (data.authMethod === 'bearer' && !data.authSecret) {
         return false;
       }
       return true;
     },
     {
-      message: 'MCP_AUTH_TOKEN is required when MCP_AUTH_METHOD is "bearer"',
-      path: ['authToken'],
+      message: 'MCP_AUTH_SECRET is required when MCP_AUTH_METHOD is "bearer"',
+      path: ['authSecret'],
     }
   );
 
 export interface EnvironmentConfig {
-  // Home Assistant Client Configuration
-  baseUrl: string;
-  token: string;
+  // Plugin Enable Flags
+  haPluginEnabled: boolean;
+  aiPluginEnabled: boolean;
+  omadaPluginEnabled: boolean;
+
+  // Home Assistant Client Configuration (optional if using Omada only)
+  baseUrl?: string;
+  token?: string;
   strictSsl: boolean;
   timeout: number;
+
+  // Omada Client Configuration (optional)
+  omadaBaseUrl?: string;
+  omadaClientId?: string;
+  omadaClientSecret?: string;
+  omadacId?: string;
+  siteId?: string;
+  omadaStrictSsl: boolean;
+  requestTimeout?: number;
 
   // AI Provider Configuration
   aiProvider: AIProviderType;
@@ -162,16 +177,31 @@ export interface EnvironmentConfig {
 
   // Authentication Configuration
   authMethod: 'none' | 'bearer';
-  authToken?: Set<string>;
+  authSecret?: string;
+  permissions: PermissionsConfig;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentConfig {
   const parsed = envSchema.safeParse({
+    // Plugin Enable Flags
+    haPluginEnabled: env.HA_PLUGIN_ENABLED,
+    aiPluginEnabled: env.AI_PLUGIN_ENABLED,
+    omadaPluginEnabled: env.OMADA_PLUGIN_ENABLED,
+
     // Home Assistant Client Configuration
     haUrl: env.HA_URL,
     haToken: env.HA_TOKEN,
     haStrictSsl: env.HA_STRICT_SSL,
     haTimeout: env.HA_TIMEOUT,
+
+    // Omada Client Configuration
+    omadaBaseUrl: env.OMADA_BASE_URL,
+    omadaClientId: env.OMADA_CLIENT_ID,
+    omadaClientSecret: env.OMADA_CLIENT_SECRET,
+    omadaOmadacId: env.OMADA_OMADAC_ID,
+    omadaSiteId: env.OMADA_SITE_ID,
+    omadaStrictSsl: env.OMADA_STRICT_SSL,
+    omadaTimeout: env.OMADA_TIMEOUT,
 
     // AI Provider Configuration
     aiProvider: env.AI_PROVIDER,
@@ -206,7 +236,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
 
     // Authentication Configuration
     authMethod: env.MCP_AUTH_METHOD,
-    authToken: env.MCP_AUTH_TOKEN,
+    authSecret: env.MCP_AUTH_SECRET,
+    permissionsConfig: env.MCP_PERMISSIONS_CONFIG,
   });
 
   if (!parsed.success) {
@@ -214,25 +245,35 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     throw new Error(`Invalid environment configuration:\n${messages.join('\n')}`);
   }
 
-  // Default MCP endpoint path
   const httpPath = parsed.data.httpPath ?? '/mcp';
-
-  // Set default bind address and allowed origins for security
   const httpBindAddr = parsed.data.httpBindAddr ?? '127.0.0.1';
   let httpAllowedOrigins = parsed.data.httpAllowedOrigins ?? ['127.0.0.1', 'localhost'];
 
-  // If wildcard is present, use empty array to disable SDK origin validation
   if (httpAllowedOrigins.includes('*')) {
-    logger.warn('Wildcard (*) origin allowed - origin validation is disabled. This should only be used in development.');
+    logger.warn('Wildcard (*) origin allowed - origin validation disabled');
     httpAllowedOrigins = [];
   }
 
   return {
-    // Home Assistant Client Configuration
-    baseUrl: parsed.data.haUrl.replace(/\/$/, ''),
+    // Plugin Enable Flags
+    haPluginEnabled: parsed.data.haPluginEnabled,
+    aiPluginEnabled: parsed.data.aiPluginEnabled,
+    omadaPluginEnabled: parsed.data.omadaPluginEnabled,
+
+    // Home Assistant Client Configuration (optional)
+    baseUrl: parsed.data.haUrl?.replace(/\/$/, ''),
     token: parsed.data.haToken,
     strictSsl: parsed.data.haStrictSsl,
     timeout: parsed.data.haTimeout ?? 30000,
+
+    // Omada Client Configuration (optional)
+    omadaBaseUrl: parsed.data.omadaBaseUrl?.replace(/\/$/, ''),
+    omadaClientId: parsed.data.omadaClientId,
+    omadaClientSecret: parsed.data.omadaClientSecret,
+    omadacId: parsed.data.omadaOmadacId,
+    siteId: parsed.data.omadaSiteId,
+    omadaStrictSsl: parsed.data.omadaStrictSsl,
+    requestTimeout: parsed.data.omadaTimeout,
 
     // AI Provider Configuration
     aiProvider: (parsed.data.aiProvider ?? 'ollama') as AIProviderType,
@@ -267,13 +308,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
 
     // Authentication Configuration
     authMethod: parsed.data.authMethod,
-    authToken: parsed.data.authToken ? new Set(parsed.data.authToken) : undefined,
+    authSecret: parsed.data.authSecret,
+    permissions: parsePermissionsConfig(parsed.data.permissionsConfig),
   };
 }
 
-// Legacy compatibility functions
 export function validateConfig(config: EnvironmentConfig): void {
-  // Config is already validated by Zod, this is for compatibility
   if (!config.baseUrl || !config.token) {
     throw new Error('Invalid configuration: missing baseUrl or token');
   }

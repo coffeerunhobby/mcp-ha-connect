@@ -67,7 +67,7 @@ function setCors(req: IncomingMessage, res: ServerResponse): void {
   }
 
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id");
   res.setHeader("Access-Control-Max-Age", "86400");
 }
 

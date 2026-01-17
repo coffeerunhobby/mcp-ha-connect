@@ -8,9 +8,11 @@
 import { loadConfig } from './config.js';
 import { HaClient } from './haClient/index.js';
 import { LocalAIClient } from './localAI/index.js';
+import { OmadaClient } from './omadaClient/index.js';
 import { startHttpServer } from './server/http.js';
 import { startStdioServer } from './server/stdio.js';
 import { initLogger, logger } from './utils/logger.js';
+import { VERSION } from './version.js';
 
 async function main(): Promise<void> {
   try {
@@ -23,55 +25,94 @@ async function main(): Promise<void> {
     // Initialize logger with configured level, format, and output stream
     initLogger(config.logLevel, config.logFormat, useStderr);
 
-    logger.info('Loaded Home Assistant configuration', {
-      baseUrl: config.baseUrl,
-      hasToken: !!config.token,
-      strictSsl: config.strictSsl,
-      timeout: config.timeout,
+    logger.info(`mcp-ha-connect v${VERSION} starting`);
+    logger.info('Loaded configuration', {
+      haPluginEnabled: config.haPluginEnabled,
+      aiPluginEnabled: config.aiPluginEnabled,
+      omadaPluginEnabled: config.omadaPluginEnabled,
       useHttp: config.useHttp,
-      aiProvider: config.aiProvider,
-      aiUrl: config.aiUrl,
-      aiModel: config.aiModel,
     });
 
-    // Create Home Assistant client
-    const client = new HaClient(config);
-
-    // Test Home Assistant connection
-    const apiCheck = await client.checkApi();
-    logger.info('Connected to Home Assistant', { message: apiCheck.message });
-
-    // Create Local AI client for AI analysis (unless explicitly disabled)
-    let aiClient: LocalAIClient | undefined;
-    if (config.aiProvider === 'none') {
-      logger.info('AI features disabled (AI_PROVIDER=none)');
-    } else {
-      aiClient = new LocalAIClient(config);
-      const aiHealthy = await aiClient.checkHealth();
-      if (aiHealthy) {
-        logger.info('Connected to AI provider', {
-          provider: aiClient.getProviderName(),
-          url: config.aiUrl,
-          model: config.aiModel,
+    // Create Home Assistant client (if plugin enabled and configured)
+    let haClient: HaClient | undefined;
+    if (config.haPluginEnabled) {
+      if (config.baseUrl && config.token) {
+        haClient = new HaClient({
+          baseUrl: config.baseUrl,
+          token: config.token,
+          timeout: config.timeout,
+          strictSsl: config.strictSsl,
         });
+
+        // Test Home Assistant connection
+        const apiCheck = await haClient.checkApi();
+        logger.info('Connected to Home Assistant', { message: apiCheck.message });
       } else {
-        logger.warn('AI provider not available - AI analysis tool will be disabled', {
-          provider: config.aiProvider,
-          url: config.aiUrl,
-        });
-        aiClient = undefined;
+        logger.warn('HA plugin enabled but HA_URL or HA_TOKEN not set');
       }
+    } else {
+      logger.info('Home Assistant plugin disabled');
+    }
+
+    // Create Omada client (if plugin enabled and configured)
+    let omadaClient: OmadaClient | undefined;
+    if (config.omadaPluginEnabled) {
+      if (config.omadaBaseUrl && config.omadaClientId && config.omadaClientSecret && config.omadacId) {
+        omadaClient = new OmadaClient({
+          baseUrl: config.omadaBaseUrl,
+          clientId: config.omadaClientId,
+          clientSecret: config.omadaClientSecret,
+          omadacId: config.omadacId,
+          siteId: config.siteId,
+          strictSsl: config.omadaStrictSsl,
+          requestTimeout: config.requestTimeout,
+        });
+
+        // Test Omada connection by listing sites
+        const sites = await omadaClient.listSites();
+        logger.info('Connected to Omada controller', { siteCount: sites.length });
+      } else {
+        logger.warn('Omada plugin enabled but required config not set (OMADA_BASE_URL, OMADA_CLIENT_ID, OMADA_CLIENT_SECRET, OMADA_OMADAC_ID)');
+      }
+    } else {
+      logger.info('Omada plugin disabled');
+    }
+
+    // Create Local AI client (if plugin enabled)
+    let aiClient: LocalAIClient | undefined;
+    if (config.aiPluginEnabled) {
+      if (config.aiProvider === 'none') {
+        logger.info('AI plugin enabled but AI_PROVIDER=none');
+      } else {
+        aiClient = new LocalAIClient(config);
+        const aiHealthy = await aiClient.checkHealth();
+        if (aiHealthy) {
+          logger.info('Connected to AI provider', {
+            provider: aiClient.getProviderName(),
+            url: config.aiUrl,
+            model: config.aiModel,
+          });
+        } else {
+          logger.warn('AI provider not available - AI analysis tool will be disabled', {
+            provider: config.aiProvider,
+            url: config.aiUrl,
+          });
+          aiClient = undefined;
+        }
+      }
+    } else {
+      logger.info('AI plugin disabled');
     }
 
     // Start server in appropriate mode
     if (config.useHttp) {
-      await startHttpServer(client, config, aiClient);
+      await startHttpServer({ haClient, omadaClient, aiClient, config });
     } else {
-      await startStdioServer(client, aiClient);
+      await startStdioServer({ haClient, omadaClient, aiClient });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logger.error('Failed to start Home Assistant MCP server', {
+    logger.error('Failed to start MCP server', {
       error: message,
       stack: error instanceof Error ? error.stack : undefined,
     });

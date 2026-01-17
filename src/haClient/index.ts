@@ -3,7 +3,6 @@
  * Main client class that composes all operation modules
  */
 
-import type { EnvironmentConfig } from '../config.js';
 import type {
   Entity,
   ServiceCallData,
@@ -30,6 +29,13 @@ import { StateOperations } from './states.js';
 import { UpdateOperations } from './updates.js';
 import { CalendarOperations } from './calendars.js';
 
+export interface HaClientOptions {
+  baseUrl: string;
+  token: string;
+  timeout: number;
+  strictSsl: boolean;
+}
+
 /**
  * Main client for interacting with the Home Assistant API.
  * Organized with dedicated operation classes for each domain.
@@ -46,7 +52,7 @@ export class HaClient {
   private readonly calendarOps: CalendarOperations;
   public readonly devices: DeviceOperations;
 
-  constructor(config: EnvironmentConfig) {
+  constructor(config: HaClientOptions) {
     logger.debug('Initializing HaClient');
 
     // Initialize request handler

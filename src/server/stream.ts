@@ -9,6 +9,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { EnvironmentConfig } from '../config.js';
 import type { HaClient } from '../haClient/index.js';
 import type { LocalAIClient } from '../localAI/index.js';
+import type { OmadaClient } from '../omadaClient/index.js';
 import { logger } from '../utils/logger.js';
 import { createServer } from './common.js';
 
@@ -20,12 +21,20 @@ interface StreamTransportState {
 // Export the type for use in http.ts
 export type { StreamTransportState };
 
+export interface StreamTransportOptions {
+  haClient?: HaClient;
+  omadaClient?: OmadaClient;
+  aiClient?: LocalAIClient;
+  config: EnvironmentConfig;
+}
+
 /**
  * Creates a Streamable HTTP transport
  * This implements the MCP protocol version 2025-03-26
  */
-export function createStreamTransport(client: HaClient, config: EnvironmentConfig, aiClient?: LocalAIClient): StreamTransportState {
-  const mcpServer = createServer(client, aiClient);
+export function createStreamTransport(options: StreamTransportOptions): StreamTransportState {
+  const { haClient, omadaClient, aiClient, config } = options;
+  const mcpServer = createServer({ haClient, omadaClient, aiClient });
 
   const enableStatefulSessions = config.stateful;
   const sessionIdGenerator = enableStatefulSessions ? () => randomUUID() : undefined;
@@ -61,14 +70,13 @@ export function createStreamTransport(client: HaClient, config: EnvironmentConfi
  * For stateful mode, transports should be stored and reused by the caller
  */
 export async function handleStreamRequest(
-  client: HaClient,
-  config: EnvironmentConfig,
+  options: StreamTransportOptions,
   req: IncomingMessage,
   res: ServerResponse,
   parsedBody?: unknown,
-  existingTransport?: StreamTransportState,
-  aiClient?: LocalAIClient
+  existingTransport?: StreamTransportState
 ): Promise<StreamTransportState | void> {
+  const { config } = options;
   const originHeader = req.headers.origin;
   const hostHeader = req.headers.host;
 
@@ -81,7 +89,7 @@ export async function handleStreamRequest(
   });
 
   // Reuse existing transport if provided, otherwise create new one
-  const state = existingTransport ?? createStreamTransport(client, config, aiClient);
+  const state = existingTransport ?? createStreamTransport(options);
 
   if (!existingTransport) {
     await state.server.connect(state.transport);

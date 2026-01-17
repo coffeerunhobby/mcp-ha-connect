@@ -1,13 +1,44 @@
+### 1.0.0
+- **TP-Link Omada Network Integration**: Full support for Omada SDN controller
+  - 24 new tools for network management (total tools: 60)
+  - Site management: `omada_listSites`
+  - Device management: `omada_listDevices`, `omada_getDevice`, `omada_searchDevices`, `omada_getSwitchStackDetail`, `omada_listDevicesStats`
+  - Client management: `omada_listClients`, `omada_getClient`, `omada_listMostActiveClients`, `omada_listClientsActivity`, `omada_listClientsPastConnections`
+  - Rate limiting: `omada_getRateLimitProfiles`, `omada_setClientRateLimit`, `omada_setClientRateLimitProfile`, `omada_disableClientRateLimit`
+  - Security: `omada_getThreatList`
+  - Network config: `omada_getInternetInfo`, `omada_getPortForwardingStatus`, `omada_getLanNetworkList`, `omada_getLanProfileList`, `omada_getWlanGroupList`, `omada_getSsidList`, `omada_getSsidDetail`, `omada_getFirewallSetting`
+  - OAuth2 authentication with automatic token refresh
+  - New environment variables: `OMADA_PLUGIN_ENABLED`, `OMADA_BASE_URL`, `OMADA_CLIENT_ID`, `OMADA_CLIENT_SECRET`, `OMADA_OMADAC_ID`, `OMADA_SITE_ID`, `OMADA_STRICT_SSL`, `OMADA_TIMEOUT`
+- **JWT Authentication**: Replaced static bearer tokens with JWT-based authentication
+  - `MCP_AUTH_SECRET`: JWT signing secret (min 32 chars, HS256 algorithm)
+  - Token validation with expiration support (`exp` claim)
+  - User identification via `sub` claim for permission lookup
+- **Permission System**: Role-based access control with binary masks
+  - Permission binary masks: ADMIN (1), CONFIGURE (2), CONTROL (4), QUERY (8), NOTIFY (16), AI (32) (sorted by criticality)
+  - Role presets: NONE, READONLY, OPERATOR, CONTRIBUTOR, ADMIN, SUPERUSER
+  - User-to-role mapping with id/sub based authentication
+  - `MCP_PERMISSIONS_CONFIG` environment variable for configuration
+  - Case-insensitive role lookup in configuration
+- **MCP SDK AuthInfo Integration**: Proper integration with MCP SDK authentication
+  - Permissions passed via `authInfo.extra.permissions` to tool handlers
+  - Tools enforce permission requirements (e.g., READONLY users denied CONTROL tools)
+- **Plugin Architecture**: Modular plugin system for extensibility
+  - Home Assistant plugin (`HA_PLUGIN_ENABLED`)
+  - Local AI plugin (`AI_PLUGIN_ENABLED`)
+  - Omada network plugin (`OMADA_PLUGIN_ENABLED`)
+- **Environment Variable Cleanup**: Standardized naming conventions
+  - Renamed `LOCALAI_PLUGIN_ENABLED` to `AI_PLUGIN_ENABLED`
+  - Deprecated `MCP_SERVER_MODE`, `MCP_SERVER_PORT`, `MCP_SERVER_HOST`
+- **Minimal Logger**: Replaced pino with lightweight built-in logger
+  - Supports plain, JSON, and GCP-JSON log formats
+  - Zero external logging dependencies
+- All 688 unit tests + 44 integration tests passing
+
 ### 0.9.0
 - **Streamable HTTP Only**: Removed deprecated SSE transport, keeping only Streamable HTTP
   - Real-time HA event subscriptions still available at `/subscribe_events`
-- **Autonomic Priority System**: New tiered response architecture for home automation
-  - `Priority` enum with bitwise flags: REFLEX (1), SUPERVISED (32), INFORMATIONAL (64), LOG (128)
-  - `PriorityMask` for filtering: CRITICAL, ACTIONABLE, USER_FACING, ALL
-  - Helper functions: `matchesPriority`, `getPriorityTier`, `bypassesQuietHours`, etc.
-  - Based on MOQT priority model adapted for home automation tiers
 - Preparing for future QUIC transport (Node.js 25+ experimental support)
-- All 660 tests passing
+- All 648 tests passing
 
 ### 0.8.0
 - **Bearer Token Authentication**: Secure HTTP endpoints with bearer tokens

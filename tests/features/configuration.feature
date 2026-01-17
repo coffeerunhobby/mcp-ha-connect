@@ -23,15 +23,15 @@ Feature: Server Configuration
     When I load the configuration
     Then baseUrl should not have a trailing slash
 
-  Scenario: Reject missing HA_URL
+  Scenario: Allow missing HA_URL for Omada-only mode
     Given environment variables without HA_URL
     When I attempt to load the configuration
-    Then it should throw an error about invalid configuration
+    Then it should load successfully with baseUrl undefined
 
-  Scenario: Reject missing HA_TOKEN
+  Scenario: Allow missing HA_TOKEN for Omada-only mode
     Given environment variables without HA_TOKEN
     When I attempt to load the configuration
-    Then it should throw an error about invalid configuration
+    Then it should load successfully with token undefined
 
   Scenario: Reject invalid URL format
     Given HA_URL with invalid format "not-a-url"

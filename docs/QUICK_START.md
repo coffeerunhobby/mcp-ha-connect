@@ -161,18 +161,42 @@ services:
       - MCP_HTTP_BIND_ADDR=0.0.0.0
 ```
 
-### With Bearer Token Authentication
+### With JWT Authentication
 
 ```yaml
 environment:
   - MCP_AUTH_METHOD=bearer
-  - MCP_AUTH_TOKEN=your_secret_token
+  - MCP_AUTH_SECRET=your_32_char_minimum_secret_key!
+  - MCP_PERMISSIONS_CONFIG={"users":[{"sub":"admin","role":"admin"}],"defaultRole":"NONE"}
+```
+
+Generate a JWT token with your secret using HS256 algorithm:
+
+```bash
+# Example: Generate JWT with Node.js
+node -e "
+const crypto = require('crypto');
+const header = Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url');
+const payload = Buffer.from(JSON.stringify({sub:'admin',exp:Math.floor(Date.now()/1000)+86400})).toString('base64url');
+const signature = crypto.createHmac('sha256','your_32_char_minimum_secret_key!').update(header+'.'+payload).digest('base64url');
+console.log(header+'.'+payload+'.'+signature);
+"
 ```
 
 Then connect with:
 ```
-Authorization: Bearer your_secret_token
+Authorization: Bearer <your-jwt-token>
 ```
+
+#### Available Roles
+
+| Role | Permissions |
+|------|-------------|
+| `READONLY` | Query entities and states |
+| `OPERATOR` | Query + Control devices + Notifications |
+| `CONTRIBUTOR` | Operator + Create/modify automations |
+| `ADMIN` | Full access except AI features |
+| `SUPERUSER` | All permissions |
 
 ## n8n Integration
 
@@ -181,8 +205,10 @@ Authorization: Bearer your_secret_token
 1. Add **MCP Client** node in n8n
 2. Configure connection:
    - **SSE URL:** `http://your-server:3000/mcp`
-   - **Authentication:** Bearer Token (if enabled)
+   - **Authentication:** Bearer Token with JWT (if enabled)
 3. Call tools like `getVersion`, `listEntities`, `getSystemLog`
+
+> **Note:** When using JWT authentication, generate a token with appropriate role permissions for your n8n workflows.
 
 ## Verify It's Working
 
@@ -210,5 +236,5 @@ Once configured, ask Claude:
 ## Next Steps
 
 - [Environment Variables](../README.md#environment-variables) - Full configuration reference
-- [Available Tools](../README.md#available-tools-37-total) - All 37 tools documented
+- [Available Tools](../README.md#available-tools-60-total) - All 60 tools documented (35 Home Assistant + 24 Omada + 1 AI)
 - [Changelog](CHANGELOG.md) - Version history

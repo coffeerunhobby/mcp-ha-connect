@@ -1,12 +1,15 @@
 /**
- * Authentication middleware tests
+ * JWT authentication middleware tests
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createAuthMiddleware } from '../../src/server/auth.js';
+import { createJwt } from '../../src/utils/jwt.js';
 
 vi.mock('../../src/utils/logger.js');
+
+const SECRET = 'test-secret-key-32chars-minimum!';
 
 describe('Auth Middleware', () => {
   let mockReq: Partial<IncomingMessage>;
@@ -52,11 +55,10 @@ describe('Auth Middleware', () => {
   });
 
   describe('Bearer Auth', () => {
-    const validTokens = new Set(['test-token-123', 'another-token']);
-
     it('should allow request with valid token', () => {
-      mockReq.headers = { authorization: 'Bearer test-token-123' };
-      const middleware = createAuthMiddleware({ method: 'bearer', tokens: validTokens });
+      const token = createJwt({ sub: 'user1' }, SECRET);
+      mockReq.headers = { authorization: `Bearer ${token}` };
+      const middleware = createAuthMiddleware({ method: 'bearer', secret: SECRET });
 
       const result = middleware(mockReq as IncomingMessage, mockRes as ServerResponse);
 
@@ -64,18 +66,24 @@ describe('Auth Middleware', () => {
       expect(mockRes.end).not.toHaveBeenCalled();
     });
 
-    it('should allow request with any valid token from set', () => {
-      mockReq.headers = { authorization: 'Bearer another-token' };
-      const middleware = createAuthMiddleware({ method: 'bearer', tokens: validTokens });
+    it('should attach AuthInfo to request with payload in extra', () => {
+      const token = createJwt({ sub: 'admin', role: 'superuser' }, SECRET);
+      mockReq.headers = { authorization: `Bearer ${token}` };
+      const middleware = createAuthMiddleware({ method: 'bearer', secret: SECRET });
 
-      const result = middleware(mockReq as IncomingMessage, mockRes as ServerResponse);
+      middleware(mockReq as IncomingMessage, mockRes as ServerResponse);
 
-      expect(result).toBe(true);
+      const authReq = mockReq as IncomingMessage & { auth?: { clientId?: string; extra?: { payload?: { sub?: string; role?: string } } } };
+      // AuthInfo.clientId is set to JWT sub
+      expect(authReq.auth?.clientId).toBe('admin');
+      // JWT payload is in authInfo.extra.payload
+      expect(authReq.auth?.extra?.payload?.sub).toBe('admin');
+      expect(authReq.auth?.extra?.payload?.role).toBe('superuser');
     });
 
     it('should reject request without Authorization header', () => {
       mockReq.headers = {};
-      const middleware = createAuthMiddleware({ method: 'bearer', tokens: validTokens });
+      const middleware = createAuthMiddleware({ method: 'bearer', secret: SECRET });
 
       const result = middleware(mockReq as IncomingMessage, mockRes as ServerResponse);
 
@@ -85,50 +93,61 @@ describe('Auth Middleware', () => {
       expect(responseData.body).toContain('Missing Authorization header');
     });
 
-    it('should reject request with invalid token', () => {
-      mockReq.headers = { authorization: 'Bearer wrong-token' };
-      const middleware = createAuthMiddleware({ method: 'bearer', tokens: validTokens });
+    it('should reject request with invalid signature', () => {
+      const token = createJwt({ sub: 'user1' }, 'wrong-secret');
+      mockReq.headers = { authorization: `Bearer ${token}` };
+      const middleware = createAuthMiddleware({ method: 'bearer', secret: SECRET });
 
       const result = middleware(mockReq as IncomingMessage, mockRes as ServerResponse);
 
       expect(result).toBe(false);
       expect(responseData.statusCode).toBe(401);
-      expect(responseData.headers['WWW-Authenticate']).toBe('Bearer error="invalid_token"');
-      expect(responseData.body).toContain('Invalid token');
+      expect(responseData.body).toContain('bad signature');
     });
 
-    it('should reject request with malformed Authorization header', () => {
+    it('should reject expired token', () => {
+      const token = createJwt({ sub: 'user1', exp: Math.floor(Date.now() / 1000) - 60 }, SECRET);
+      mockReq.headers = { authorization: `Bearer ${token}` };
+      const middleware = createAuthMiddleware({ method: 'bearer', secret: SECRET });
+
+      const result = middleware(mockReq as IncomingMessage, mockRes as ServerResponse);
+
+      expect(result).toBe(false);
+      expect(responseData.statusCode).toBe(401);
+      expect(responseData.body).toContain('expired');
+    });
+
+    it('should reject malformed Authorization header', () => {
       mockReq.headers = { authorization: 'Basic dXNlcjpwYXNz' };
-      const middleware = createAuthMiddleware({ method: 'bearer', tokens: validTokens });
+      const middleware = createAuthMiddleware({ method: 'bearer', secret: SECRET });
 
       const result = middleware(mockReq as IncomingMessage, mockRes as ServerResponse);
 
       expect(result).toBe(false);
       expect(responseData.statusCode).toBe(401);
-      expect(responseData.body).toContain('Invalid Authorization header format');
+      expect(responseData.body).toContain('Expected: Bearer');
     });
 
-    it('should return 500 if bearer auth enabled but no tokens configured', () => {
-      mockReq.headers = { authorization: 'Bearer test-token' };
-      const middleware = createAuthMiddleware({ method: 'bearer', tokens: undefined });
+    it('should return 500 if bearer auth enabled but no secret configured', () => {
+      const token = createJwt({ sub: 'user1' }, SECRET);
+      mockReq.headers = { authorization: `Bearer ${token}` };
+      const middleware = createAuthMiddleware({ method: 'bearer', secret: undefined });
 
       const result = middleware(mockReq as IncomingMessage, mockRes as ServerResponse);
 
       expect(result).toBe(false);
       expect(responseData.statusCode).toBe(500);
-      expect(responseData.body).toContain('auth token not set');
+      expect(responseData.body).toContain('misconfiguration');
     });
   });
 
   describe('Skip Paths', () => {
-    const validTokens = new Set(['secret-token']);
-
     it('should skip auth for exact path match', () => {
       mockReq.url = '/health';
-      mockReq.headers = {}; // No auth header
+      mockReq.headers = {};
       const middleware = createAuthMiddleware({
         method: 'bearer',
-        tokens: validTokens,
+        secret: SECRET,
         skipPaths: ['/health'],
       });
 
@@ -142,7 +161,7 @@ describe('Auth Middleware', () => {
       mockReq.headers = {};
       const middleware = createAuthMiddleware({
         method: 'bearer',
-        tokens: validTokens,
+        secret: SECRET,
         skipPaths: ['/health'],
       });
 
@@ -156,7 +175,7 @@ describe('Auth Middleware', () => {
       mockReq.headers = {};
       const middleware = createAuthMiddleware({
         method: 'bearer',
-        tokens: validTokens,
+        secret: SECRET,
         skipPaths: ['/health'],
       });
 
@@ -171,7 +190,7 @@ describe('Auth Middleware', () => {
       mockReq.headers = {};
       const middleware = createAuthMiddleware({
         method: 'bearer',
-        tokens: validTokens,
+        secret: SECRET,
         skipPaths: ['/health'],
       });
 
@@ -181,26 +200,25 @@ describe('Auth Middleware', () => {
     });
   });
 
-  describe('Multi-token Support', () => {
-    it('should support multiple tokens for different clients', () => {
-      const tokens = new Set(['n8n-token', 'openwebui-token', 'cli-token']);
-      const middleware = createAuthMiddleware({ method: 'bearer', tokens });
+  describe('Bearer Payload Claims', () => {
+    it('should allow token with future exp', () => {
+      const token = createJwt({ sub: 'user1', exp: Math.floor(Date.now() / 1000) + 3600 }, SECRET);
+      mockReq.headers = { authorization: `Bearer ${token}` };
+      const middleware = createAuthMiddleware({ method: 'bearer', secret: SECRET });
 
-      // n8n client
-      mockReq.headers = { authorization: 'Bearer n8n-token' };
-      expect(middleware(mockReq as IncomingMessage, mockRes as ServerResponse)).toBe(true);
+      const result = middleware(mockReq as IncomingMessage, mockRes as ServerResponse);
 
-      // Open WebUI client
-      mockReq.headers = { authorization: 'Bearer openwebui-token' };
-      expect(middleware(mockReq as IncomingMessage, mockRes as ServerResponse)).toBe(true);
+      expect(result).toBe(true);
+    });
 
-      // CLI client
-      mockReq.headers = { authorization: 'Bearer cli-token' };
-      expect(middleware(mockReq as IncomingMessage, mockRes as ServerResponse)).toBe(true);
+    it('should allow token without exp (no expiration)', () => {
+      const token = createJwt({ sub: 'service-account' }, SECRET);
+      mockReq.headers = { authorization: `Bearer ${token}` };
+      const middleware = createAuthMiddleware({ method: 'bearer', secret: SECRET });
 
-      // Invalid client
-      mockReq.headers = { authorization: 'Bearer unknown-token' };
-      expect(middleware(mockReq as IncomingMessage, mockRes as ServerResponse)).toBe(false);
+      const result = middleware(mockReq as IncomingMessage, mockRes as ServerResponse);
+
+      expect(result).toBe(true);
     });
   });
 });

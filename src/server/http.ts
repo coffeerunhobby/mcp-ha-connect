@@ -8,8 +8,9 @@ import type { EnvironmentConfig } from '../config.js';
 import type { HaClient } from '../haClient/index.js';
 import { EventSubscriber } from '../haClient/events.js';
 import type { LocalAIClient } from '../localAI/index.js';
+import type { OmadaClient } from '../omadaClient/index.js';
 import { logger } from '../utils/logger.js';
-import { handleStreamRequest, type StreamTransportState } from './stream.js';
+import { handleStreamRequest, type StreamTransportState, type StreamTransportOptions } from './stream.js';
 import { handleEventSubscription, getClientCount } from './eventSubscription.js';
 import { RateLimiter } from './rateLimiter.js';
 import { createAuthMiddleware } from './auth.js';
@@ -407,7 +408,7 @@ function handleCors(req: IncomingMessage, res: ServerResponse, config: Environme
   if (allowedOrigins.length === 0 || (origin && allowedOrigins.includes(origin))) {
     res.setHeader('Access-Control-Allow-Origin', origin ?? '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Mcp-Session-Id');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id');
     res.setHeader('Access-Control-Max-Age', '86400');
   }
 }
@@ -415,7 +416,15 @@ function handleCors(req: IncomingMessage, res: ServerResponse, config: Environme
 /**
  * Start HTTP server
  */
-export async function startHttpServer(client: HaClient, config: EnvironmentConfig, aiClient?: LocalAIClient): Promise<void> {
+export interface HttpServerOptions {
+  haClient?: HaClient;
+  omadaClient?: OmadaClient;
+  config: EnvironmentConfig;
+  aiClient?: LocalAIClient;
+}
+
+export async function startHttpServer(options: HttpServerOptions): Promise<void> {
+  const { haClient: client, omadaClient, config, aiClient } = options;
   const port = config.httpPort ?? 3000;
   const bindAddr = config.httpBindAddr ?? '127.0.0.1';
   const mcpPath = config.httpPath ?? '/mcp';
@@ -434,13 +443,14 @@ export async function startHttpServer(client: HaClient, config: EnvironmentConfi
   // Initialize auth middleware
   const authMiddleware = createAuthMiddleware({
     method: config.authMethod,
-    tokens: config.authToken,
+    secret: config.authSecret,
+    permissions: config.permissions,
     skipPaths: [healthPath, '/openapi.json'],
   });
 
-  // Initialize event subscriber if SSE events are enabled
+  // Initialize event subscriber if SSE events are enabled and HA is configured
   let eventSubscriber: EventSubscriber | null = null;
-  if (config.sseEventsEnabled) {
+  if (config.sseEventsEnabled && config.baseUrl && config.token) {
     eventSubscriber = new EventSubscriber({
       baseUrl: config.baseUrl,
       token: config.token,
@@ -532,8 +542,12 @@ export async function startHttpServer(client: HaClient, config: EnvironmentConfi
         return;
       }
 
-      // REST API endpoints for Open WebUI compatibility
+      // REST API endpoints for Open WebUI compatibility (requires HA client)
       if (url.startsWith('/api/')) {
+        if (!client) {
+          sendJson(res, 503, { error: 'Home Assistant not configured' });
+          return;
+        }
         await handleRestApi(req, res, url, client);
         return;
       }
@@ -544,7 +558,8 @@ export async function startHttpServer(client: HaClient, config: EnvironmentConfi
         const existingState = sessionId ? sessions.get(sessionId) : undefined;
 
         const body = req.method !== 'GET' ? await parseBody(req) : undefined;
-        const state = await handleStreamRequest(client, config, req, res, body, existingState, aiClient);
+        const streamOptions: StreamTransportOptions = { haClient: client, omadaClient, aiClient, config };
+        const state = await handleStreamRequest(streamOptions, req, res, body, existingState);
 
         if (state && config.stateful && sessionId) {
           sessions.set(sessionId, state);

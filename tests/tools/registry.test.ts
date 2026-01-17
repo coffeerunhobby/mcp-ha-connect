@@ -6,34 +6,36 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerAllTools } from '../../src/tools/index.js';
-import { HaClient } from '../../src/haClient/index.js';
-import type { EnvironmentConfig } from '../../src/config.js';
+
+// Mock HaClient
+const mockClient = {
+  getStates: vi.fn().mockResolvedValue([]),
+  getState: vi.fn().mockResolvedValue({}),
+  callService: vi.fn().mockResolvedValue({ context: {} }),
+  getEntitiesByDomain: vi.fn().mockResolvedValue([]),
+  searchEntities: vi.fn().mockResolvedValue([]),
+  getAllSensors: vi.fn().mockResolvedValue([]),
+  getDomainSummary: vi.fn().mockResolvedValue({}),
+  getHistory: vi.fn().mockResolvedValue([]),
+  getVersion: vi.fn().mockResolvedValue({ version: '2024.1.0' }),
+  getLogbook: vi.fn().mockResolvedValue([]),
+  listAutomations: vi.fn().mockResolvedValue([]),
+  triggerAutomation: vi.fn().mockResolvedValue({}),
+  createAutomation: vi.fn().mockResolvedValue({ id: 'test-id' }),
+  deleteAutomation: vi.fn().mockResolvedValue({}),
+  getAutomationTrace: vi.fn().mockResolvedValue({}),
+  checkUpdates: vi.fn().mockResolvedValue({ available: [] }),
+  devices: {
+    triggerAutomation: vi.fn().mockResolvedValue({}),
+    reloadAutomations: vi.fn().mockResolvedValue({}),
+  },
+};
 
 describe('Tool Registration', () => {
   let server: McpServer;
-  let mockClient: HaClient;
-  let mockConfig: EnvironmentConfig;
 
   beforeEach(() => {
-    mockConfig = {
-      baseUrl: 'http://homeassistant.10.0.0.19.nip.io:8123',
-      token: 'test-token',
-      strictSsl: false,
-      timeout: 30000,
-      aiProvider: 'ollama',
-      aiUrl: 'http://ollama.10.0.0.17.nip.io:11434',
-      aiModel: 'qwen3:14b',
-      aiTimeout: 60000,
-      logLevel: 'error', // Suppress logs during tests
-      logFormat: 'plain',
-      useHttp: false,
-      stateful: false,
-      
-      httpEnableHealthcheck: true,
-      httpAllowCors: true,
-    };
-
-    mockClient = new HaClient(mockConfig);
+    vi.clearAllMocks();
 
     server = new McpServer({
       name: 'test-server',
@@ -43,18 +45,22 @@ describe('Tool Registration', () => {
 
   describe('registerAllTools', () => {
     it('should register all tools without errors', () => {
-      expect(() => registerAllTools(server, mockClient)).not.toThrow();
+      expect(() => registerAllTools({ server, haClient: mockClient as any })).not.toThrow();
     });
 
     it('should register tools on McpServer', () => {
-      registerAllTools(server, mockClient);
+      registerAllTools({ server, haClient: mockClient as any });
 
       // The server should have handlers registered
       expect(server).toBeDefined();
     });
 
     it('should work with optional aiClient', () => {
-      expect(() => registerAllTools(server, mockClient, undefined)).not.toThrow();
+      expect(() => registerAllTools({ server, haClient: mockClient as any, aiClient: undefined })).not.toThrow();
+    });
+
+    it('should work without haClient (Omada-only mode)', () => {
+      expect(() => registerAllTools({ server })).not.toThrow();
     });
   });
 

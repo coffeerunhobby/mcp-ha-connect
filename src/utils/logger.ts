@@ -1,99 +1,106 @@
-import pino from 'pino';
+/**
+ * Minimal zero-dependency logger
+ * Designed for constrained environments (MIPS, embedded, low RAM)
+ */
 
 type LogFields = Record<string, unknown>;
-
 type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent';
-
 type LogFormat = 'plain' | 'json' | 'gcp-json';
 
-const levelToSeverity: Record<string, string> = {
-  trace: 'DEBUG',
+const LEVELS: Record<LogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+  silent: 4,
+};
+
+const SEVERITY: Record<LogLevel, string> = {
   debug: 'DEBUG',
   info: 'INFO',
   warn: 'WARNING',
   error: 'ERROR',
-  fatal: 'CRITICAL',
+  silent: 'SILENT',
 };
 
-let instance: pino.Logger;
-
-function createLogger(level: LogLevel = 'info', format: LogFormat = 'plain', useStderr = false): pino.Logger {
-  const baseConfig: pino.LoggerOptions = {
-    level,
-    base: undefined,
-    messageKey: 'message',
-    timestamp: pino.stdTimeFunctions.isoTime,
-  };
-
-  // Configure formatters based on format
-  if (format === 'gcp-json') {
-    baseConfig.formatters = {
-      level(label) {
-        return { severity: levelToSeverity[label] ?? label.toUpperCase() };
-      },
-    };
-  } else if (format === 'plain') {
-    baseConfig.formatters = {
-      level(label) {
-        return { level: label.toUpperCase() };
-      },
-    };
-  }
-  // For 'json' format, use default pino JSON output (no special formatters)
-
-  // When running in stdio mode, always log to stderr to avoid interfering with MCP protocol on stdout
-  return useStderr ? pino(baseConfig, process.stderr) : pino(baseConfig);
-}
-
-// Initialize with default, will be reconfigured by calling initLogger
-// Default to stderr to avoid interfering with MCP stdio protocol
-const defaultLevel = (process.env.MCP_SERVER_LOG_LEVEL as LogLevel | undefined) ?? 'info';
-instance = createLogger(defaultLevel, 'plain', true);
+let currentLevel: LogLevel = 'info';
+let currentFormat: LogFormat = 'plain';
+let output: NodeJS.WriteStream = process.stderr;
 
 /**
  * Initialize the logger with a specific log level and format.
- * This should be called once during application startup.
- * @param level - The minimum log level to output
- * @param format - The output format (plain, json, or gcp-json)
- * @param useStderr - If true, logs to stderr instead of stdout (required for stdio transport)
  */
 export function initLogger(level: LogLevel, format: LogFormat = 'plain', useStderr = false): void {
-  instance = createLogger(level, format, useStderr);
+  currentLevel = level;
+  currentFormat = format;
+  output = useStderr ? process.stderr : process.stdout;
 }
 
 /**
  * Set the logger level dynamically
- * @param level - The new log level
  */
 export function setLevel(level: LogLevel): void {
-  instance.level = level;
+  currentLevel = level;
 }
 
-function normalizeMeta(meta?: LogFields): LogFields | undefined {
-  if (!meta) {
-    return undefined;
+function formatPlain(_level: LogLevel, message: string, meta?: LogFields): string {
+  let metaStr = '';
+  if (meta && Object.keys(meta).length > 0) {
+    const parts = Object.entries(meta).map(([k, v]) => {
+      if (v === undefined || v === null) return `${k}=null`;
+      if (typeof v === 'object') return `${k}=${JSON.stringify(v)}`;
+      return `${k}=${v}`;
+    });
+    metaStr = ` (${parts.join(', ')})`;
   }
+  return `${message}${metaStr}\n`;
+}
 
-  const normalized: LogFields = {};
-  for (const [key, value] of Object.entries(meta)) {
-    if (value instanceof Error) {
-      normalized[key] = { message: value.message, stack: value.stack };
-      continue;
-    }
+function formatJson(level: LogLevel, message: string, meta?: LogFields): string {
+  const obj: Record<string, unknown> = {
+    level: level.toUpperCase(),
+    time: new Date().toISOString(),
+    message,
+    ...meta,
+  };
+  return JSON.stringify(obj) + '\n';
+}
 
-    normalized[key] = value;
-  }
-
-  return Object.keys(normalized).length > 0 ? normalized : undefined;
+function formatGcp(level: LogLevel, message: string, meta?: LogFields): string {
+  const obj: Record<string, unknown> = {
+    severity: SEVERITY[level],
+    time: new Date().toISOString(),
+    message,
+    ...meta,
+  };
+  return JSON.stringify(obj) + '\n';
 }
 
 function write(level: LogLevel, message: string, meta?: LogFields): void {
-  const fields = normalizeMeta(meta);
-  if (fields) {
-    instance[level](fields, message);
-  } else {
-    instance[level](message);
+  if (LEVELS[level] < LEVELS[currentLevel]) return;
+
+  // Normalize errors in meta
+  if (meta) {
+    for (const [key, value] of Object.entries(meta)) {
+      if (value instanceof Error) {
+        meta[key] = { message: value.message, stack: value.stack };
+      }
+    }
   }
+
+  let line: string;
+  switch (currentFormat) {
+    case 'json':
+      line = formatJson(level, message, meta);
+      break;
+    case 'gcp-json':
+      line = formatGcp(level, message, meta);
+      break;
+    default:
+      line = formatPlain(level, message, meta);
+  }
+
+  output.write(line);
 }
 
 export const logger = {
@@ -111,5 +118,4 @@ export const logger = {
   },
 };
 
-// Export types
 export type { LogLevel, LogFormat, LogFields };

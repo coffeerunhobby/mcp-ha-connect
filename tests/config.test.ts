@@ -66,20 +66,24 @@ describe('loadConfig', () => {
     expect(config.baseUrl).toBe('http://homeassistant.10.0.0.19.nip.io:8123');
   });
 
-  it('should throw error for missing HA_URL', () => {
+  it('should allow missing HA_URL (Omada-only mode)', () => {
     const env = {
       HA_TOKEN: 'test-token-12345',
     };
 
-    expect(() => loadConfig(env)).toThrow('Invalid environment configuration');
+    const config = loadConfig(env);
+    expect(config.baseUrl).toBeUndefined();
+    expect(config.token).toBe('test-token-12345');
   });
 
-  it('should throw error for missing HA_TOKEN', () => {
+  it('should allow missing HA_TOKEN (Omada-only mode)', () => {
     const env = {
       HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
     };
 
-    expect(() => loadConfig(env)).toThrow('Invalid environment configuration');
+    const config = loadConfig(env);
+    expect(config.baseUrl).toBe('http://homeassistant.10.0.0.19.nip.io:8123');
+    expect(config.token).toBeUndefined();
   });
 
   it('should throw error for invalid HA_URL', () => {

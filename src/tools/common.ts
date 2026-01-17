@@ -7,9 +7,14 @@ import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/proto
 import type { CallToolResult, ServerNotification, ServerRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { logger } from '../utils/logger.js';
+import { Permission, hasPermission, getPermissionNames } from '../permissions/index.js';
+
+// Re-export Permission for tool files
+export { Permission };
 
 /**
  * Extra context passed to tool handlers
+ * Permissions are extracted from authInfo.extra.permissions (MCP SDK standard)
  */
 export type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
@@ -36,15 +41,36 @@ export function safeSerialize(value: unknown): string {
 }
 
 /**
- * Wrap a tool handler with logging and error handling
+ * Wrap a tool handler with logging, error handling, and permission checking
  * Includes session ID and args in logs for debugging
+ *
+ * @param name - Tool name for logging
+ * @param handler - The actual tool handler function
+ * @param requiredPermission - Optional permission mask required to use this tool
  */
 export function wrapToolHandler<T>(
   name: string,
-  handler: (args: T, extra: ToolExtra) => Promise<CallToolResult>
+  handler: (args: T, extra: ToolExtra) => Promise<CallToolResult>,
+  requiredPermission?: number
 ): (args: T, extra: ToolExtra) => Promise<CallToolResult> {
   return async (args: T, extra: ToolExtra): Promise<CallToolResult> => {
     const sessionId = extra.sessionId ?? 'unknown-session';
+    // Extract permissions from MCP SDK authInfo.extra.permissions
+    const userPermissions = (extra.authInfo?.extra?.permissions as number | undefined) ?? 0xFF;
+
+    // Check permissions if required
+    if (requiredPermission !== undefined && !hasPermission(userPermissions, requiredPermission)) {
+      const required = getPermissionNames(requiredPermission);
+      const has = getPermissionNames(userPermissions);
+      logger.warn('Permission denied', { tool: name, sessionId, required, has });
+      return toToolResult({
+        error: 'Permission denied',
+        message: `Tool '${name}' requires permission: ${required.join(', ')}`,
+        required,
+        has,
+      }, true);
+    }
+
     logger.info('Tool invoked', { tool: name, sessionId, args: safeSerialize(args) });
 
     try {
@@ -259,4 +285,37 @@ export const getCalendarEventsSchema = z.object({
   start_date: z.string().optional().describe('Start date in ISO format (e.g., "2026-01-01"). Defaults to today.'),
   end_date: z.string().optional().describe('End date in ISO format (e.g., "2026-12-31"). Defaults to 30 days from start.'),
   days: z.number().optional().describe('Alternative: number of days from start_date (overrides end_date if provided)'),
+});
+
+// =============================================================================
+// Omada-specific schemas
+// =============================================================================
+
+// Site ID input schema (optional site selector)
+export const siteInputSchema = z.object({
+  siteId: z.string().min(1).optional().describe('Site ID (optional, uses default if not provided)'),
+});
+
+// Client ID schema (extends site input)
+export const clientIdSchema = siteInputSchema.extend({
+  clientId: z.string().min(1, 'clientId (MAC or client identifier) is required').describe('Client MAC address or identifier'),
+});
+
+// Device ID schema (extends site input)
+export const deviceIdSchema = siteInputSchema.extend({
+  deviceId: z.string().min(1, 'deviceId (MAC or device identifier) is required').describe('Device MAC address or identifier'),
+});
+
+// Stack ID schema (extends site input)
+export const stackIdSchema = siteInputSchema.extend({
+  stackId: z.string().min(1, 'stackId is required').describe('Switch stack identifier'),
+});
+
+// Custom request schema for advanced API calls
+export const customRequestSchema = z.object({
+  method: z.string().default('GET').describe('HTTP method'),
+  url: z.string().min(1, 'A controller API path is required').describe('API endpoint path'),
+  params: z.record(z.string(), z.unknown()).optional().describe('Query parameters'),
+  data: z.unknown().optional().describe('Request body data'),
+  siteId: z.string().min(1).optional().describe('Site ID'),
 });

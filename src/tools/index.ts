@@ -1,131 +1,62 @@
 /**
- * Tools index - registers all MCP tools
+ * Tools index - registers all MCP tools organized by domain
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HaClient } from '../haClient/index.js';
 import type { LocalAIClient } from '../localAI/index.js';
+import type { OmadaClient } from '../omadaClient/index.js';
 import { logger } from '../utils/logger.js';
 
-// State & Entity Tools
-import { registerGetStatesTool } from './getStates.js';
-import { registerGetStateTool } from './getState.js';
-import { registerGetEntitiesByDomainTool } from './getEntitiesByDomain.js';
-import { registerSearchEntitiesTool } from './searchEntities.js';
-import { registerGetAllSensorsTool } from './getAllSensors.js';
-import { registerListEntitiesTool } from './listEntities.js';
-import { registerGetDomainSummaryTool } from './getDomainSummary.js';
-import { registerGetHistoryTool } from './getHistory.js';
+// Tool registration functions by domain
+import { registerHomeAssistantTools } from './homeassistant/index.js';
+import { registerOmadaTools } from './omada/index.js';
+import { registerAITools } from './ai/index.js';
 
-// Service & Control Tools
-import { registerCallServiceTool } from './callService.js';
-import { registerEntityActionTool } from './entityAction.js';
+export interface RegisterToolsOptions {
+  server: McpServer;
+  haClient?: HaClient;
+  omadaClient?: OmadaClient;
+  aiClient?: LocalAIClient;
+}
 
-// Device Control Tools
-import { registerControlLightTool } from './controlLight.js';
-import { registerControlClimateTool } from './controlClimate.js';
-import { registerControlMediaPlayerTool } from './controlMediaPlayer.js';
-import { registerControlCoverTool } from './controlCover.js';
-import { registerControlFanTool } from './controlFan.js';
-import { registerActivateSceneTool, registerRunScriptTool } from './sceneAndScript.js';
-import { registerSendNotificationTool, registerListNotificationTargetsTool } from './sendNotification.js';
-
-// Automation Tools
-import { registerListAutomationsTool } from './listAutomations.js';
-import { registerTriggerAutomationTool } from './triggerAutomation.js';
-import {
-  registerEnableAutomationTool,
-  registerDisableAutomationTool,
-  registerToggleAutomationTool,
-  registerReloadAutomationsTool,
-} from './automationControls.js';
-import { registerCreateAutomationTool } from './createAutomation.js';
-import { registerDeleteAutomationTool } from './deleteAutomation.js';
-import { registerGetAutomationTraceTool } from './getAutomationTrace.js';
-
-// System Tools
-import { registerGetVersionTool } from './getVersion.js';
-import {
-  registerRestartHomeAssistantTool,
-  registerGetSystemLogTool,
-  registerCheckUpdatesTool,
-} from './systemTools.js';
-
-// AI Tools
-import { registerAnalyzeSensorsTool } from './analyzeSensors.js';
-
-// Calendar Tools
-import { registerListCalendarsTool, registerGetCalendarEventsTool } from './calendar.js';
-
-// Person Tools
-import { registerListPersonsTool } from './listPersons.js';
-
-export function registerAllTools(server: McpServer, client: HaClient, aiClient?: LocalAIClient): void {
+/**
+ * Register all available tools based on configured clients
+ */
+export function registerAllTools(options: RegisterToolsOptions): void {
+  const { server, haClient, omadaClient, aiClient } = options;
   logger.debug('Registering all tools');
-  let toolCount = 0;
 
-  // State & Entity Tools
-  registerGetStatesTool(server, client);
-  registerGetStateTool(server, client);
-  registerGetEntitiesByDomainTool(server, client);
-  registerSearchEntitiesTool(server, client);
-  registerGetAllSensorsTool(server, client);
-  registerListEntitiesTool(server, client);
-  registerGetDomainSummaryTool(server, client);
-  registerGetHistoryTool(server, client);
-  toolCount += 8;
+  let totalTools = 0;
 
-  // Service & Control Tools
-  registerCallServiceTool(server, client);
-  registerEntityActionTool(server, client);
-  toolCount += 2;
+  // Home Assistant tools (if client provided)
+  if (haClient) {
+    const haToolCount = registerHomeAssistantTools(server, haClient);
+    totalTools += haToolCount;
+  }
 
-  // Device Control Tools
-  registerControlLightTool(server, client);
-  registerControlClimateTool(server, client);
-  registerControlMediaPlayerTool(server, client);
-  registerControlCoverTool(server, client);
-  registerControlFanTool(server, client);
-  registerActivateSceneTool(server, client);
-  registerRunScriptTool(server, client);
-  registerSendNotificationTool(server, client);
-  registerListNotificationTargetsTool(server, client);
-  toolCount += 9;
+  // Omada tools (if client provided)
+  if (omadaClient) {
+    const omadaToolCount = registerOmadaTools(server, omadaClient);
+    totalTools += omadaToolCount;
+  }
 
-  // Automation Tools
-  registerListAutomationsTool(server, client);
-  registerTriggerAutomationTool(server, client);
-  registerEnableAutomationTool(server, client);
-  registerDisableAutomationTool(server, client);
-  registerToggleAutomationTool(server, client);
-  registerReloadAutomationsTool(server, client);
-  registerCreateAutomationTool(server, client);
-  registerDeleteAutomationTool(server, client);
-  registerGetAutomationTraceTool(server, client);
-  toolCount += 9;
+  // AI tools (always register, but may be disabled if no aiClient)
+  const aiToolCount = registerAITools(server, aiClient);
+  totalTools += aiToolCount;
 
-  // System Tools
-  registerGetVersionTool(server, client);
-  registerRestartHomeAssistantTool(server, client);
-  registerGetSystemLogTool(server, client);
-  registerCheckUpdatesTool(server, client);
-  toolCount += 4;
-
-  // AI Tools
-  registerAnalyzeSensorsTool(server, aiClient);
-  toolCount += 1;
-
-  // Calendar Tools
-  registerListCalendarsTool(server, client);
-  registerGetCalendarEventsTool(server, client);
-  toolCount += 2;
-
-  // Person Tools
-  registerListPersonsTool(server, client);
-  toolCount += 1;
-
-  logger.info('All tools registered successfully', { toolCount, aiEnabled: !!aiClient });
+  logger.info('All tools registered successfully', {
+    totalTools,
+    haEnabled: !!haClient,
+    omadaEnabled: !!omadaClient,
+    aiEnabled: !!aiClient,
+  });
 }
 
 // Re-export common utilities
-export { toToolResult, wrapToolHandler } from './common.js';
+export { toToolResult, wrapToolHandler, Permission } from './common.js';
+
+// Re-export domain-specific registration functions for selective use
+export { registerHomeAssistantTools } from './homeassistant/index.js';
+export { registerOmadaTools } from './omada/index.js';
+export { registerAITools } from './ai/index.js';

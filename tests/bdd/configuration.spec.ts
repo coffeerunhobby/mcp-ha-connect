@@ -89,7 +89,7 @@ describeFeature(feature, ({ Scenario }) => {
     });
   });
 
-  Scenario('Reject missing HA_URL', ({ Given, When, Then }) => {
+  Scenario('Allow missing HA_URL for Omada-only mode', ({ Given, When, Then }) => {
     Given('environment variables without HA_URL', () => {
       env = {
         HA_TOKEN: 'test-token',
@@ -105,13 +105,14 @@ describeFeature(feature, ({ Scenario }) => {
       }
     });
 
-    Then('it should throw an error about invalid configuration', () => {
-      expect(error).not.toBeNull();
-      expect(error?.message).toContain('Invalid environment configuration');
+    Then('it should load successfully with baseUrl undefined', () => {
+      expect(error).toBeNull();
+      expect(config?.baseUrl).toBeUndefined();
+      expect(config?.token).toBe('test-token');
     });
   });
 
-  Scenario('Reject missing HA_TOKEN', ({ Given, When, Then }) => {
+  Scenario('Allow missing HA_TOKEN for Omada-only mode', ({ Given, When, Then }) => {
     Given('environment variables without HA_TOKEN', () => {
       env = {
         HA_URL: 'http://homeassistant.local:8123',
@@ -127,9 +128,10 @@ describeFeature(feature, ({ Scenario }) => {
       }
     });
 
-    Then('it should throw an error about invalid configuration', () => {
-      expect(error).not.toBeNull();
-      expect(error?.message).toContain('Invalid environment configuration');
+    Then('it should load successfully with token undefined', () => {
+      expect(error).toBeNull();
+      expect(config?.baseUrl).toBe('http://homeassistant.local:8123');
+      expect(config?.token).toBeUndefined();
     });
   });
 

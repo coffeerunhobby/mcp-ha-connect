@@ -44,14 +44,17 @@ See [docs/QUICK_START.md](docs/QUICK_START.md) for Docker, HTTP server mode, n8n
 - Multiple transport modes (stdio, Streamable HTTP)
 - HTTP server with health checks
 - CORS support for browser-based clients
-- Structured logging with pino (plain, JSON, GCP-JSON formats)
+- Structured logging (plain, JSON, GCP-JSON formats)
 - Comprehensive configuration validation with Zod
 - Full type safety with TypeScript
 - Stateful and stateless session support
+- JWT authentication with role-based access control
 
-## Available Tools (37 Total)
+## Available Tools (60 Total)
 
-### State & Entity Tools
+### Home Assistant Tools (35)
+
+#### State & Entity Tools
 
 | Tool | Description |
 |------|-------------|
@@ -65,14 +68,14 @@ See [docs/QUICK_START.md](docs/QUICK_START.md) for Docker, HTTP server mode, n8n
 | `getHistory` | Get historical data for an entity |
 | `listPersons` | List all household members with location state (home/away) |
 
-### Service & Control Tools
+#### Service & Control Tools
 
 | Tool | Description |
 |------|-------------|
 | `callService` | Call any Home Assistant service |
 | `entityAction` | Simple turn_on/turn_off/toggle actions |
 
-### Device Control Tools
+#### Device Control Tools
 
 | Tool | Description |
 |------|-------------|
@@ -86,7 +89,7 @@ See [docs/QUICK_START.md](docs/QUICK_START.md) for Docker, HTTP server mode, n8n
 | `sendNotification` | Send notifications with full mobile app support (actions, priority, images) |
 | `listNotificationTargets` | Discover available mobile app notification targets |
 
-### Automation Tools
+#### Automation Tools
 
 | Tool | Description |
 |------|-------------|
@@ -100,7 +103,7 @@ See [docs/QUICK_START.md](docs/QUICK_START.md) for Docker, HTTP server mode, n8n
 | `deleteAutomation` | Delete an automation |
 | `getAutomationTrace` | Get automation execution history |
 
-### System Tools
+#### System Tools
 
 | Tool | Description |
 |------|-------------|
@@ -108,14 +111,75 @@ See [docs/QUICK_START.md](docs/QUICK_START.md) for Docker, HTTP server mode, n8n
 | `restartHomeAssistant` | Restart the Home Assistant server |
 | `getSystemLog` | Get system log entries from logbook |
 | `checkUpdates` | Check for available updates |
-| `analyzeSensors` | AI-powered sensor analysis using Ollama |
 
-### Calendar Tools
+#### Calendar Tools
 
 | Tool | Description |
 |------|-------------|
 | `listCalendars` | List all calendar entities |
 | `getCalendarEvents` | Get events from one or all calendars |
+
+### Omada Network Tools (24)
+
+#### Site Tools
+
+| Tool | Description |
+|------|-------------|
+| `omada_listSites` | List all sites configured on the Omada controller |
+
+#### Device Tools
+
+| Tool | Description |
+|------|-------------|
+| `omada_listDevices` | List all network devices (APs, switches, gateways) in a site |
+| `omada_getDevice` | Get detailed information about a specific network device |
+| `omada_searchDevices` | Search for devices globally across all sites |
+| `omada_getSwitchStackDetail` | Get detailed information about a switch stack |
+| `omada_listDevicesStats` | Get statistics for global adopted devices with filtering |
+
+#### Client Tools
+
+| Tool | Description |
+|------|-------------|
+| `omada_listClients` | List all connected clients (devices/users) in a site |
+| `omada_getClient` | Get detailed information about a specific connected client |
+| `omada_listMostActiveClients` | Get the most active clients sorted by total traffic |
+| `omada_listClientsActivity` | Get client activity statistics over time |
+| `omada_listClientsPastConnections` | Get historical client connection data |
+
+#### Rate Limit Tools
+
+| Tool | Description |
+|------|-------------|
+| `omada_getRateLimitProfiles` | Get available rate limit profiles for a site |
+| `omada_setClientRateLimit` | Set custom bandwidth limits for a client (download/upload in Kbps) |
+| `omada_setClientRateLimitProfile` | Apply a rate limit profile to a client |
+| `omada_disableClientRateLimit` | Remove bandwidth limits from a client |
+
+#### Security Tools
+
+| Tool | Description |
+|------|-------------|
+| `omada_getThreatList` | Get security threat management list |
+
+#### Network Configuration Tools
+
+| Tool | Description |
+|------|-------------|
+| `omada_getInternetInfo` | Get internet connection configuration for a site |
+| `omada_getPortForwardingStatus` | Get port forwarding rules (User or UPnP) |
+| `omada_getLanNetworkList` | Get LAN network configuration list |
+| `omada_getLanProfileList` | Get LAN profile configuration list |
+| `omada_getWlanGroupList` | Get WLAN group configuration list |
+| `omada_getSsidList` | Get SSID list for a WLAN group |
+| `omada_getSsidDetail` | Get detailed SSID configuration |
+| `omada_getFirewallSetting` | Get firewall configuration for a site |
+
+### AI Tools (1)
+
+| Tool | Description |
+|------|-------------|
+| `analyzeSensors` | Analyze sensor data using AI (Ollama) to detect issues and provide recommendations |
 
 ### MCP Resources
 
@@ -158,6 +222,7 @@ See [docs/QUICK_START.md](docs/QUICK_START.md) for Docker, HTTP server mode, n8n
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `HA_PLUGIN_ENABLED` | `true` | Enable Home Assistant plugin |
 | `HA_STRICT_SSL` | `true` | Validate SSL certificates |
 | `HA_TIMEOUT` | `30000` | API request timeout (ms) |
 
@@ -202,16 +267,85 @@ See [docs/QUICK_START.md](docs/QUICK_START.md) for Docker, HTTP server mode, n8n
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MCP_AUTH_METHOD` | `none` | Auth method: `none` or `bearer` |
-| `MCP_AUTH_TOKEN` | - | Bearer token(s), can be comma-separated for multiple clients |
+| `MCP_AUTH_SECRET` | - | JWT signing secret (min 32 chars, required for `bearer` method) |
+| `MCP_PERMISSIONS_CONFIG` | - | JSON config for user roles and permissions |
+
+#### JWT Authentication
+
+When `MCP_AUTH_METHOD=bearer`, clients must provide a JWT token in the Authorization header:
+
+```
+Authorization: Bearer <jwt-token>
+```
+
+Generate tokens with your `MCP_AUTH_SECRET` using HS256 algorithm. The JWT payload should include:
+- `sub` (subject): User identifier for permission lookup
+- `exp` (optional): Expiration timestamp
+
+#### Permission System
+
+The server uses role-based access control with binary permission masks:
+
+| Permission | Flag | Description |
+|------------|------|-------------|
+| `ADMIN` | 1 | System operations (restart, updates) |
+| `CONFIGURE` | 2 | Create/modify automations, scripts |
+| `CONTROL` | 4 | Control devices (lights, climate, etc.) |
+| `QUERY` | 8 | Read entity states, history, lists |
+| `NOTIFY` | 16 | Send notifications |
+| `AI` | 32 | Use AI analysis features |
+
+**Predefined Roles:**
+
+| Role | Permissions |
+|------|-------------|
+| `NONE` | No permissions |
+| `READONLY` | QUERY only |
+| `OPERATOR` | QUERY + CONTROL + NOTIFY |
+| `CONTRIBUTOR` | QUERY + CONTROL + NOTIFY + CONFIGURE |
+| `ADMIN` | All except AI |
+| `SUPERUSER` | All permissions |
+
+**Configuration Example:**
+
+```json
+{
+  "users": [
+    { "sub": "admin@example.com", "role": "admin" },
+    { "sub": "user@example.com", "role": "operator" },
+    { "sub": "viewer@example.com", "role": "readonly" }
+  ],
+  "defaultRole": "NONE"
+}
+```
+
+Set via environment variable (escape quotes for shell):
+```bash
+MCP_PERMISSIONS_CONFIG='{"users":[{"sub":"admin","role":"admin"}],"defaultRole":"NONE"}'
+```
 
 ### Optional - AI Provider
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `AI_PLUGIN_ENABLED` | `true` | Enable AI plugin |
 | `AI_PROVIDER` | `ollama` | AI provider: `ollama`, `openai`, or `none` |
-| `AI_URL` | `http://ollama.10.0.0.17.nip.io:11434` | AI server URL (Ollama) |
+| `AI_URL` | `http://localhost:11434` | AI server URL (Ollama) |
 | `AI_MODEL` | `llama2` | AI model name |
 | `AI_TIMEOUT` | `60000` | AI request timeout (ms) |
+
+### Optional - Omada Network Controller
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OMADA_PLUGIN_ENABLED` | `false` | Enable Omada plugin |
+| `OMADA_BASE_URL` | - | Omada controller URL (e.g., `https://192.168.0.1:8043`) |
+| `OMADA_CLIENT_ID` | - | OAuth2 client ID from Omada controller |
+| `OMADA_CLIENT_SECRET` | - | OAuth2 client secret from Omada controller |
+| `OMADA_OMADAC_ID` | - | Omada controller ID |
+| `OMADA_SITE_ID` | - | Default site ID for operations |
+| `OMADA_STRICT_SSL` | `true` | Validate SSL certificates |
+| `OMADA_TIMEOUT` | `30000` | API request timeout (ms) |
 
 ## Advanced Configuration Examples
 

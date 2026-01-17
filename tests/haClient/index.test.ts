@@ -3,7 +3,6 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EnvironmentConfig } from '../../src/config.js';
 
 // Create mock instances
 const statesInstance = {
@@ -132,22 +131,13 @@ vi.mock('../../src/haClient/request.js', () => ({
   },
 }));
 
-const baseConfig: EnvironmentConfig = {
+import type { HaClientOptions } from '../../src/haClient/index.js';
+
+const baseConfig: HaClientOptions = {
   baseUrl: 'http://homeassistant.10.0.0.19.nip.io:8123',
   token: 'test-token',
   strictSsl: false,
   timeout: 30000,
-  aiProvider: 'ollama',
-  aiUrl: 'http://ollama.10.0.0.17.nip.io:11434',
-  aiModel: 'phi4:14b',
-  aiTimeout: 60000,
-  logLevel: 'error',
-  logFormat: 'plain',
-  useHttp: false,
-  stateful: false,
-  
-  httpEnableHealthcheck: true,
-  httpAllowCors: true,
 };
 
 describe('HaClient aggregator', () => {

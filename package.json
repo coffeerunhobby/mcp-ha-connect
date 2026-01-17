@@ -1,6 +1,6 @@
 {
   "name": "@coffeerunhobby/mcp-ha-connect",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "description": "Smart home MCP server for Home Assistant plus Local AI integration",
   "type": "module",
   "main": "dist/index.js",
@@ -14,10 +14,11 @@
     "check": "npm run lint && tsc --noEmit",
     "start": "node --env-file=.env dist/index.js",
     "start:http": "node --env-file=.env dist/index.js",
-    "test": "vitest run --no-color",
-    "test:watch": "vitest --no-color",
-    "test:coverage": "vitest run --coverage --no-color",
-    "lint": "eslint src tests"
+    "test": "vitest run --no-color --exclude 'tests/integration/**'",
+    "test:watch": "vitest --no-color --exclude 'tests/integration/**'",
+    "test:coverage": "vitest run --coverage --no-color --exclude 'tests/integration/**'",
+    "lint": "eslint src tests",
+    "generate:jwt": "tsx --env-file=.env scripts/generate-jwt.ts"
   },
   "keywords": [
     "mcp",
@@ -29,7 +30,6 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
-    "pino": "^9.5.0",
     "ws": "^8.19.0",
     "zod": "^3.24.1"
   },
