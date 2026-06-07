@@ -30,9 +30,9 @@
   "author": "Coffee Run Hobby",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "undici": "^6.26.0",
-    "ws": "^8.19.0",
+    "ws": "^8.21.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
