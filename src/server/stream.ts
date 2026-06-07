@@ -28,6 +28,62 @@ export interface StreamTransportOptions {
   config: EnvironmentConfig;
 }
 
+export interface TransportSecurityOptions {
+  allowedOrigins: string[];
+  allowedHosts: string[];
+  enableDnsRebindingProtection: boolean;
+}
+
+/**
+ * Build the DNS-rebinding protection options for the Streamable HTTP transport
+ * (M3 / OWASP A05:2021).
+ *
+ * The SDK only validates the `Host` header when `allowedHosts` is non-empty and
+ * only validates `Origin` when `allowedOrigins` is non-empty, each by EXACT
+ * string match. Previously only `allowedOrigins` was passed, so the Host-header
+ * rebinding check never ran. Here we derive `allowedHosts` (host[:port] form,
+ * no scheme) from the configured origins plus the local/bind host so that:
+ *   - clients reaching the server by its configured origin host succeed,
+ *   - direct loopback/bind-address access still works,
+ *   - everything else is rejected with a 403.
+ *
+ * When origins are empty (operator configured a `*` wildcard) both lists are
+ * empty and the SDK skips validation — preserving the documented opt-out.
+ */
+export function buildTransportSecurityOptions(config: EnvironmentConfig): TransportSecurityOptions {
+  const origins = config.httpAllowedOrigins ?? [];
+
+  if (origins.length === 0) {
+    return { allowedOrigins: [], allowedHosts: [], enableDnsRebindingProtection: true };
+  }
+
+  const port = config.httpPort ?? 3000;
+  const bindAddr = config.httpBindAddr ?? '127.0.0.1';
+  const hosts = new Set<string>();
+
+  for (const origin of origins) {
+    try {
+      // Full origin URL (e.g. https://example.com) → host header form (example.com).
+      hosts.add(new URL(origin).host);
+    } catch {
+      // Bare hostname / IP already in host-header form.
+      hosts.add(origin);
+    }
+  }
+
+  // Always permit direct loopback / bind-address access on the listen port.
+  for (const host of [bindAddr, 'localhost', '127.0.0.1']) {
+    hosts.add(host);
+    hosts.add(`${host}:${port}`);
+  }
+
+  return {
+    allowedOrigins: origins,
+    allowedHosts: [...hosts],
+    enableDnsRebindingProtection: true,
+  };
+}
+
 /**
  * Creates a Streamable HTTP transport
  * This implements the MCP protocol version 2025-03-26
@@ -43,10 +99,13 @@ export function createStreamTransport(options: StreamTransportOptions): StreamTr
     logger.info('Starting Streamable HTTP transport in stateless mode; Mcp-Session-Id headers are optional');
   }
 
+  const security = buildTransportSecurityOptions(config);
+
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator,
-    allowedOrigins: config.httpAllowedOrigins,
-    enableDnsRebindingProtection: true,
+    allowedOrigins: security.allowedOrigins,
+    allowedHosts: security.allowedHosts,
+    enableDnsRebindingProtection: security.enableDnsRebindingProtection,
     onsessioninitialized: (sessionId: string) => {
       logger.info('Session initialized', { sessionId });
     },

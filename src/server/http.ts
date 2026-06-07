@@ -76,6 +76,18 @@ function parseBody(req: IncomingMessage): Promise<unknown> {
 }
 
 /**
+ * Apply baseline security response headers (L4 / OWASP A05:2021).
+ *
+ * Cheap, static defenses applied to every response: block MIME sniffing,
+ * forbid framing (clickjacking), and avoid leaking full URLs in the Referer.
+ */
+export function applySecurityHeaders(res: ServerResponse): void {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+}
+
+/**
  * Send JSON response with proper Content-Length header
  */
 function sendJson(res: ServerResponse, statusCode: number, data: unknown): void {
@@ -541,6 +553,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   const server = createHttpServer(async (req: IncomingMessage, originalRes: ServerResponse) => {
     // Wrap response to add Server-Timing header
     const { res } = wrapResponseWithTiming(originalRes);
+
+    // L4: baseline security headers on every response.
+    applySecurityHeaders(res);
 
     const url = req.url ?? '/';
     const urlPath = url.split('?')[0];

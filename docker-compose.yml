@@ -10,8 +10,11 @@ services:
     env_file:
       - .env
     environment:
+      # Bind all interfaces inside the container so Docker's port map works.
       - MCP_HTTP_BIND_ADDR=0.0.0.0
-      - MCP_HTTP_ALLOWED_ORIGINS=*
+      # M1: do NOT hard-code a wildcard origin here. Set MCP_HTTP_ALLOWED_ORIGINS
+      # in .env to the exact public origin(s) — e.g. your Cloudflare domain in
+      # both bare-host and https:// form — so DNS-rebinding/CORS protection works.
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
       interval: 30s
