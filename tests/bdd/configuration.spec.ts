@@ -211,6 +211,9 @@ describeFeature(feature, ({ Scenario }) => {
         HA_URL: 'http://homeassistant.local:8123',
         HA_TOKEN: 'test-token',
         MCP_HTTP_BIND_ADDR: '192.168.1.100',
+        // H5: a non-loopback bind requires authentication.
+        MCP_AUTH_METHOD: 'bearer',
+        MCP_AUTH_SECRET: 'test-secret-key-32chars-minimum!',
       };
     });
 

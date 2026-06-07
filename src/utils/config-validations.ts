@@ -13,6 +13,21 @@ export function isValidBindAddress(addr: string): boolean {
 }
 
 /**
+ * Returns true if the address is a loopback address (localhost-only).
+ *
+ * Used to enforce that an unauthenticated server (MCP_AUTH_METHOD=none) may only
+ * be bound to a loopback interface — never to `0.0.0.0`/`::` or a LAN address.
+ */
+export function isLoopbackAddress(addr: string): boolean {
+  if (!addr) return false;
+  const a = addr.toLowerCase();
+  if (a === 'localhost' || a === '::1') return true;
+  // IPv4 loopback is the whole 127.0.0.0/8 block.
+  if (isIPv4(a) && a.startsWith('127.')) return true;
+  return false;
+}
+
+/**
  * Validates if a string is a valid hostname
  * Allows alphanumeric characters, hyphens, and dots
  * Must not start or end with hyphen or dot

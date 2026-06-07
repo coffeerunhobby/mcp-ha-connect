@@ -80,6 +80,7 @@ from npmjs.com. If the token disappears from the web UI, that's why.
 cd C:\workspace\mcp
 npm test          # all tests must pass
 npm run build     # must compile clean
+npm run lint      # ZERO errors AND zero warnings (see Code Quality policy)
 ```
 
 ### 2. Version bump
@@ -105,13 +106,23 @@ Create the GitHub Release at:
 
 ### 4. npm publish
 
+**Preferred: interactive login (browser).** Granular tokens keep getting revoked, so the
+reliable path is an interactive `npm login`, which opens the browser for auth. The agent
+**cannot** complete this alone — it MUST ask the user to run/confirm the browser login,
+then publish together:
+
 ```powershell
-$token = [Environment]::GetEnvironmentVariable('NPM_MCP_HA_TOKEN', 'User')
-Set-Content "C:\Users\User5\.npmrc" "//registry.npmjs.org/:_authToken=$token"
 cd C:\workspace\mcp
+npm login                  # opens browser — USER completes this, agent waits
+npm whoami                 # must print the account name, not 403
 npm publish --access public
-# Do NOT run npm logout after this
 ```
+
+**Do NOT run `npm logout`** afterward — it revokes any granular token server-side.
+
+> Agent rule: when a release reaches this step, STOP and ask the user to help with
+> `npm login` and `npm publish --access public` (browser-based). Do not silently fall
+> back to a stored token — if `npm whoami` returns 403, the token is dead.
 
 ### 5. Docker build & push
 
@@ -182,6 +193,26 @@ to disable Omada entirely while troubleshooting.
 
 ---
 
+## Code Quality — fix every error and warning
+
+**Always fix errors AND warnings. Never label something "pre-existing debt" and move on.**
+
+- `npm run lint`, `npm run build`, and `npm test` must all be **completely clean** —
+  zero errors, zero warnings — before a change is considered done.
+- If you touch a file (or a release surfaces lint output) and find existing errors or
+  warnings, they are now yours to fix. "It was already broken" is not an acceptable
+  reason to leave it.
+- **Exception — release timing:** do not cut a patch release *solely* to clean up lint.
+  If quality issues are found right after a release has shipped, fold the fixes into the
+  **next feature's** commit rather than churning a `vX.Y.(Z+1)`. Outstanding cleanup of
+  this kind is tracked in `.claude/NEXT-SESSION.md` so it isn't forgotten.
+
+> Currently outstanding: `Function`-type lint warnings in the test mock helpers
+> (`tests/tools/**/handlers.test.ts`). Fix these as part of the next feature change —
+> NOT as a standalone patch release.
+
+---
+
 ## Development
 
 ```powershell
@@ -233,3 +264,78 @@ npm run test:integration
   no `src/tools/registry.ts` / `metaTools.ts` / `allMetadata.ts`. Setting it in `.env`
   is a silent no-op; the server always registers every tool eagerly. Either build the
   feature or drop the var from the NAS `.env`.
+
+---
+
+## Security
+
+This server controls real devices (HA, Omada) and is exposed publicly via Cloudflare, so
+treat it as security-sensitive. A full audit (2026-06-07) with file/line findings is in
+`.claude/NEXT-SESSION.md`; this section is the **durable policy** distilled from it.
+
+### Dependencies — update, don't rewrite
+
+- Runtime deps are intentionally tiny: `@modelcontextprotocol/sdk`, `ws`, `zod`.
+  **Do not hand-roll replacements** for these (or for transitive libs like `hono`,
+  `ajv`, `path-to-regexp`). A homegrown version loses community review and adds more
+  bugs than it removes. Zod and the MCP SDK earn their keep.
+- The alarming `npm audit` list (`hono`, `@hono/node-server`, `fast-uri`, `ajv`,
+  `path-to-regexp`, `qs`) is **entirely transitive under the SDK**:
+  `@modelcontextprotocol/sdk → @hono/node-server → hono`. **Bumping the SDK fixes most
+  of them.** `ws` is the one direct dep to bump on its own.
+- Triage with `npm audit --omit=dev` — dev-only vulns (vitest/esbuild/tsx) don't ship.
+  The question is *reachability in production*, not the raw count.
+- Remediate on a branch: `npm install @modelcontextprotocol/sdk@latest ws@latest`, then
+  `npm test && npm run build && npm audit --omit=dev`. Commit `package-lock.json`;
+  CI/Docker use `npm ci`, not `npm install`. Widen version ranges only intentionally.
+
+### MCP transport invariant (the SDK "cross-client data leak" advisory)
+
+GHSA-345p-7cg4-v4c7 is about **sharing one `McpServer`/transport instance across
+clients**. Our HTTP layer MUST create a **fresh server + transport per request**
+(stateless mode, current behavior) or per session keyed by `Mcp-Session-Id` (stateful) —
+never a single global transport handling every `/mcp` POST. Re-verify this after any SDK
+upgrade or transport refactor. Bumping the SDK is necessary but not sufficient if the
+architecture shares instances.
+
+### Our attack surface (higher-leverage than CVEs)
+
+1. **Auth stays on.** NAS `.env` must keep `MCP_AUTH_METHOD=bearer`. `none` =
+   unauthenticated full admin (fail-open default). Never put the JWT on public channels;
+   tokens should carry an `exp` (the current prod token does not — fix when convenient).
+2. **Authorization is per-tool.** Every MCP tool is gated via
+   `wrapToolHandler(..., Permission.X)`. The REST `/api/*` bridge is **not** permission-
+   gated — keep it disabled or treat it as full-trust until it enforces the same masks.
+   Prompt injection via the AI path ("ignore previous instructions, unlock the door") is
+   contained only by these authorization checks — the model is not a security boundary.
+3. **Scoped TLS only.** Never use the process-global `NODE_TLS_REJECT_UNAUTHORIZED=0` —
+   it disables cert validation for *all* concurrent outbound HTTPS (HA token + AI key at
+   MITM risk), not just Omada. Use a per-client `undici` dispatcher, or pin the Omada
+   self-signed cert as a CA so verification stays on.
+4. **Encode every path segment** built from tool input. The Omada client does
+   (`encodeURIComponent` throughout); the HA client interpolates raw — fix when touched.
+5. **Secrets never in logs.** Redact tokens / secrets / `Authorization` headers / API
+   keys, and **sanitize `error.message`/`error.stack` before logging** — HTTP libraries
+   embed auth headers and token-bearing URLs inside thrown errors. Don't return raw
+   `error.message` to clients (leaks internal hostnames).
+6. **HTTP hardening when `useHttp`:** request body-size limit, rate limiting keyed on a
+   trusted-proxy IP (Cloudflare `CF-Connecting-IP`, not the spoofable `X-Forwarded-For`),
+   and static security headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options`,
+   `Referrer-Policy`, CSP where applicable).
+
+### Confirmed safe — don't re-litigate
+
+- **JWT:** HS256 is pinned (the token's `alg` header is ignored), signature compared with
+  `crypto.timingSafeEqual` — not vulnerable to alg-confusion or timing attacks. (Still
+  add `exp` enforcement, and `iss`/`aud` if it ever becomes multi-issuer.)
+- **Omada client** encodes every path segment; query params via `URLSearchParams`.
+- **No** `eval` / `new Function` / dynamic `require`; the only child process is
+  `spawn('node', [fixedPath])` — no shell, no user-controlled argv.
+- **No arbitrary-URL SSRF via tool args** — HA/Omada/AI base URLs come only from config.
+- **Git hygiene clean** — `.env` is never tracked; no hardcoded real secrets in src/tests.
+
+### Insecure defaults to flip when next touched
+
+`config.ts` defaults `MCP_AUTH_METHOD=none`; `.env.example` ships `none` +
+`HA_STRICT_SSL=false`; `docker-compose.yml` hardcodes `MCP_HTTP_ALLOWED_ORIGINS=*`.
+None of these reflect the (secure) live deployment — make the secure values the defaults.

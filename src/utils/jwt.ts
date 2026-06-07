@@ -9,6 +9,9 @@ export interface JwtPayload {
   sub?: string;
   exp?: number;
   iat?: number;
+  nbf?: number;
+  iss?: string;
+  aud?: string | string[];
   [key: string]: unknown;
 }
 
@@ -16,6 +19,18 @@ export interface JwtResult {
   valid: boolean;
   payload?: JwtPayload;
   error?: string;
+}
+
+/** Optional claim-validation policy for verifyJwt. */
+export interface JwtVerifyOptions {
+  /** Reject tokens that have no `exp` claim (H3). Default: false (backward-compatible). */
+  requireExp?: boolean;
+  /** Require `iss` to equal this value when set (L6). */
+  issuer?: string;
+  /** Require `aud` to include this value when set (L6). */
+  audience?: string;
+  /** Allowable clock skew in seconds for exp/nbf comparisons (L6). Default: 0. */
+  clockSkewSec?: number;
 }
 
 function b64decode(str: string): string {
@@ -27,7 +42,7 @@ function b64encode(data: Buffer): string {
   return data.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-export function verifyJwt(token: string, secret: string): JwtResult {
+export function verifyJwt(token: string, secret: string, options: JwtVerifyOptions = {}): JwtResult {
   const parts = token.split('.');
   if (parts.length !== 3) {
     return { valid: false, error: 'bad format' };
@@ -52,9 +67,37 @@ export function verifyJwt(token: string, secret: string): JwtResult {
     return { valid: false, error: 'bad payload' };
   }
 
-  // Check expiration
-  if (payload.exp && payload.exp < Date.now() / 1000) {
-    return { valid: false, error: 'expired' };
+  const now = Date.now() / 1000;
+  const skew = options.clockSkewSec ?? 0;
+
+  // Expiration (H3): enforce when present; optionally require it.
+  if (payload.exp !== undefined) {
+    if (typeof payload.exp !== 'number' || payload.exp < now - skew) {
+      return { valid: false, error: 'expired' };
+    }
+  } else if (options.requireExp) {
+    return { valid: false, error: 'missing exp' };
+  }
+
+  // Not-before (L6)
+  if (payload.nbf !== undefined) {
+    if (typeof payload.nbf !== 'number' || payload.nbf > now + skew) {
+      return { valid: false, error: 'not yet valid' };
+    }
+  }
+
+  // Issuer (L6): only checked when an expected issuer is configured.
+  if (options.issuer !== undefined && payload.iss !== options.issuer) {
+    return { valid: false, error: 'bad issuer' };
+  }
+
+  // Audience (L6): only checked when an expected audience is configured.
+  if (options.audience !== undefined) {
+    const aud = payload.aud;
+    const ok = Array.isArray(aud) ? aud.includes(options.audience) : aud === options.audience;
+    if (!ok) {
+      return { valid: false, error: 'bad audience' };
+    }
   }
 
   return { valid: true, payload };
