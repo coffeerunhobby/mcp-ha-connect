@@ -4,8 +4,12 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import type { EventSubscriber, HaEvent } from '../haClient/events.js';
 import { logger } from '../utils/logger.js';
+import { sanitizeError } from '../utils/sanitizeError.js';
+import { Permission, hasPermission } from '../permissions/index.js';
+import type { AuthenticatedRequest } from './auth.js';
 
 export interface SSEClient {
   id: string;
@@ -21,6 +25,17 @@ export interface SSEClient {
 
 // Store active SSE clients
 const clients = new Map<string, SSEClient>();
+
+/**
+ * Generate an unguessable SSE client ID (L5).
+ *
+ * Uses a CSPRNG (randomUUID) rather than Math.random()/Date.now(), so a client
+ * ID cannot be predicted or enumerated by an observer who knows roughly when a
+ * connection was opened.
+ */
+export function generateClientId(): string {
+  return randomUUID();
+}
 
 /**
  * Parse query parameters from URL
@@ -64,7 +79,17 @@ export async function handleEventSubscription(
   res: ServerResponse,
   eventSubscriber: EventSubscriber
 ): Promise<void> {
-  const clientId = `sse_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  // L2: the SSE stream reads entity state — require QUERY, like every other read.
+  // Auth middleware has already populated req.auth; fail closed if the mask is absent.
+  const userPermissions = ((req as AuthenticatedRequest).auth?.extra?.permissions as number | undefined) ?? 0;
+  if (!hasPermission(userPermissions, Permission.QUERY)) {
+    logger.warn('SSE subscription denied: missing QUERY permission');
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Forbidden', message: 'SSE event subscription requires QUERY permission' }));
+    return;
+  }
+
+  const clientId = generateClientId();
   const params = parseQueryParams(req.url ?? '');
 
   // Parse filter parameters
@@ -72,14 +97,12 @@ export async function handleEventSubscription(
   const entityId = params.get('entity_id') ?? undefined;
   const eventTypesParam = params.get('event_types');
   const eventTypes = eventTypesParam ? eventTypesParam.split(',').map(t => t.trim()) : undefined;
-  const token = params.get('token');
 
   logger.info('New SSE subscription request', {
     clientId,
     domain,
     entityId,
     eventTypes,
-    hasToken: !!token,
   });
 
   // Set SSE headers
@@ -119,9 +142,10 @@ export async function handleEventSubscription(
       await eventSubscriber.connect();
     } catch (error) {
       logger.error('Failed to connect event subscriber', { error });
+      // M6: log detail above; the SSE client gets a generic message only.
       sendSSEEvent(res, 'error', {
         error: 'Failed to connect to Home Assistant',
-        message: error instanceof Error ? error.message : String(error),
+        message: sanitizeError(error),
       });
       res.end();
       clients.delete(clientId);
@@ -191,9 +215,10 @@ export async function handleEventSubscription(
     });
   } catch (error) {
     logger.error('Failed to subscribe to events', { error, clientId });
+    // M6: log detail above; the SSE client gets a generic message only.
     sendSSEEvent(res, 'error', {
       error: 'Failed to subscribe to events',
-      message: error instanceof Error ? error.message : String(error),
+      message: sanitizeError(error),
     });
   }
 

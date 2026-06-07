@@ -11,9 +11,11 @@ import type { LocalAIClient } from '../localAI/index.js';
 import type { OmadaClient } from '../omadaClient/index.js';
 import { logger } from '../utils/logger.js';
 import { handleStreamRequest, type StreamTransportState, type StreamTransportOptions } from './stream.js';
-import { handleEventSubscription, getClientCount } from './eventSubscription.js';
+import { handleEventSubscription } from './eventSubscription.js';
 import { RateLimiter } from './rateLimiter.js';
-import { createAuthMiddleware } from './auth.js';
+import { createAuthMiddleware, type AuthenticatedRequest } from './auth.js';
+import { Permission, hasPermission, getPermissionNames } from '../permissions/index.js';
+import { sanitizeError } from '../utils/sanitizeError.js';
 import { VERSION } from '../version.js';
 
 // Session storage for stateful mode
@@ -53,25 +55,81 @@ function wrapResponseWithTiming(res: ServerResponse): { res: ServerResponse; sta
 }
 
 /**
- * Parse JSON body from request
+ * Maximum accepted request body size, in bytes (M5 / OWASP API4:2023).
+ * 1 MB is comfortably above any legitimate MCP/JSON-RPC or REST payload.
  */
-function parseBody(req: IncomingMessage): Promise<unknown> {
+export const MAX_BODY_BYTES = 1024 * 1024;
+
+/** Error carrying an HTTP status for the request handler to surface. */
+interface HttpError extends Error {
+  statusCode?: number;
+}
+
+/**
+ * Parse a JSON request body, enforcing a hard size cap (M5).
+ *
+ * If the streamed body exceeds `maxBytes` the promise rejects with a 413-tagged
+ * error and the socket is destroyed, so an attacker cannot exhaust memory by
+ * streaming an unbounded payload. Buffering stops the moment the cap is crossed.
+ */
+export function parseBody(req: IncomingMessage, maxBytes: number = MAX_BODY_BYTES): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', (chunk) => (body += chunk.toString()));
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let aborted = false;
+
+    req.on('data', (chunk: Buffer | string) => {
+      if (aborted) {
+        return;
+      }
+      const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+      size += buf.length;
+      if (size > maxBytes) {
+        aborted = true;
+        const err: HttpError = new Error('Request body too large');
+        err.statusCode = 413;
+        reject(err);
+        req.destroy();
+        return;
+      }
+      chunks.push(buf);
+    });
+
     req.on('end', () => {
-      if (!body) {
+      if (aborted) {
+        return;
+      }
+      if (chunks.length === 0) {
         resolve(undefined);
         return;
       }
       try {
-        resolve(JSON.parse(body));
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
       } catch (error) {
         reject(new Error(`Invalid JSON: ${(error as Error).message}`));
       }
     });
+
     req.on('error', reject);
   });
+}
+
+/** Extract a numeric HTTP status from a thrown value, if present. */
+function errorStatusCode(error: unknown): number | undefined {
+  const code = (error as HttpError | undefined)?.statusCode;
+  return typeof code === 'number' ? code : undefined;
+}
+
+/**
+ * Apply baseline security response headers (L4 / OWASP A05:2021).
+ *
+ * Cheap, static defenses applied to every response: block MIME sniffing,
+ * forbid framing (clickjacking), and avoid leaking full URLs in the Referer.
+ */
+export function applySecurityHeaders(res: ServerResponse): void {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
 }
 
 /**
@@ -86,24 +144,16 @@ function sendJson(res: ServerResponse, statusCode: number, data: unknown): void 
 }
 
 /**
- * Handle health check endpoint
+ * Handle health check endpoint (M7 / OWASP A09:2021).
+ *
+ * `/health` is unauthenticated (it is on the auth skip-list so container/orchestrator
+ * probes can reach it). It therefore returns liveness ONLY — never version, auth
+ * method, AI provider URLs, client counts, or any other internal configuration that
+ * would aid an unauthenticated attacker fingerprinting the deployment. Operators who
+ * need that detail can query the authenticated MCP tools (e.g. `getVersion`).
  */
-function handleHealthCheck(res: ServerResponse, config: EnvironmentConfig, aiEnabled: boolean, eventsEnabled: boolean): void {
-  sendJson(res, 200, {
-    status: 'healthy',
-    version: VERSION,
-    transport: 'stream',
-    stateful: config.stateful,
-    authMethod: config.authMethod,
-    aiEnabled,
-    aiProvider: aiEnabled ? config.aiProvider : undefined,
-    aiUrl: aiEnabled ? config.aiUrl : undefined,
-    aiModel: aiEnabled ? config.aiModel : undefined,
-    eventsEnabled,
-    eventsPath: eventsEnabled ? config.sseEventsPath : undefined,
-    eventsConnectedClients: eventsEnabled ? getClientCount() : undefined,
-    rateLimitEnabled: config.rateLimitEnabled,
-  });
+export function handleHealthCheck(res: ServerResponse): void {
+  sendJson(res, 200, { status: 'healthy' });
 }
 
 /**
@@ -118,10 +168,43 @@ function addRestApiCors(req: IncomingMessage, res: ServerResponse): void {
 }
 
 /**
+ * Resolve the permission a REST `/api/*` route requires.
+ *
+ * Each route mirrors the `Permission.*` bit of its MCP-tool twin so the REST
+ * bridge cannot be used to bypass RBAC (finding H1 / OWASP A01:2021, BFLA).
+ * Read routes require QUERY; the service-call route requires CONTROL (matching
+ * the `callService` tool). Unknown routes return `null` — the handler falls
+ * through to a 404, which needs no permission.
+ */
+export function requiredRestPermission(method: string, pathname: string): number | null {
+  const m = method.toUpperCase();
+
+  if (m === 'GET') {
+    if (
+      pathname === '/api/states' ||
+      pathname === '/api/sensors' ||
+      pathname === '/api/search' ||
+      pathname === '/api/version' ||
+      /^\/api\/states\/[^/]+$/.test(pathname) ||
+      /^\/api\/entities\/[^/]+$/.test(pathname) ||
+      /^\/api\/history\/[^/]+$/.test(pathname)
+    ) {
+      return Permission.QUERY;
+    }
+  }
+
+  if (m === 'POST' && /^\/api\/services\/[^/]+\/[^/]+$/.test(pathname)) {
+    return Permission.CONTROL;
+  }
+
+  return null;
+}
+
+/**
  * Handle REST API requests for Open WebUI compatibility
  * These endpoints translate REST calls to Home Assistant API calls
  */
-async function handleRestApi(
+export async function handleRestApi(
   req: IncomingMessage,
   res: ServerResponse,
   url: string,
@@ -132,6 +215,26 @@ async function handleRestApi(
 
   const parsedUrl = new URL(url, `http://${req.headers.host}`);
   const pathname = parsedUrl.pathname;
+
+  // H1: enforce RBAC on REST routes before touching Home Assistant.
+  const required = requiredRestPermission(req.method ?? 'GET', pathname);
+  if (required !== null) {
+    // Fail closed: a missing mask grants nothing.
+    const userPermissions = ((req as AuthenticatedRequest).auth?.extra?.permissions as number | undefined) ?? 0;
+    if (!hasPermission(userPermissions, required)) {
+      logger.warn('REST API permission denied', {
+        method: req.method,
+        path: pathname,
+        required: getPermissionNames(required),
+        has: getPermissionNames(userPermissions),
+      });
+      sendJson(res, 403, {
+        error: 'Forbidden',
+        message: `This endpoint requires permission: ${getPermissionNames(required).join(', ')}`,
+      });
+      return;
+    }
+  }
 
   try {
     // GET /api/states - Get all entity states
@@ -229,10 +332,18 @@ async function handleRestApi(
     // Not found
     sendJson(res, 404, { error: 'API endpoint not found' });
   } catch (error) {
+    // M5: a body that exceeded the size cap surfaces as 413, not a generic 500.
+    if (errorStatusCode(error) === 413) {
+      if (!res.headersSent) {
+        sendJson(res, 413, { error: 'Payload Too Large', message: 'Request body exceeds the size limit' });
+      }
+      return;
+    }
     logger.error('REST API error', { error, url });
+    // M6: log the detail above; never echo raw error text to the client.
     sendJson(res, 500, {
       error: 'Internal server error',
-      message: error instanceof Error ? error.message : String(error),
+      message: sanitizeError(error),
     });
   }
 }
@@ -437,6 +548,8 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         windowMs: config.rateLimitWindowMs,
         maxRequests: config.rateLimitMaxRequests,
         skipPaths: [healthPath, '/openapi.json'],
+        // M4: only trust forwarding headers from configured proxies.
+        trustedProxies: config.rateLimitTrustedProxies,
       })
     : null;
 
@@ -446,6 +559,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
     secret: config.authSecret,
     permissions: config.permissions,
     skipPaths: [healthPath, '/openapi.json'],
+    requireExp: config.authRequireExp,
+    issuer: config.authIssuer,
+    audience: config.authAudience,
   });
 
   // Initialize event subscriber if SSE events are enabled and HA is configured
@@ -485,6 +601,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
     // Wrap response to add Server-Timing header
     const { res } = wrapResponseWithTiming(originalRes);
 
+    // L4: baseline security headers on every response.
+    applySecurityHeaders(res);
+
     const url = req.url ?? '/';
     const urlPath = url.split('?')[0];
 
@@ -519,7 +638,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
     try {
       // Health check endpoint
       if (config.httpEnableHealthcheck && url === healthPath) {
-        handleHealthCheck(res, config, !!aiClient, !!eventSubscriber);
+        handleHealthCheck(res);
         return;
       }
 
@@ -570,6 +689,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       // Not found
       sendJson(res, 404, { error: 'Not found' });
     } catch (error) {
+      // M5: oversize body → 413 rather than a generic 500.
+      if (errorStatusCode(error) === 413) {
+        if (!res.headersSent) {
+          sendJson(res, 413, { error: 'Payload Too Large', message: 'Request body exceeds the size limit' });
+        }
+        return;
+      }
+
       logger.error('HTTP request error', {
         error,
         method: req.method,
@@ -577,13 +704,22 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       });
 
       if (!res.headersSent) {
+        // M6: detail is logged above; the client gets only a generic message.
         sendJson(res, 500, {
           error: 'Internal server error',
-          message: error instanceof Error ? error.message : String(error),
+          message: sanitizeError(error),
         });
       }
     }
   });
+
+  // M5: bound how long a client may take to deliver headers/body so a slow-loris
+  // connection cannot tie up a socket indefinitely. These cap request *intake*
+  // time, not response duration, so long-lived SSE streams are unaffected.
+  server.headersTimeout = 30_000;   // 30s to send all request headers
+  server.requestTimeout = 60_000;   // 60s to deliver the complete request
+  server.keepAliveTimeout = 5_000;  // 5s idle on a keep-alive connection
+  server.maxRequestsPerSocket = 0;  // unlimited (default); explicit for clarity
 
   // Graceful shutdown handler
   let isShuttingDown = false;

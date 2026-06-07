@@ -9,13 +9,13 @@ import { registerAnalyzeSensorsTool } from '../../../src/tools/ai/analyzeSensors
 
 // Create mock server that captures registered handlers
 function createMockServer() {
-  const handlers = new Map<string, { config: unknown; handler: Function }>();
+  const handlers = new Map<string, { config: unknown; handler: (...args: unknown[]) => unknown }>();
   return {
-    registerTool: vi.fn((name: string, config: unknown, handler: Function) => {
+    registerTool: vi.fn((name: string, config: unknown, handler: (...args: unknown[]) => unknown) => {
       handlers.set(name, { config, handler });
     }),
     handlers,
-  } as unknown as McpServer & { handlers: Map<string, { config: unknown; handler: Function }> };
+  } as unknown as McpServer & { handlers: Map<string, { config: unknown; handler: (...args: unknown[]) => unknown }> };
 }
 
 // Create mock LocalAIClient

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isValidBindAddress, isValidOrigin } from './utils/config-validations.js';
+import { isValidBindAddress, isValidOrigin, isLoopbackAddress } from './utils/config-validations.js';
 import { parsePermissionsConfig, type PermissionsConfig } from './permissions/index.js';
 import { logger } from './utils/logger.js';
 import type { AIProviderType } from './localAI/types.js';
@@ -64,6 +64,7 @@ const envSchema = z
     httpHealthcheckPath: z.string().optional(),
     httpAllowCors: createBooleanStringSchema(true),
     httpAllowedOrigins: z.string().optional().transform((v) => v?.split(',').map((s) => s.trim()).filter(Boolean)),
+    httpAllowedHosts: z.string().optional().transform((v) => v?.split(',').map((s) => s.trim()).filter(Boolean)),
 
     // SSE Event Subscription Configuration
     sseEventsEnabled: createBooleanStringSchema(true),
@@ -73,10 +74,18 @@ const envSchema = z
     rateLimitEnabled: createBooleanStringSchema(true),
     rateLimitWindowMs: numericStringSchema,
     rateLimitMaxRequests: numericStringSchema,
+    // M4: immediate-peer IPs whose forwarding headers may be trusted (CSV).
+    rateLimitTrustedProxies: z
+      .string()
+      .optional()
+      .transform((v) => v?.split(',').map((s) => s.trim()).filter(Boolean)),
 
     // Authentication Configuration
     authMethod: z.enum(['none', 'bearer']).optional().default('none'),
     authSecret: z.string().optional(),
+    authRequireExp: createBooleanStringSchema(false),
+    authIssuer: z.string().min(1).optional(),
+    authAudience: z.string().min(1).optional(),
     permissionsConfig: z.string().optional(),
   })
   .refine(
@@ -120,6 +129,41 @@ const envSchema = z
     {
       message: 'MCP_AUTH_SECRET is required when MCP_AUTH_METHOD is "bearer"',
       path: ['authSecret'],
+    }
+  )
+  .refine(
+    (data) => {
+      // M8: a weak signing secret undermines the whole bearer scheme.
+      if (data.authMethod === 'bearer' && data.authSecret && data.authSecret.length < 32) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message: 'MCP_AUTH_SECRET must be at least 32 characters when MCP_AUTH_METHOD is "bearer"',
+      path: ['authSecret'],
+    }
+  )
+  .refine(
+    (data) => {
+      // H5: an unauthenticated server must never be reachable off-host. Allow
+      // method=none only when the (explicit) bind address is loopback. A missing
+      // bind address defaults to 127.0.0.1 later, so it is safe.
+      if (
+        data.authMethod === 'none' &&
+        data.httpBindAddr &&
+        !isLoopbackAddress(data.httpBindAddr)
+      ) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message:
+        'MCP_AUTH_METHOD=none is only permitted on a loopback bind address ' +
+        '(127.0.0.0/8 or ::1). Set MCP_AUTH_METHOD=bearer (with MCP_AUTH_SECRET) ' +
+        'to bind a public interface such as 0.0.0.0.',
+      path: ['authMethod'],
     }
   );
 
@@ -165,6 +209,12 @@ export interface EnvironmentConfig {
   httpHealthcheckPath?: string;
   httpAllowCors: boolean;
   httpAllowedOrigins?: string[];
+  /**
+   * Opt-in list of Host-header values (host[:port]) the server is reached by.
+   * When set, DNS-rebinding Host validation is enforced at the transport (M3);
+   * when unset, Host validation is OFF (origin/CORS is handled separately).
+   */
+  httpAllowedHosts?: string[];
 
   // SSE Event Subscription Configuration
   sseEventsEnabled: boolean;
@@ -174,10 +224,14 @@ export interface EnvironmentConfig {
   rateLimitEnabled: boolean;
   rateLimitWindowMs: number;
   rateLimitMaxRequests: number;
+  rateLimitTrustedProxies?: string[];
 
   // Authentication Configuration
   authMethod: 'none' | 'bearer';
   authSecret?: string;
+  authRequireExp: boolean;
+  authIssuer?: string;
+  authAudience?: string;
   permissions: PermissionsConfig;
 }
 
@@ -224,6 +278,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     httpHealthcheckPath: env.MCP_HTTP_HEALTHCHECK_PATH,
     httpAllowCors: env.MCP_HTTP_ALLOW_CORS,
     httpAllowedOrigins: env.MCP_HTTP_ALLOWED_ORIGINS,
+    httpAllowedHosts: env.MCP_HTTP_ALLOWED_HOSTS,
 
     // SSE Event Subscription Configuration
     sseEventsEnabled: env.MCP_SSE_EVENTS_ENABLED,
@@ -233,10 +288,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     rateLimitEnabled: env.MCP_RATE_LIMIT_ENABLED,
     rateLimitWindowMs: env.MCP_RATE_LIMIT_WINDOW_MS,
     rateLimitMaxRequests: env.MCP_RATE_LIMIT_MAX_REQUESTS,
+    rateLimitTrustedProxies: env.MCP_RATE_LIMIT_TRUSTED_PROXIES,
 
     // Authentication Configuration
     authMethod: env.MCP_AUTH_METHOD,
     authSecret: env.MCP_AUTH_SECRET,
+    authRequireExp: env.MCP_AUTH_REQUIRE_EXP,
+    authIssuer: env.MCP_AUTH_ISSUER,
+    authAudience: env.MCP_AUTH_AUDIENCE,
     permissionsConfig: env.MCP_PERMISSIONS_CONFIG,
   });
 
@@ -247,11 +306,27 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
 
   const httpPath = parsed.data.httpPath ?? '/mcp';
   const httpBindAddr = parsed.data.httpBindAddr ?? '127.0.0.1';
-  let httpAllowedOrigins = parsed.data.httpAllowedOrigins ?? ['127.0.0.1', 'localhost'];
+  const httpPort = parsed.data.httpPort ?? 3000;
+
+  // M3: default origins must be full scheme://host:port so they actually match a
+  // real browser `Origin` header (the SDK compares it by exact string). Bare
+  // hostnames like "localhost" never match "http://localhost:3000" and so left
+  // DNS-rebinding/CORS protection effectively disabled for the default config.
+  let httpAllowedOrigins =
+    parsed.data.httpAllowedOrigins ??
+    [`http://localhost:${httpPort}`, `http://127.0.0.1:${httpPort}`];
 
   if (httpAllowedOrigins.includes('*')) {
     logger.warn('Wildcard (*) origin allowed - origin validation disabled');
     httpAllowedOrigins = [];
+  }
+
+  // H5: make the no-auth posture loud even when the bind is loopback.
+  if (parsed.data.authMethod === 'none') {
+    logger.warn(
+      'MCP_AUTH_METHOD=none: authentication is DISABLED. This is only permitted ' +
+        'on a loopback bind; set MCP_AUTH_METHOD=bearer to expose the server.'
+    );
   }
 
   return {
@@ -289,13 +364,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     stateful: parsed.data.stateful,
 
     // MCP Server HTTP Configuration
-    httpPort: parsed.data.httpPort,
+    httpPort,
     httpBindAddr,
     httpPath,
     httpEnableHealthcheck: parsed.data.httpEnableHealthcheck,
     httpHealthcheckPath: parsed.data.httpHealthcheckPath,
     httpAllowCors: parsed.data.httpAllowCors,
     httpAllowedOrigins,
+    httpAllowedHosts: parsed.data.httpAllowedHosts,
 
     // SSE Event Subscription Configuration
     sseEventsEnabled: parsed.data.sseEventsEnabled,
@@ -305,10 +381,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     rateLimitEnabled: parsed.data.rateLimitEnabled,
     rateLimitWindowMs: parsed.data.rateLimitWindowMs ?? 60000,
     rateLimitMaxRequests: parsed.data.rateLimitMaxRequests ?? 100,
+    rateLimitTrustedProxies: parsed.data.rateLimitTrustedProxies,
 
     // Authentication Configuration
     authMethod: parsed.data.authMethod,
     authSecret: parsed.data.authSecret,
+    authRequireExp: parsed.data.authRequireExp,
+    authIssuer: parsed.data.authIssuer,
+    authAudience: parsed.data.authAudience,
     permissions: parsePermissionsConfig(parsed.data.permissionsConfig),
   };
 }

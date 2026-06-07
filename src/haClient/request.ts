@@ -3,10 +3,11 @@
  * Handles authentication and HTTP requests
  */
 
-import https from 'https';
+import type { Dispatcher } from 'undici';
 import type { RequestOptions } from '../types/index.js';
 import { AuthenticationError, ApiError } from '../types/index.js';
 import { logger } from '../utils/logger.js';
+import { createTlsDispatcher, type FetchInitWithDispatcher } from '../utils/tlsDispatcher.js';
 
 export interface RequestHandlerConfig {
   baseUrl: string;
@@ -19,7 +20,8 @@ export interface RequestHandlerConfig {
  * HTTP request handler for Home Assistant API calls.
  */
 export class RequestHandler {
-  private httpsAgent?: https.Agent;
+  /** Per-client undici dispatcher; set only when strictSsl is disabled (H2). */
+  private dispatcher?: Dispatcher;
   private baseUrl: string;
   private token: string;
   private timeout: number;
@@ -29,11 +31,11 @@ export class RequestHandler {
     this.token = config.token;
     this.timeout = config.timeout;
 
-    // Create HTTPS agent with custom SSL settings
-    if (!config.strictSsl) {
-      this.httpsAgent = new https.Agent({
-        rejectUnauthorized: false,
-      });
+    // Relax TLS validation for THIS client only, via a per-instance undici
+    // dispatcher. Node's global fetch ignores the legacy `agent` option, so the
+    // previous https.Agent was silently a no-op for self-signed HA instances.
+    this.dispatcher = createTlsDispatcher(config.strictSsl);
+    if (this.dispatcher) {
       logger.warn('SSL certificate validation is disabled');
     }
   }
@@ -43,6 +45,13 @@ export class RequestHandler {
    */
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const url = new URL(`${this.baseUrl}/api${path}`);
+
+    // H4 defense-in-depth: refuse any path that resolves outside /api/.
+    // Call sites encode user-controlled segments, but this guard catches any
+    // raw "../" traversal that would otherwise escape the API namespace.
+    if (url.pathname !== '/api' && !url.pathname.startsWith('/api/')) {
+      throw new ApiError('Invalid API path', 400, { path });
+    }
 
     // Add query parameters
     if (options.params) {
@@ -64,14 +73,17 @@ export class RequestHandler {
     });
 
     try {
-      const response = await fetch(url.toString(), {
+      const init: FetchInitWithDispatcher = {
         method: options.method ?? 'GET',
         headers,
         body: options.body ? JSON.stringify(options.body) : undefined,
-        // @ts-expect-error - agent is valid but not in types
-        agent: this.httpsAgent,
         signal: AbortSignal.timeout(this.timeout),
-      });
+      };
+      if (this.dispatcher) {
+        init.dispatcher = this.dispatcher;
+      }
+
+      const response = await fetch(url.toString(), init);
 
       if (!response.ok) {
         const errorText = await response.text();

@@ -11,6 +11,13 @@ export interface RateLimitConfig {
   maxRequests?: number;   // Maximum requests per window (default: 100)
   skipPaths?: string[];   // Paths to skip rate limiting (e.g., health checks)
   keyGenerator?: (req: IncomingMessage) => string;  // Custom key generator
+  /**
+   * Immediate-peer IPs whose forwarding headers (CF-Connecting-IP / X-Forwarded-For /
+   * X-Real-IP) may be trusted to identify the real client (M4). Empty by default —
+   * with no trusted proxy, client-supplied headers are IGNORED and the socket
+   * address is used, so a forged header cannot evade limits or grow the bucket map.
+   */
+  trustedProxies?: string[];
 }
 
 interface RateLimitEntry {
@@ -26,6 +33,7 @@ export class RateLimiter {
   private readonly maxRequests: number;
   private readonly skipPaths: Set<string>;
   private readonly keyGenerator: (req: IncomingMessage) => string;
+  private readonly trustedProxies: Set<string>;
   private readonly entries = new Map<string, RateLimitEntry>();
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -33,30 +41,54 @@ export class RateLimiter {
     this.windowMs = config.windowMs ?? 60000; // 1 minute default
     this.maxRequests = config.maxRequests ?? 100; // 100 requests per minute
     this.skipPaths = new Set(config.skipPaths ?? ['/health', '/healthcheck']);
-    this.keyGenerator = config.keyGenerator ?? this.defaultKeyGenerator;
+    this.trustedProxies = new Set(config.trustedProxies ?? []);
+    // Bind so a custom generator OR the default both see `this`.
+    this.keyGenerator = config.keyGenerator ?? ((req) => this.defaultKeyGenerator(req));
 
     // Start cleanup interval to prevent memory leaks
     this.startCleanup();
   }
 
+  /** First value of a possibly-array header, trimmed; undefined if absent/empty. */
+  private firstHeader(value: string | string[] | undefined): string | undefined {
+    const v = Array.isArray(value) ? value[0] : value;
+    const trimmed = v?.trim();
+    return trimmed ? trimmed : undefined;
+  }
+
   /**
-   * Default key generator - uses IP address
+   * Default key generator (M4 / OWASP API4:2023).
+   *
+   * Client-supplied forwarding headers are honored ONLY when the immediate peer
+   * (`socket.remoteAddress`) is a configured trusted proxy. Otherwise we key on the
+   * socket address — an attacker cannot forge that, so they can neither evade the
+   * limit by rotating X-Forwarded-For nor exhaust memory with unbounded forged keys.
    */
   private defaultKeyGenerator(req: IncomingMessage): string {
-    // Try to get real IP from common proxy headers
-    const forwardedFor = req.headers['x-forwarded-for'];
-    if (forwardedFor) {
-      const ips = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
-      return ips.split(',')[0].trim();
+    const socketAddr = req.socket?.remoteAddress ?? 'unknown';
+
+    if (!this.trustedProxies.has(socketAddr)) {
+      return socketAddr;
     }
 
-    const realIp = req.headers['x-real-ip'];
+    // Behind a trusted proxy: prefer Cloudflare's single-client CF-Connecting-IP,
+    // then the left-most X-Forwarded-For hop, then X-Real-IP.
+    const cf = this.firstHeader(req.headers['cf-connecting-ip']);
+    if (cf) {
+      return cf;
+    }
+
+    const xff = this.firstHeader(req.headers['x-forwarded-for']);
+    if (xff) {
+      return xff.split(',')[0].trim();
+    }
+
+    const realIp = this.firstHeader(req.headers['x-real-ip']);
     if (realIp) {
-      return Array.isArray(realIp) ? realIp[0] : realIp;
+      return realIp;
     }
 
-    // Fall back to socket remote address
-    return req.socket.remoteAddress ?? 'unknown';
+    return socketAddr;
   }
 
   /**
