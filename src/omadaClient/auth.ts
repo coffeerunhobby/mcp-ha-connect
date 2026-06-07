@@ -1,5 +1,7 @@
+import type { Dispatcher } from 'undici';
 import type { OmadaApiResponse, TokenResult } from '../types/index.js';
 import { logger } from '../utils/logger.js';
+import { createTlsDispatcher, type FetchInitWithDispatcher } from '../utils/tlsDispatcher.js';
 
 const TOKEN_EXPIRY_BUFFER_SECONDS = 30;
 
@@ -27,7 +29,8 @@ export class AuthManager {
     private readonly clientSecret: string;
     private readonly omadacId: string;
     private readonly timeout: number;
-    private readonly strictSsl: boolean;
+    /** Per-client undici dispatcher; set only when strictSsl is disabled (H2). */
+    private readonly dispatcher?: Dispatcher;
 
     constructor(config: AuthManagerConfig) {
         this.baseUrl = config.baseUrl;
@@ -35,7 +38,7 @@ export class AuthManager {
         this.clientSecret = config.clientSecret;
         this.omadacId = config.omadacId;
         this.timeout = config.timeout ?? 30000;
-        this.strictSsl = config.strictSsl ?? true;
+        this.dispatcher = createTlsDispatcher(config.strictSsl);
     }
 
     /**
@@ -100,34 +103,23 @@ export class AuthManager {
         }
 
         try {
-            // For self-signed certificates, we need to temporarily disable TLS validation
-            // Node.js native fetch doesn't support the `agent` option like axios/node-fetch
-            const originalRejectUnauthorized = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-            if (!this.strictSsl) {
-                process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+            // For self-signed certificates we relax TLS validation for THIS client
+            // only, via a per-instance undici dispatcher (H2) — never by toggling the
+            // process-global NODE_TLS_REJECT_UNAUTHORIZED env var.
+            const init: FetchInitWithDispatcher = {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                },
+                body: JSON.stringify(body),
+                signal: AbortSignal.timeout(this.timeout),
+            };
+            if (this.dispatcher) {
+                init.dispatcher = this.dispatcher;
             }
 
-            let response: Response;
-            try {
-                response = await fetch(url.toString(), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Accept: 'application/json',
-                    },
-                    body: JSON.stringify(body),
-                    signal: AbortSignal.timeout(this.timeout),
-                });
-            } finally {
-                // Restore original setting
-                if (!this.strictSsl) {
-                    if (originalRejectUnauthorized === undefined) {
-                        delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-                    } else {
-                        process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalRejectUnauthorized;
-                    }
-                }
-            }
+            const response = await fetch(url.toString(), init);
 
             if (!response.ok) {
                 const errorText = await response.text();
