@@ -38,36 +38,40 @@ export interface TransportSecurityOptions {
  * Build the DNS-rebinding protection options for the Streamable HTTP transport
  * (M3 / OWASP A05:2021).
  *
- * The SDK only validates the `Host` header when `allowedHosts` is non-empty and
- * only validates `Origin` when `allowedOrigins` is non-empty, each by EXACT
- * string match. Previously only `allowedOrigins` was passed, so the Host-header
- * rebinding check never ran. Here we derive `allowedHosts` (host[:port] form,
- * no scheme) from the configured origins plus the local/bind host so that:
- *   - clients reaching the server by its configured origin host succeed,
- *   - direct loopback/bind-address access still works,
- *   - everything else is rejected with a 403.
+ * Host-header validation is **opt-in**. The SDK only validates the `Host` header
+ * when `allowedHosts` is non-empty (EXACT string match), and only validates
+ * `Origin` when `allowedOrigins` is non-empty. CORS/Origin enforcement already
+ * lives in the HTTP layer, so this helper governs ONLY the Host check and leaves
+ * `allowedOrigins` empty to avoid double-enforcing origins at the transport.
  *
- * When origins are empty (operator configured a `*` wildcard) both lists are
- * empty and the SDK skips validation — preserving the documented opt-out.
+ * - `MCP_HTTP_ALLOWED_HOSTS` UNSET → Host validation OFF (protection disabled).
+ *   This preserves pre-1.3.0 behavior: an upgrade never silently 403s clients
+ *   that reach the server by a host not listed in the (CORS) origins. The
+ *   server's own reachable host and its allowed CORS origins are frequently
+ *   different addresses, so deriving hosts from origins would break real setups.
+ * - `MCP_HTTP_ALLOWED_HOSTS` SET → enforce exactly those host[:port] values, plus
+ *   loopback/bind-address conveniences so on-box health checks and local tools
+ *   keep working. Any other `Host` header is rejected with a 403.
  */
 export function buildTransportSecurityOptions(config: EnvironmentConfig): TransportSecurityOptions {
-  const origins = config.httpAllowedOrigins ?? [];
+  const explicitHosts = config.httpAllowedHosts ?? [];
 
-  if (origins.length === 0) {
-    return { allowedOrigins: [], allowedHosts: [], enableDnsRebindingProtection: true };
+  // Opt-out by default: no explicit hosts ⇒ no Host-header validation.
+  if (explicitHosts.length === 0) {
+    return { allowedOrigins: [], allowedHosts: [], enableDnsRebindingProtection: false };
   }
 
   const port = config.httpPort ?? 3000;
   const bindAddr = config.httpBindAddr ?? '127.0.0.1';
   const hosts = new Set<string>();
 
-  for (const origin of origins) {
+  for (const entry of explicitHosts) {
     try {
-      // Full origin URL (e.g. https://example.com) → host header form (example.com).
-      hosts.add(new URL(origin).host);
+      // Accept a full URL form (e.g. https://example.com) → host header form.
+      hosts.add(new URL(entry).host);
     } catch {
-      // Bare hostname / IP already in host-header form.
-      hosts.add(origin);
+      // Bare hostname / IP[:port] already in host-header form.
+      hosts.add(entry);
     }
   }
 
@@ -78,7 +82,7 @@ export function buildTransportSecurityOptions(config: EnvironmentConfig): Transp
   }
 
   return {
-    allowedOrigins: origins,
+    allowedOrigins: [],
     allowedHosts: [...hosts],
     enableDnsRebindingProtection: true,
   };

@@ -4,8 +4,10 @@
  * H5  Fail-closed bind: MCP_AUTH_METHOD=none must not be combined with a
  *     non-loopback bind address — that exposes an unauthenticated server.
  * M1  docker-compose.yml must not hard-code a wildcard `MCP_HTTP_ALLOWED_ORIGINS=*`.
- * M3  DNS-rebinding protection must pass a non-empty `allowedHosts` and default
- *     origins must be full scheme://host:port so they match real Origin headers.
+ * M3  DNS-rebinding Host validation is OPT-IN via MCP_HTTP_ALLOWED_HOSTS: OFF when
+ *     unset (no silent upgrade break), enforcing exactly the listed host[:port]
+ *     (plus loopback) when set. Default origins stay full scheme://host:port forms
+ *     so the separate Origin/CORS layer matches real Origin headers.
  * M10 Dockerfile must run as a non-root USER.
  * L4  HTTP responses must carry baseline security headers.
  * L7  .env.example must use the real var (MCP_AUTH_SECRET, not MCP_AUTH_TOKEN)
@@ -60,35 +62,63 @@ describe('SEC-CONFIG M1: compose has no wildcard origin', () => {
   });
 });
 
-describe('SEC-CONFIG M3: DNS-rebinding allowedHosts + real-Origin defaults', () => {
+describe('SEC-CONFIG M3: opt-in DNS-rebinding Host validation', () => {
+  const base = {
+    MCP_HTTP_BIND_ADDR: '0.0.0.0',
+    MCP_AUTH_METHOD: 'bearer',
+    MCP_AUTH_SECRET: SECRET,
+  } as NodeJS.ProcessEnv;
+
   it('default config origins are full scheme://host:port forms', () => {
     const cfg = loadConfig({} as NodeJS.ProcessEnv);
     expect(cfg.httpAllowedOrigins?.some((o) => /^https?:\/\/[^/]+:\d+$/.test(o))).toBe(true);
   });
 
-  it('builds a non-empty allowedHosts and keeps rebinding protection on', () => {
+  it('leaves Host validation OFF when MCP_HTTP_ALLOWED_HOSTS is unset (no upgrade break)', () => {
     const cfg = loadConfig({} as NodeJS.ProcessEnv);
     const opts = buildTransportSecurityOptions(cfg);
-    expect(opts.enableDnsRebindingProtection).toBe(true);
-    expect(Array.isArray(opts.allowedHosts)).toBe(true);
-    expect(opts.allowedHosts.length).toBeGreaterThan(0);
-    // The default loopback host:port must be allowed so local clients connect.
-    expect(opts.allowedHosts).toContain('localhost:3000');
+    expect(opts.enableDnsRebindingProtection).toBe(false);
+    expect(opts.allowedHosts).toEqual([]);
+    // Origin/CORS is enforced by the HTTP layer, not the transport.
+    expect(opts.allowedOrigins).toEqual([]);
   });
 
-  it('derives allowed hosts from configured origins (host header form, no scheme)', () => {
+  it('does NOT derive Host allowlist from CORS origins', () => {
+    // Origins are client/CORS addresses; the server host is frequently different.
+    // Setting origins alone must not turn on (or seed) Host validation.
     const cfg = loadConfig({
-      MCP_HTTP_ALLOWED_ORIGINS: 'example.com,https://example.com',
+      ...base,
+      MCP_HTTP_ALLOWED_ORIGINS: 'https://client.example.com:5678',
     } as NodeJS.ProcessEnv);
     const opts = buildTransportSecurityOptions(cfg);
-    expect(opts.allowedHosts).toContain('example.com');
+    expect(opts.enableDnsRebindingProtection).toBe(false);
+    expect(opts.allowedHosts).toEqual([]);
   });
 
-  it('disables host validation when a wildcard origin was configured', () => {
-    const cfg = loadConfig({ MCP_HTTP_ALLOWED_ORIGINS: '*' } as NodeJS.ProcessEnv);
+  it('enforces exactly the configured hosts (plus loopback) when MCP_HTTP_ALLOWED_HOSTS is set', () => {
+    const cfg = loadConfig({
+      ...base,
+      MCP_HTTP_ALLOWED_HOSTS: 'mcp.example.com,192.168.0.18:3000',
+    } as NodeJS.ProcessEnv);
     const opts = buildTransportSecurityOptions(cfg);
-    // Wildcard => empty lists => SDK skips both checks (documented behavior).
-    expect(opts.allowedHosts).toEqual([]);
+    expect(opts.enableDnsRebindingProtection).toBe(true);
+    expect(opts.allowedHosts).toContain('mcp.example.com');
+    expect(opts.allowedHosts).toContain('192.168.0.18:3000');
+    // Loopback/bind conveniences are always added so on-box access keeps working.
+    expect(opts.allowedHosts).toContain('localhost:3000');
+    expect(opts.allowedHosts).toContain('0.0.0.0:3000');
+    // A host the operator did NOT list is absent → the SDK 403s it.
+    expect(opts.allowedHosts).not.toContain('evil.attacker.test');
+  });
+
+  it('accepts a full-URL host entry and reduces it to host[:port] form', () => {
+    const cfg = loadConfig({
+      ...base,
+      MCP_HTTP_ALLOWED_HOSTS: 'https://mcp.example.com',
+    } as NodeJS.ProcessEnv);
+    const opts = buildTransportSecurityOptions(cfg);
+    expect(opts.allowedHosts).toContain('mcp.example.com');
+    // Origins are still not enforced at the transport.
     expect(opts.allowedOrigins).toEqual([]);
   });
 });
