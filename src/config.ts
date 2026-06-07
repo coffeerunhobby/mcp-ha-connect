@@ -77,6 +77,9 @@ const envSchema = z
     // Authentication Configuration
     authMethod: z.enum(['none', 'bearer']).optional().default('none'),
     authSecret: z.string().optional(),
+    authRequireExp: createBooleanStringSchema(false),
+    authIssuer: z.string().min(1).optional(),
+    authAudience: z.string().min(1).optional(),
     permissionsConfig: z.string().optional(),
   })
   .refine(
@@ -119,6 +122,19 @@ const envSchema = z
     },
     {
       message: 'MCP_AUTH_SECRET is required when MCP_AUTH_METHOD is "bearer"',
+      path: ['authSecret'],
+    }
+  )
+  .refine(
+    (data) => {
+      // M8: a weak signing secret undermines the whole bearer scheme.
+      if (data.authMethod === 'bearer' && data.authSecret && data.authSecret.length < 32) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message: 'MCP_AUTH_SECRET must be at least 32 characters when MCP_AUTH_METHOD is "bearer"',
       path: ['authSecret'],
     }
   );
@@ -178,6 +194,9 @@ export interface EnvironmentConfig {
   // Authentication Configuration
   authMethod: 'none' | 'bearer';
   authSecret?: string;
+  authRequireExp: boolean;
+  authIssuer?: string;
+  authAudience?: string;
   permissions: PermissionsConfig;
 }
 
@@ -237,6 +256,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     // Authentication Configuration
     authMethod: env.MCP_AUTH_METHOD,
     authSecret: env.MCP_AUTH_SECRET,
+    authRequireExp: env.MCP_AUTH_REQUIRE_EXP,
+    authIssuer: env.MCP_AUTH_ISSUER,
+    authAudience: env.MCP_AUTH_AUDIENCE,
     permissionsConfig: env.MCP_PERMISSIONS_CONFIG,
   });
 
@@ -309,6 +331,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     // Authentication Configuration
     authMethod: parsed.data.authMethod,
     authSecret: parsed.data.authSecret,
+    authRequireExp: parsed.data.authRequireExp,
+    authIssuer: parsed.data.authIssuer,
+    authAudience: parsed.data.authAudience,
     permissions: parsePermissionsConfig(parsed.data.permissionsConfig),
   };
 }
