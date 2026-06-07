@@ -39,16 +39,35 @@ export interface PermissionsConfig {
 }
 
 /**
+ * Resolve a role name to its permission mask, case-insensitively.
+ *
+ * Config (and JSON) commonly use lowercase role names ("operator") while the
+ * `Role` map is keyed uppercase ("OPERATOR"). Normalize here so BOTH the per-user
+ * role and the `defaultRole` fall-back resolve consistently. An unknown/undefined
+ * name fails closed to `Role.NONE` (never `undefined`, which downstream coerces to
+ * a zero mask anyway but is easy to mishandle).
+ */
+function resolveRoleName(name: string | undefined): number {
+  if (!name) {
+    return Role.NONE;
+  }
+  const key = name.toUpperCase() as RoleName;
+  return Role[key] ?? Role.NONE;
+}
+
+/**
  * Get permission mask for a user by their JWT sub claim
  */
 export function getUserPermissions(sub: string | undefined, config: PermissionsConfig): number {
+  const fallback = resolveRoleName(config.defaultRole);
+
   if (!sub) {
-    return config.defaultRole ? Role[config.defaultRole] : Role.NONE;
+    return fallback;
   }
 
   const user = config.users.find((u) => u.sub === sub);
   if (!user) {
-    return config.defaultRole ? Role[config.defaultRole] : Role.NONE;
+    return fallback;
   }
 
   // Direct mask takes precedence over role
@@ -56,9 +75,7 @@ export function getUserPermissions(sub: string | undefined, config: PermissionsC
     return user.mask;
   }
 
-  // Convert role to uppercase for lookup (config may have lowercase)
-  const roleKey = user.role?.toUpperCase() as RoleName | undefined;
-  return roleKey && Role[roleKey] !== undefined ? Role[roleKey] : Role.NONE;
+  return resolveRoleName(user.role);
 }
 
 /**

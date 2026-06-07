@@ -1,3 +1,11 @@
+### 1.3.1
+**Patch — RBAC role-name case-insensitivity.** Follow-up to the v1.3.0 fail-closed
+permission change. `getUserPermissions` now resolves both the per-user `role` and the
+`defaultRole` fall-back case-insensitively: a lowercase `"operator"` / `"admin"` in
+`MCP_PERMISSIONS_CONFIG` (a common real-world spelling) maps to the correct mask instead
+of silently collapsing to an empty (no-permission) mask. Unknown role names still fail
+closed to `NONE`. Regression tests added under `tests/permissions/`.
+
 ### 1.3.0
 **Security hardening release.** A full OWASP-aligned audit (API Top 10 2023 + Top 10 2021)
 drove fixes across access control, authentication, injection, transport, configuration,
