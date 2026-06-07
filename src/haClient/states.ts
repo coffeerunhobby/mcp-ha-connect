@@ -31,7 +31,7 @@ export class StateOperations {
     logger.debug('Fetching state', { entityId });
 
     try {
-      const state = await this.request.get<Entity>(`/states/${entityId}`);
+      const state = await this.request.get<Entity>(`/states/${encodeURIComponent(entityId)}`);
       return state;
     } catch (error) {
       if (error instanceof ApiError && error.statusCode === 404) {

@@ -44,6 +44,13 @@ export class RequestHandler {
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const url = new URL(`${this.baseUrl}/api${path}`);
 
+    // H4 defense-in-depth: refuse any path that resolves outside /api/.
+    // Call sites encode user-controlled segments, but this guard catches any
+    // raw "../" traversal that would otherwise escape the API namespace.
+    if (url.pathname !== '/api' && !url.pathname.startsWith('/api/')) {
+      throw new ApiError('Invalid API path', 400, { path });
+    }
+
     // Add query parameters
     if (options.params) {
       Object.entries(options.params).forEach(([key, value]) => {

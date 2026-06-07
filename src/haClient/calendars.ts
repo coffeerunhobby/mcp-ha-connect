@@ -54,7 +54,7 @@ export class CalendarOperations {
 
     // Calendar events use a special API endpoint, not the standard services API
     const events = await this.request.get<CalendarEvent[]>(
-      `/calendars/${entityId}`,
+      `/calendars/${encodeURIComponent(entityId)}`,
       {
         start: start.toISOString(),
         end: end.toISOString(),

@@ -23,7 +23,7 @@ export class ServiceOperations {
       hasTarget: !!data.target,
     });
 
-    const path = `/services/${data.domain}/${data.service}`;
+    const path = `/services/${encodeURIComponent(data.domain)}/${encodeURIComponent(data.service)}`;
     const body = {
       ...data.service_data,
       ...data.target,
