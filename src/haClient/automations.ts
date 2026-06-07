@@ -162,7 +162,7 @@ export class AutomationOperations {
     logger.info('Creating automation', { alias: config.alias, id: automationId });
 
     // POST to /config/automation/config/{id} - the ID must be in the URL path
-    await this.request.post<{ result: string }>(`/config/automation/config/${automationId}`, {
+    await this.request.post<{ result: string }>(`/config/automation/config/${encodeURIComponent(automationId)}`, {
       id: automationId,
       alias: config.alias,
       description: config.description || '',
@@ -224,6 +224,6 @@ export class AutomationOperations {
     const automationId = entityId.replace('automation.', '');
     logger.debug('Fetching automation trace', { automationId });
 
-    return this.request.get<unknown[]>(`/trace/automation/${automationId}`);
+    return this.request.get<unknown[]>(`/trace/automation/${encodeURIComponent(automationId)}`);
   }
 }
