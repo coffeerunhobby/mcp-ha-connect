@@ -4,6 +4,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import type { EventSubscriber, HaEvent } from '../haClient/events.js';
 import { logger } from '../utils/logger.js';
 import { Permission, hasPermission } from '../permissions/index.js';
@@ -23,6 +24,17 @@ export interface SSEClient {
 
 // Store active SSE clients
 const clients = new Map<string, SSEClient>();
+
+/**
+ * Generate an unguessable SSE client ID (L5).
+ *
+ * Uses a CSPRNG (randomUUID) rather than Math.random()/Date.now(), so a client
+ * ID cannot be predicted or enumerated by an observer who knows roughly when a
+ * connection was opened.
+ */
+export function generateClientId(): string {
+  return randomUUID();
+}
 
 /**
  * Parse query parameters from URL
@@ -76,7 +88,7 @@ export async function handleEventSubscription(
     return;
   }
 
-  const clientId = `sse_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const clientId = generateClientId();
   const params = parseQueryParams(req.url ?? '');
 
   // Parse filter parameters

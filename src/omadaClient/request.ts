@@ -1,5 +1,7 @@
+import type { Dispatcher } from 'undici';
 import type { OmadaApiResponse, PaginatedResult } from '../types/index.js';
 import { logger } from '../utils/logger.js';
+import { createTlsDispatcher, type FetchInitWithDispatcher } from '../utils/tlsDispatcher.js';
 
 import type { AuthManager } from './auth.js';
 
@@ -25,7 +27,8 @@ export interface RequestHandlerConfig {
 export class RequestHandler {
     private readonly baseUrl: string;
     private readonly timeout: number;
-    private readonly strictSsl: boolean;
+    /** Per-client undici dispatcher; set only when strictSsl is disabled (H2). */
+    private readonly dispatcher?: Dispatcher;
 
     constructor(
         config: RequestHandlerConfig,
@@ -33,7 +36,7 @@ export class RequestHandler {
     ) {
         this.baseUrl = config.baseUrl;
         this.timeout = config.timeout ?? 30000;
-        this.strictSsl = config.strictSsl ?? true;
+        this.dispatcher = createTlsDispatcher(config.strictSsl);
     }
 
     /**
@@ -98,31 +101,22 @@ export class RequestHandler {
         });
 
         try {
-            // For self-signed certificates, we need to temporarily disable TLS validation
-            // Node.js native fetch doesn't support the `agent` option like axios/node-fetch
-            const originalRejectUnauthorized = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-            if (!this.strictSsl) {
-                process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+            // For self-signed certificates we relax TLS validation for THIS client
+            // only, via a per-instance undici dispatcher (H2). Node's global fetch
+            // ignores the legacy `agent` option, and toggling the process-global
+            // NODE_TLS_REJECT_UNAUTHORIZED env var would disable validation for every
+            // concurrent outbound request in the process.
+            const init: FetchInitWithDispatcher = {
+                method,
+                headers,
+                body: config.data ? JSON.stringify(config.data) : undefined,
+                signal: AbortSignal.timeout(this.timeout),
+            };
+            if (this.dispatcher) {
+                init.dispatcher = this.dispatcher;
             }
 
-            let response: Response;
-            try {
-                response = await fetch(url.toString(), {
-                    method,
-                    headers,
-                    body: config.data ? JSON.stringify(config.data) : undefined,
-                    signal: AbortSignal.timeout(this.timeout),
-                });
-            } finally {
-                // Restore original setting
-                if (!this.strictSsl) {
-                    if (originalRejectUnauthorized === undefined) {
-                        delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-                    } else {
-                        process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalRejectUnauthorized;
-                    }
-                }
-            }
+            const response = await fetch(url.toString(), init);
 
             logger.info('Omada response', {
                 method,
