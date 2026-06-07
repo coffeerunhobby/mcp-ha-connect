@@ -9,13 +9,13 @@ import { registerAllResources } from '../../src/resources/index.js';
 
 // Create mock server that captures registered resources
 function createMockServer() {
-  const resources = new Map<string, { config: unknown; handler: Function }>();
+  const resources = new Map<string, { config: unknown; handler: (...args: unknown[]) => unknown }>();
   return {
-    resource: vi.fn((name: string, uriOrTemplate: unknown, config: unknown, handler: Function) => {
+    resource: vi.fn((name: string, uriOrTemplate: unknown, config: unknown, handler: (...args: unknown[]) => unknown) => {
       resources.set(name, { config, handler });
     }),
     resources,
-  } as unknown as McpServer & { resources: Map<string, { config: unknown; handler: Function }> };
+  } as unknown as McpServer & { resources: Map<string, { config: unknown; handler: (...args: unknown[]) => unknown }> };
 }
 
 // Create mock HaClient

@@ -6,6 +6,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { EventSubscriber, HaEvent } from '../haClient/events.js';
 import { logger } from '../utils/logger.js';
+import { Permission, hasPermission } from '../permissions/index.js';
+import type { AuthenticatedRequest } from './auth.js';
 
 export interface SSEClient {
   id: string;
@@ -64,6 +66,16 @@ export async function handleEventSubscription(
   res: ServerResponse,
   eventSubscriber: EventSubscriber
 ): Promise<void> {
+  // L2: the SSE stream reads entity state — require QUERY, like every other read.
+  // Auth middleware has already populated req.auth; fail closed if the mask is absent.
+  const userPermissions = ((req as AuthenticatedRequest).auth?.extra?.permissions as number | undefined) ?? 0;
+  if (!hasPermission(userPermissions, Permission.QUERY)) {
+    logger.warn('SSE subscription denied: missing QUERY permission');
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Forbidden', message: 'SSE event subscription requires QUERY permission' }));
+    return;
+  }
+
   const clientId = `sse_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const params = parseQueryParams(req.url ?? '');
 
@@ -72,14 +84,12 @@ export async function handleEventSubscription(
   const entityId = params.get('entity_id') ?? undefined;
   const eventTypesParam = params.get('event_types');
   const eventTypes = eventTypesParam ? eventTypesParam.split(',').map(t => t.trim()) : undefined;
-  const token = params.get('token');
 
   logger.info('New SSE subscription request', {
     clientId,
     domain,
     entityId,
     eventTypes,
-    hasToken: !!token,
   });
 
   // Set SSE headers

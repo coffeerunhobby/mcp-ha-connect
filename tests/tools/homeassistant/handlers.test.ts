@@ -82,9 +82,9 @@ function parseResult(result: { content: { text: string }[] }): unknown {
 
 // Mock server that captures registered handlers
 function createMockServer() {
-  const handlers: Map<string, Function> = new Map();
+  const handlers: Map<string, (...args: unknown[]) => unknown> = new Map();
   return {
-    registerTool: vi.fn((name: string, _config: any, handler: Function) => {
+    registerTool: vi.fn((name: string, _config: any, handler: (...args: unknown[]) => unknown) => {
       handlers.set(name, handler);
     }),
     getHandler: (name: string) => handlers.get(name),
