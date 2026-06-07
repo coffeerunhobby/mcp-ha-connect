@@ -55,25 +55,69 @@ function wrapResponseWithTiming(res: ServerResponse): { res: ServerResponse; sta
 }
 
 /**
- * Parse JSON body from request
+ * Maximum accepted request body size, in bytes (M5 / OWASP API4:2023).
+ * 1 MB is comfortably above any legitimate MCP/JSON-RPC or REST payload.
  */
-function parseBody(req: IncomingMessage): Promise<unknown> {
+export const MAX_BODY_BYTES = 1024 * 1024;
+
+/** Error carrying an HTTP status for the request handler to surface. */
+interface HttpError extends Error {
+  statusCode?: number;
+}
+
+/**
+ * Parse a JSON request body, enforcing a hard size cap (M5).
+ *
+ * If the streamed body exceeds `maxBytes` the promise rejects with a 413-tagged
+ * error and the socket is destroyed, so an attacker cannot exhaust memory by
+ * streaming an unbounded payload. Buffering stops the moment the cap is crossed.
+ */
+export function parseBody(req: IncomingMessage, maxBytes: number = MAX_BODY_BYTES): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', (chunk) => (body += chunk.toString()));
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let aborted = false;
+
+    req.on('data', (chunk: Buffer | string) => {
+      if (aborted) {
+        return;
+      }
+      const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+      size += buf.length;
+      if (size > maxBytes) {
+        aborted = true;
+        const err: HttpError = new Error('Request body too large');
+        err.statusCode = 413;
+        reject(err);
+        req.destroy();
+        return;
+      }
+      chunks.push(buf);
+    });
+
     req.on('end', () => {
-      if (!body) {
+      if (aborted) {
+        return;
+      }
+      if (chunks.length === 0) {
         resolve(undefined);
         return;
       }
       try {
-        resolve(JSON.parse(body));
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
       } catch (error) {
         reject(new Error(`Invalid JSON: ${(error as Error).message}`));
       }
     });
+
     req.on('error', reject);
   });
+}
+
+/** Extract a numeric HTTP status from a thrown value, if present. */
+function errorStatusCode(error: unknown): number | undefined {
+  const code = (error as HttpError | undefined)?.statusCode;
+  return typeof code === 'number' ? code : undefined;
 }
 
 /**
@@ -288,6 +332,13 @@ export async function handleRestApi(
     // Not found
     sendJson(res, 404, { error: 'API endpoint not found' });
   } catch (error) {
+    // M5: a body that exceeded the size cap surfaces as 413, not a generic 500.
+    if (errorStatusCode(error) === 413) {
+      if (!res.headersSent) {
+        sendJson(res, 413, { error: 'Payload Too Large', message: 'Request body exceeds the size limit' });
+      }
+      return;
+    }
     logger.error('REST API error', { error, url });
     // M6: log the detail above; never echo raw error text to the client.
     sendJson(res, 500, {
@@ -497,6 +548,8 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         windowMs: config.rateLimitWindowMs,
         maxRequests: config.rateLimitMaxRequests,
         skipPaths: [healthPath, '/openapi.json'],
+        // M4: only trust forwarding headers from configured proxies.
+        trustedProxies: config.rateLimitTrustedProxies,
       })
     : null;
 
@@ -636,6 +689,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       // Not found
       sendJson(res, 404, { error: 'Not found' });
     } catch (error) {
+      // M5: oversize body → 413 rather than a generic 500.
+      if (errorStatusCode(error) === 413) {
+        if (!res.headersSent) {
+          sendJson(res, 413, { error: 'Payload Too Large', message: 'Request body exceeds the size limit' });
+        }
+        return;
+      }
+
       logger.error('HTTP request error', {
         error,
         method: req.method,
@@ -651,6 +712,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       }
     }
   });
+
+  // M5: bound how long a client may take to deliver headers/body so a slow-loris
+  // connection cannot tie up a socket indefinitely. These cap request *intake*
+  // time, not response duration, so long-lived SSE streams are unaffected.
+  server.headersTimeout = 30_000;   // 30s to send all request headers
+  server.requestTimeout = 60_000;   // 60s to deliver the complete request
+  server.keepAliveTimeout = 5_000;  // 5s idle on a keep-alive connection
+  server.maxRequestsPerSocket = 0;  // unlimited (default); explicit for clarity
 
   // Graceful shutdown handler
   let isShuttingDown = false;
