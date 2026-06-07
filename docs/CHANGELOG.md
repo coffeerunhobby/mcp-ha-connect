@@ -1,3 +1,61 @@
+### 1.3.0
+**Security hardening release.** A full OWASP-aligned audit (API Top 10 2023 + Top 10 2021)
+drove fixes across access control, authentication, injection, transport, configuration,
+resource limits, logging, design, and dependencies. Every fix ships with regression tests
+under `tests/security/` (organized by OWASP category). The server's external behavior is
+unchanged for correctly-configured deployments; the changes close bypasses and tighten
+defaults. Suite grew to 908 unit tests; `npm audit --omit=dev` is clean.
+
+- **Access control (SEC-AC)**
+  - REST `/api/*` routes are now gated by the same RBAC permission bits as their MCP-tool
+    twins — a valid token no longer implies full Home Assistant control. Insufficient
+    permissions return `403`.
+  - SSE `/subscribe_events` now requires the `QUERY` permission; the dead `?token=` query
+    param was removed and SSE CORS is constrained to the configured allowlist.
+- **Authentication (SEC-AUTHN)**
+  - New optional `MCP_AUTH_REQUIRE_EXP` rejects tokens lacking an `exp` claim (defaults
+    **off** for backward compatibility; emits a one-time startup warning when a no-exp token
+    is accepted).
+  - Optional `MCP_AUTH_ISSUER` / `MCP_AUTH_AUDIENCE` validation plus `nbf` and clock-skew checks.
+  - The JWT signing secret must be ≥32 chars when `MCP_AUTH_METHOD=bearer` — startup fails fast otherwise.
+- **Injection / SSRF (SEC-INJ / SEC-SSRF)**
+  - Every interpolated Home Assistant API path segment is now `encodeURIComponent`-encoded and
+    schema-validated (entity/domain/service patterns), closing path-traversal and
+    endpoint-redirection against the HA base URL.
+- **Cryptographic & transport (SEC-CRYPTO)**
+  - Removed the process-global `NODE_TLS_REJECT_UNAUTHORIZED=0` race; self-signed trust is now
+    a per-client `undici` dispatcher used only when `strictSsl=false`. SSE client IDs use
+    `randomUUID()` instead of `Math.random()`.
+- **Configuration (SEC-CONFIG)**
+  - `MCP_AUTH_METHOD=none` now throws at startup on a non-loopback bind (loopback dev still works);
+    loud warning whenever `none` is active.
+  - Opt-in DNS-rebinding Host validation via a new `MCP_HTTP_ALLOWED_HOSTS` env: leave it unset
+    (default) and Host validation stays off so the server works everywhere; set it to the exact
+    host(s) clients use to reach the server (its LAN IP:port and/or public domain) to enforce a
+    `403` on any other `Host` header. Origin/CORS handling is unchanged. Removed the
+    `ALLOWED_ORIGINS=*` wildcard from the shipped compose file. Container runs as non-root
+    (`USER node`). Standard security headers
+    (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`) on every response.
+- **Resource consumption (SEC-DOS)**
+  - Rate-limit keying is spoof-proof: client forwarding headers (`CF-Connecting-IP` /
+    `X-Forwarded-For` / `X-Real-IP`) are honored only when the immediate peer is a configured
+    `MCP_RATE_LIMIT_TRUSTED_PROXIES` entry; otherwise the socket address is used, so forged
+    headers can neither evade the limit nor exhaust memory.
+  - Request bodies are capped at 1 MB (`413` on overflow, socket destroyed immediately) and the
+    HTTP server enforces `headersTimeout`/`requestTimeout`/`keepAliveTimeout` against slow-loris
+    (intake-only — long-lived SSE streams are unaffected).
+- **Logging & disclosure (SEC-LOG)**
+  - Client-facing `500`/SSE errors return a generic message; full detail is logged server-side only.
+  - `/health` now returns `{ "status": "healthy" }` only — version, auth method, AI provider/URL,
+    and client counts are no longer disclosed to unauthenticated callers.
+- **Insecure design (SEC-DESIGN)**
+  - Tool authorization fails **closed**: a missing permission mask denies (was `0xFF` allow-all).
+    stdio (Claude Desktop) opts into local full-trust explicitly; HTTP always carries an explicit mask.
+- **Dependencies (SEC-DEPS)**
+  - Bumped `@modelcontextprotocol/sdk` → `^1.29.0` and `ws` → `^8.21.0`, clearing 8 production
+    advisories (5 high) in the transitive tree. A CI gate test asserts zero high/critical from
+    `npm audit --omit=dev`.
+
 ### 1.2.0
 - **Omada Client Block/Unblock**: Block or unblock a network client by MAC address
   - New tool `omada_blockClient`: denies a client all network access until unblocked
