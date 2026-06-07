@@ -94,7 +94,12 @@ export function buildTransportSecurityOptions(config: EnvironmentConfig): Transp
  */
 export function createStreamTransport(options: StreamTransportOptions): StreamTransportState {
   const { haClient, omadaClient, aiClient, config } = options;
-  const mcpServer = createServer({ haClient, omadaClient, aiClient });
+  const mcpServer = createServer({
+    haClient,
+    omadaClient,
+    aiClient,
+    toolRegistrationMode: config.toolRegistrationMode,
+  });
 
   const enableStatefulSessions = config.stateful;
   const sessionIdGenerator = enableStatefulSessions ? () => randomUUID() : undefined;

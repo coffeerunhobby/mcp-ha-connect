@@ -55,6 +55,10 @@ const envSchema = z
     logFormat: z.enum(['plain', 'json', 'gcp-json']).optional().default('plain'),
     useHttp: createBooleanStringSchema(false),
     stateful: createBooleanStringSchema(false),
+    // Tool registration strategy. `eager` (default) registers every typed tool;
+    // `graph` registers the Omada resource-graph reads (omada_browse/omada_read)
+    // plus typed writes, shrinking the tool-schema budget for low-context models.
+    toolRegistrationMode: z.enum(['eager', 'graph']).optional().default('eager'),
 
     // MCP Server HTTP Configuration
     httpPort: numericStringSchema,
@@ -200,6 +204,7 @@ export interface EnvironmentConfig {
   logFormat: 'plain' | 'json' | 'gcp-json';
   useHttp: boolean;
   stateful: boolean;
+  toolRegistrationMode: 'eager' | 'graph';
 
   // MCP Server HTTP Configuration
   httpPort?: number;
@@ -269,6 +274,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     logFormat: env.MCP_SERVER_LOG_FORMAT,
     useHttp: env.MCP_SERVER_USE_HTTP,
     stateful: env.MCP_SERVER_STATEFUL,
+    toolRegistrationMode: env.MCP_TOOL_REGISTRATION_MODE,
 
     // MCP Server HTTP Configuration
     httpPort: env.MCP_HTTP_PORT,
@@ -362,6 +368,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     logFormat: parsed.data.logFormat,
     useHttp: parsed.data.useHttp,
     stateful: parsed.data.stateful,
+    toolRegistrationMode: parsed.data.toolRegistrationMode,
 
     // MCP Server HTTP Configuration
     httpPort,

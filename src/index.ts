@@ -115,7 +115,12 @@ async function main(): Promise<void> {
     if (config.useHttp) {
       await startHttpServer({ haClient, omadaClient, aiClient, config });
     } else {
-      await startStdioServer({ haClient, omadaClient, aiClient });
+      await startStdioServer({
+        haClient,
+        omadaClient,
+        aiClient,
+        toolRegistrationMode: config.toolRegistrationMode,
+      });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

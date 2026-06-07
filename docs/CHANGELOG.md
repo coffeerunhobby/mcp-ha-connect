@@ -1,3 +1,22 @@
+### Unreleased
+**Feature — Omada resource-graph tool registration (`MCP_TOOL_REGISTRATION_MODE`).**
+Implements the previously-designed-but-unbuilt registration-mode switch as a *resource
+graph* for the Omada plugin. `MCP_TOOL_REGISTRATION_MODE=graph` registers two discovery
+tools — `omada_browse` (navigate a permission-filtered tree of resource **types**, never
+instances) and `omada_read` (generic, per-path-RBAC data fetch with single-page
+pagination) — plus the 5 typed write/action tools, in place of the ~21 individual read
+getters. `eager` (default) is unchanged. A single `OmadaClient.readResource()` primitive
+(path-template driven) backs newly-exposed endpoints (gateway WAN/health, AP speed-test,
+rogue-AP/WIDS, event/alert logs, dashboard CPU/memory, firmware info + controller-wide
+critical-firmware) with no per-endpoint client code. `graph` mode is now a **complete
+superset** of `eager` reads: the ADMIN-gated IDS/IPS threat-management log is exposed at
+`/security/threats`, with its mandatory epoch time-window enforced via required
+`params.startTime`/`params.endTime` (epoch seconds) validated before any controller call —
+the first node to require a higher permission bit (ADMIN) than QUERY, demonstrating the
+per-path RBAC. New manifest (`namespace.ts`) + tools (`graph.ts`); `getCallerPermissions()`
+extracted in `tools/common.ts` and reused for per-path checks. Suite grew by 47 unit tests
+(namespace + graph + config parsing).
+
 ### 1.3.1
 **Patch — RBAC role-name case-insensitivity.** Follow-up to the v1.3.0 fail-closed
 permission change. `getUserPermissions` now resolves both the per-user `role` and the

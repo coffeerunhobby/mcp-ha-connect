@@ -10,7 +10,7 @@ import { logger } from '../utils/logger.js';
 
 // Tool registration functions by domain
 import { registerHomeAssistantTools } from './homeassistant/index.js';
-import { registerOmadaTools } from './omada/index.js';
+import { registerOmadaTools, type OmadaRegistrationMode } from './omada/index.js';
 import { registerAITools } from './ai/index.js';
 
 export interface RegisterToolsOptions {
@@ -18,13 +18,15 @@ export interface RegisterToolsOptions {
   haClient?: HaClient;
   omadaClient?: OmadaClient;
   aiClient?: LocalAIClient;
+  /** Tool registration strategy for the Omada plugin (default 'eager'). */
+  toolRegistrationMode?: OmadaRegistrationMode;
 }
 
 /**
  * Register all available tools based on configured clients
  */
 export function registerAllTools(options: RegisterToolsOptions): void {
-  const { server, haClient, omadaClient, aiClient } = options;
+  const { server, haClient, omadaClient, aiClient, toolRegistrationMode } = options;
   logger.debug('Registering all tools');
 
   let totalTools = 0;
@@ -37,7 +39,7 @@ export function registerAllTools(options: RegisterToolsOptions): void {
 
   // Omada tools (if client provided)
   if (omadaClient) {
-    const omadaToolCount = registerOmadaTools(server, omadaClient);
+    const omadaToolCount = registerOmadaTools(server, omadaClient, toolRegistrationMode);
     totalTools += omadaToolCount;
   }
 

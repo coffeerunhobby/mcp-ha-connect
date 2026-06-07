@@ -8,6 +8,7 @@ import type { HaClient } from '../haClient/index.js';
 import type { LocalAIClient } from '../localAI/index.js';
 import type { OmadaClient } from '../omadaClient/index.js';
 import { registerAllTools } from '../tools/index.js';
+import type { OmadaRegistrationMode } from '../tools/omada/index.js';
 import { registerAllResources } from '../resources/index.js';
 import { generateInstructions } from './instructions.js';
 import { logger } from '../utils/logger.js';
@@ -17,10 +18,12 @@ export interface CreateServerOptions {
   haClient?: HaClient;
   omadaClient?: OmadaClient;
   aiClient?: LocalAIClient;
+  /** Tool registration strategy for the Omada plugin (default 'eager'). */
+  toolRegistrationMode?: OmadaRegistrationMode;
 }
 
 export function createServer(options: CreateServerOptions): McpServer {
-  const { haClient, omadaClient, aiClient } = options;
+  const { haClient, omadaClient, aiClient, toolRegistrationMode } = options;
   logger.debug('Creating MCP server instance');
 
   // Generate instructions based on enabled plugins
@@ -48,6 +51,7 @@ export function createServer(options: CreateServerOptions): McpServer {
     haClient,
     omadaClient,
     aiClient,
+    toolRegistrationMode,
   });
 
   // Register Home Assistant resources (if HA client provided)

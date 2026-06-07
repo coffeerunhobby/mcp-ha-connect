@@ -256,14 +256,37 @@ npm run test:integration
 
 ---
 
-## Known gaps
+## Tool registration modes (`MCP_TOOL_REGISTRATION_MODE`)
 
-- **`MCP_TOOL_REGISTRATION_MODE` is NOT implemented.** Lazy/meta-tool registration
-  (`list_tools` + `execute` instead of all ~60 tool schemas, to save context on small
-  models) was designed but never built — `config.ts` doesn't parse the var and there is
-  no `src/tools/registry.ts` / `metaTools.ts` / `allMetadata.ts`. Setting it in `.env`
-  is a silent no-op; the server always registers every tool eagerly. Either build the
-  feature or drop the var from the NAS `.env`.
+Implemented as a **resource-graph** mode for the Omada plugin (config parses the var;
+`config.toolRegistrationMode` threads through `createServer` → `registerAllTools` →
+`registerOmadaTools`). Values:
+
+- **`eager`** (default) — register every typed tool (~26 Omada tools). Today's behavior;
+  fully backwards-compatible.
+- **`graph`** — register only `omada_browse` + `omada_read` + the 5 typed write/action
+  tools. Reads collapse into a discoverable resource graph (`src/tools/omada/namespace.ts`
+  manifest + `src/tools/omada/graph.ts`), shrinking the tool-schema budget for low-context
+  models while still exposing every read endpoint.
+
+Design invariants (don't regress these):
+- **browse returns TYPES, not instances** — `omada_browse(path)` lists permission-filtered
+  child resource types + metadata (kind, permission, pagination, params). It never
+  enumerates MACs or calls the controller.
+- **read is per-path RBAC, fail-closed** — `omada_read` declares NO static tool permission;
+  each manifest node declares its own bit (most reads = QUERY; the `/security/*` subtree =
+  ADMIN). Unknown / container / under-privileged / missing-required-param paths all return a
+  clean error and never fetch.
+- **single-page pagination** — paginated nodes forward one page/pageSize to a single GET via
+  `OmadaClient.readResource()`; they never walk every page.
+- **graph is a complete superset of eager reads** — every eager read getter has a graph node,
+  including the ADMIN-gated IDS/IPS threat-management log at `/security/threats`. Its mandatory
+  epoch time-window is enforced via required `params.startTime`/`params.endTime` (epoch seconds),
+  validated by `omada_read` before any controller call.
+
+HA and AI plugins are unaffected (still eager). Writes stay typed + individually gated in
+both modes — generic write verbs were deliberately rejected (prompt-injection / hallucination
+surface).
 
 ---
 
