@@ -11,10 +11,11 @@ import type { LocalAIClient } from '../localAI/index.js';
 import type { OmadaClient } from '../omadaClient/index.js';
 import { logger } from '../utils/logger.js';
 import { handleStreamRequest, type StreamTransportState, type StreamTransportOptions } from './stream.js';
-import { handleEventSubscription, getClientCount } from './eventSubscription.js';
+import { handleEventSubscription } from './eventSubscription.js';
 import { RateLimiter } from './rateLimiter.js';
 import { createAuthMiddleware, type AuthenticatedRequest } from './auth.js';
 import { Permission, hasPermission, getPermissionNames } from '../permissions/index.js';
+import { sanitizeError } from '../utils/sanitizeError.js';
 import { VERSION } from '../version.js';
 
 // Session storage for stateful mode
@@ -99,24 +100,16 @@ function sendJson(res: ServerResponse, statusCode: number, data: unknown): void 
 }
 
 /**
- * Handle health check endpoint
+ * Handle health check endpoint (M7 / OWASP A09:2021).
+ *
+ * `/health` is unauthenticated (it is on the auth skip-list so container/orchestrator
+ * probes can reach it). It therefore returns liveness ONLY — never version, auth
+ * method, AI provider URLs, client counts, or any other internal configuration that
+ * would aid an unauthenticated attacker fingerprinting the deployment. Operators who
+ * need that detail can query the authenticated MCP tools (e.g. `getVersion`).
  */
-function handleHealthCheck(res: ServerResponse, config: EnvironmentConfig, aiEnabled: boolean, eventsEnabled: boolean): void {
-  sendJson(res, 200, {
-    status: 'healthy',
-    version: VERSION,
-    transport: 'stream',
-    stateful: config.stateful,
-    authMethod: config.authMethod,
-    aiEnabled,
-    aiProvider: aiEnabled ? config.aiProvider : undefined,
-    aiUrl: aiEnabled ? config.aiUrl : undefined,
-    aiModel: aiEnabled ? config.aiModel : undefined,
-    eventsEnabled,
-    eventsPath: eventsEnabled ? config.sseEventsPath : undefined,
-    eventsConnectedClients: eventsEnabled ? getClientCount() : undefined,
-    rateLimitEnabled: config.rateLimitEnabled,
-  });
+export function handleHealthCheck(res: ServerResponse): void {
+  sendJson(res, 200, { status: 'healthy' });
 }
 
 /**
@@ -296,9 +289,10 @@ export async function handleRestApi(
     sendJson(res, 404, { error: 'API endpoint not found' });
   } catch (error) {
     logger.error('REST API error', { error, url });
+    // M6: log the detail above; never echo raw error text to the client.
     sendJson(res, 500, {
       error: 'Internal server error',
-      message: error instanceof Error ? error.message : String(error),
+      message: sanitizeError(error),
     });
   }
 }
@@ -591,7 +585,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
     try {
       // Health check endpoint
       if (config.httpEnableHealthcheck && url === healthPath) {
-        handleHealthCheck(res, config, !!aiClient, !!eventSubscriber);
+        handleHealthCheck(res);
         return;
       }
 
@@ -649,9 +643,10 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       });
 
       if (!res.headersSent) {
+        // M6: detail is logged above; the client gets only a generic message.
         sendJson(res, 500, {
           error: 'Internal server error',
-          message: error instanceof Error ? error.message : String(error),
+          message: sanitizeError(error),
         });
       }
     }

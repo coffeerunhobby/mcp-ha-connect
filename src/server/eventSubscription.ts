@@ -7,6 +7,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import type { EventSubscriber, HaEvent } from '../haClient/events.js';
 import { logger } from '../utils/logger.js';
+import { sanitizeError } from '../utils/sanitizeError.js';
 import { Permission, hasPermission } from '../permissions/index.js';
 import type { AuthenticatedRequest } from './auth.js';
 
@@ -141,9 +142,10 @@ export async function handleEventSubscription(
       await eventSubscriber.connect();
     } catch (error) {
       logger.error('Failed to connect event subscriber', { error });
+      // M6: log detail above; the SSE client gets a generic message only.
       sendSSEEvent(res, 'error', {
         error: 'Failed to connect to Home Assistant',
-        message: error instanceof Error ? error.message : String(error),
+        message: sanitizeError(error),
       });
       res.end();
       clients.delete(clientId);
@@ -213,9 +215,10 @@ export async function handleEventSubscription(
     });
   } catch (error) {
     logger.error('Failed to subscribe to events', { error, clientId });
+    // M6: log detail above; the SSE client gets a generic message only.
     sendSSEEvent(res, 'error', {
       error: 'Failed to subscribe to events',
-      message: error instanceof Error ? error.message : String(error),
+      message: sanitizeError(error),
     });
   }
 
