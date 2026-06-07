@@ -143,6 +143,27 @@ describe('getUserPermissions', () => {
     const configWithDefault = { ...config, defaultRole: 'READONLY' as const };
     expect(getUserPermissions('unknown', configWithDefault)).toBe(Role.READONLY);
   });
+
+  it('should resolve a lowercase defaultRole (case-insensitive)', () => {
+    // Real-world config commonly uses lowercase ("operator"); it must resolve to
+    // the OPERATOR mask, not silently fall through to an empty/undefined mask.
+    const cfg = { users: [], defaultRole: 'operator' as unknown as 'OPERATOR' };
+    expect(getUserPermissions('unlisted-sub', cfg)).toBe(Role.OPERATOR);
+    expect(getUserPermissions(undefined, cfg)).toBe(Role.OPERATOR);
+  });
+
+  it('should resolve a lowercase per-user role (case-insensitive)', () => {
+    const cfg = {
+      users: [{ sub: 'claude', role: 'admin' as unknown as 'ADMIN' }],
+      defaultRole: 'NONE' as const,
+    };
+    expect(getUserPermissions('claude', cfg)).toBe(Role.ADMIN);
+  });
+
+  it('should fail closed to NONE for an unrecognized role name', () => {
+    const cfg = { users: [], defaultRole: 'wizard' as unknown as 'ADMIN' };
+    expect(getUserPermissions('anyone', cfg)).toBe(Role.NONE);
+  });
 });
 
 describe('parsePermissionsConfig', () => {
