@@ -76,16 +76,17 @@ describe('wrapToolHandler permission checks', () => {
     expect(result.isError).toBe(false);
   });
 
-  it('should default to full permissions when authInfo not set', async () => {
+  it('should fail closed (deny) when authInfo is not set (L3)', async () => {
     const handler = vi.fn().mockResolvedValue(toToolResult('success'));
     const wrapped = wrapToolHandler('testTool', handler, Permission.ADMIN);
 
-    // No authInfo set should default to 0xFF (full permissions)
+    // A missing permission mask must DENY, not default-allow. The trusted-local
+    // stdio path opts into full trust separately (see insecureDesign.test.ts).
     const extra = createExtra(undefined);
     const result = await wrapped({}, extra);
 
-    expect(handler).toHaveBeenCalled();
-    expect(result.isError).toBe(false);
+    expect(handler).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
   });
 
   it('should allow access when no permission required', async () => {

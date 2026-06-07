@@ -13,6 +13,24 @@ import { Permission, hasPermission, getPermissionNames } from '../permissions/in
 export { Permission };
 
 /**
+ * Local-trust flag for the stdio transport (L3 / OWASP A04:2021).
+ *
+ * Tool calls normally carry a permission mask in `authInfo.extra.permissions`,
+ * populated by the HTTP auth middleware (bearer mask, or 0xFF for the loopback
+ * `none` mode). When that mask is ABSENT we fail closed — deny — instead of the
+ * old default-allow `?? 0xFF`.
+ *
+ * The one legitimate no-auth path is stdio (Claude Desktop): there is no per-request
+ * auth and the process owner is the trusted local user. `startStdioServer` opts into
+ * full trust by calling `setLocalFullTrust(true)`. HTTP never enables it.
+ */
+let localFullTrust = false;
+
+export function setLocalFullTrust(enabled: boolean): void {
+  localFullTrust = enabled;
+}
+
+/**
  * Extra context passed to tool handlers
  * Permissions are extracted from authInfo.extra.permissions (MCP SDK standard)
  */
@@ -55,8 +73,11 @@ export function wrapToolHandler<T>(
 ): (args: T, extra: ToolExtra) => Promise<CallToolResult> {
   return async (args: T, extra: ToolExtra): Promise<CallToolResult> => {
     const sessionId = extra.sessionId ?? 'unknown-session';
-    // Extract permissions from MCP SDK authInfo.extra.permissions
-    const userPermissions = (extra.authInfo?.extra?.permissions as number | undefined) ?? 0xFF;
+    // Extract permissions from MCP SDK authInfo.extra.permissions.
+    // L3: fail closed when the mask is absent — only the trusted-local stdio path
+    // (setLocalFullTrust) grants full permissions without an explicit mask.
+    const userPermissions =
+      (extra.authInfo?.extra?.permissions as number | undefined) ?? (localFullTrust ? 0xFF : 0);
 
     // Check permissions if required
     if (requiredPermission !== undefined && !hasPermission(userPermissions, requiredPermission)) {
