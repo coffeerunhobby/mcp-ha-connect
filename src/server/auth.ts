@@ -5,7 +5,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { verifyJwt, type JwtPayload } from '../utils/jwt.js';
-import { getUserPermissions, type PermissionsConfig } from '../permissions/index.js';
+import { getUserPermissions, Role, type PermissionsConfig } from '../permissions/index.js';
 import { logger } from '../utils/logger.js';
 
 export type AuthMethod = 'none' | 'bearer';
@@ -81,10 +81,13 @@ function validateJwt(
     logger.warn('Accepting a JWT without an exp claim; set MCP_AUTH_REQUIRE_EXP=true to enforce token expiry');
   }
 
-  // Get user permissions from config
+  // Get user permissions from config.
+  // L3: fail closed when no permission map is configured — an authenticated token
+  // with no RBAC mapping gets NONE, never full access. (In the real server path
+  // `permConfig` is always supplied by loadConfig, so this is defense in depth.)
   const permissions = permConfig
     ? getUserPermissions(result.payload?.sub, permConfig)
-    : 0xFF; // No config = all permissions
+    : Role.NONE;
 
   return { authenticated: true, payload: result.payload, permissions };
 }
