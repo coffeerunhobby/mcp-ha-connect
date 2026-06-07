@@ -7,6 +7,7 @@ import type { OmadaClient } from '../../omadaClient/index.js';
 import { logger } from '../../utils/logger.js';
 
 import { registerBlockClientTool } from './blockClient.js';
+import { registerOmadaGraphTools } from './graph.js';
 import { registerDisableClientRateLimitTool } from './disableClientRateLimit.js';
 import { registerGetClientTool } from './getClient.js';
 import { registerGetDeviceTool } from './getDevice.js';
@@ -33,8 +34,25 @@ import { registerSetClientRateLimitTool } from './setClientRateLimit.js';
 import { registerSetClientRateLimitProfileTool } from './setClientRateLimitProfile.js';
 import { registerUnblockClientTool } from './unblockClient.js';
 
-export function registerOmadaTools(server: McpServer, client: OmadaClient): number {
-  logger.debug('Registering Omada tools');
+/**
+ * Tool registration strategy for the Omada plugin.
+ *  - `eager` (default): register every typed Omada tool (~25). Backwards-compatible.
+ *  - `graph`: register only the resource-graph reads (`omada_browse` + `omada_read`)
+ *    plus the typed write/action tools. Keeps the tool-schema budget small for
+ *    low-context models while still exposing every read endpoint via the namespace.
+ */
+export type OmadaRegistrationMode = 'eager' | 'graph';
+
+export function registerOmadaTools(
+  server: McpServer,
+  client: OmadaClient,
+  mode: OmadaRegistrationMode = 'eager'
+): number {
+  if (mode === 'graph') {
+    return registerOmadaToolsGraph(server, client);
+  }
+
+  logger.debug('Registering Omada tools', { mode });
   let toolCount = 0;
 
   // Site tools
@@ -84,6 +102,33 @@ export function registerOmadaTools(server: McpServer, client: OmadaClient): numb
   registerGetFirewallSettingTool(server, client);
   toolCount += 8;
 
-  logger.info('Omada tools registered', { toolCount });
+  logger.info('Omada tools registered', { mode, toolCount });
+  return toolCount;
+}
+
+/**
+ * Graph mode: resource-graph reads + typed writes/actions only.
+ *
+ * Reads collapse into `omada_browse` + `omada_read` (see ./graph.ts and
+ * ./namespace.ts). Writes stay as individual, explicitly permission-gated tools —
+ * they mutate real network state, so each keeps its own narrow schema and RBAC
+ * (CONTROL) rather than being funneled through a generic verb.
+ */
+function registerOmadaToolsGraph(server: McpServer, client: OmadaClient): number {
+  logger.debug('Registering Omada tools', { mode: 'graph' });
+  let toolCount = 0;
+
+  // Resource-graph reads (browse + read)
+  toolCount += registerOmadaGraphTools(server, client);
+
+  // Typed write / action tools (unchanged, individually permission-gated)
+  registerSetClientRateLimitTool(server, client);
+  registerSetClientRateLimitProfileTool(server, client);
+  registerDisableClientRateLimitTool(server, client);
+  registerBlockClientTool(server, client);
+  registerUnblockClientTool(server, client);
+  toolCount += 5;
+
+  logger.info('Omada tools registered', { mode: 'graph', toolCount });
   return toolCount;
 }

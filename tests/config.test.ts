@@ -51,8 +51,38 @@ describe('loadConfig', () => {
     expect(config.logFormat).toBe('plain'); // default
     expect(config.useHttp).toBe(false); // default
     expect(config.stateful).toBe(false); // default
+    expect(config.toolRegistrationMode).toBe('eager'); // default
     expect(config.httpEnableHealthcheck).toBe(true); // default
     expect(config.httpAllowCors).toBe(true); // default
+  });
+
+  describe('toolRegistrationMode (MCP_TOOL_REGISTRATION_MODE)', () => {
+    it('defaults to "eager" when unset', () => {
+      const config = loadConfig({
+        HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
+        HA_TOKEN: 'test-token-12345',
+      });
+      expect(config.toolRegistrationMode).toBe('eager');
+    });
+
+    it('parses "graph"', () => {
+      const config = loadConfig({
+        HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
+        HA_TOKEN: 'test-token-12345',
+        MCP_TOOL_REGISTRATION_MODE: 'graph',
+      });
+      expect(config.toolRegistrationMode).toBe('graph');
+    });
+
+    it('rejects an unknown mode', () => {
+      expect(() =>
+        loadConfig({
+          HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
+          HA_TOKEN: 'test-token-12345',
+          MCP_TOOL_REGISTRATION_MODE: 'lazy',
+        })
+      ).toThrow('Invalid environment configuration');
+    });
   });
 
   it('should remove trailing slash from baseUrl', () => {

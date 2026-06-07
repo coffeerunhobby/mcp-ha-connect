@@ -9,6 +9,7 @@ import type {
     GetThreatListOptions,
     ListClientsPastConnectionsOptions,
     OmadaClientInfo,
+    OmadaApiResponse,
     OmadaDeviceInfo,
     OmadaDeviceStats,
     OmadaSiteSummary,
@@ -202,6 +203,70 @@ export class OmadaClient {
     // Generic API call
     public async callApi<T = unknown>(config: RequestOptions): Promise<T> {
         return await this.request.request<T>(config);
+    }
+
+    /**
+     * Read an arbitrary Omada resource described by a path template.
+     *
+     * This is the single client primitive behind the resource-graph `omada_read`
+     * tool: "many endpoints, zero new client methods". A path template may contain
+     * `{placeholder}` segments (each substituted from `siteId`/`pathParams` and
+     * URL-encoded), and may be site-scoped (the common case) or controller-global.
+     *
+     * Pagination is deliberately SINGLE-page: for paginated resources it forwards
+     * one page/pageSize to a single GET rather than walking every page (no giant
+     * payloads). It returns the unwrapped `result` (errorCode !== 0 throws via
+     * `ensureSuccess`).
+     *
+     * @param options.pathTemplate  e.g. '/sites/{siteId}/gateways/{gatewayMac}/wan-status'
+     * @param options.siteScoped    when true (default) `{siteId}` is resolved from siteId/default
+     * @param options.paginated     when true, page/pageSize are sent as query params
+     * @param options.pathParams    values for non-site `{placeholder}` segments
+     * @param options.query         extra query parameters
+     */
+    public async readResource(options: {
+        pathTemplate: string;
+        siteScoped?: boolean;
+        paginated?: boolean;
+        siteId?: string;
+        pathParams?: Record<string, string>;
+        query?: Record<string, unknown>;
+        page?: number;
+        pageSize?: number;
+    }): Promise<unknown> {
+        const {
+            pathTemplate,
+            siteScoped = true,
+            paginated = false,
+            siteId,
+            pathParams = {},
+            query = {},
+            page,
+            pageSize,
+        } = options;
+
+        const substitutions: Record<string, string> = { ...pathParams };
+        if (siteScoped || pathTemplate.includes('{siteId}')) {
+            substitutions.siteId = this.siteOps.resolveSiteId(siteId);
+        }
+
+        const relativePath = pathTemplate.replace(/\{(\w+)\}/g, (_match, key: string) => {
+            const value = substitutions[key];
+            if (value === undefined || value === '') {
+                throw new Error(`Missing required path parameter '${key}' for resource '${pathTemplate}'`);
+            }
+            return encodeURIComponent(value);
+        });
+
+        const effectiveQuery: Record<string, unknown> = { ...query };
+        if (paginated) {
+            effectiveQuery.page = page ?? 1;
+            effectiveQuery.pageSize = pageSize ?? 50;
+        }
+
+        const fullPath = this.buildOmadaPath(relativePath);
+        const response = await this.request.get<OmadaApiResponse<unknown>>(fullPath, effectiveQuery);
+        return this.request.ensureSuccess(response);
     }
 
     /**

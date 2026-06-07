@@ -37,6 +37,21 @@ export function setLocalFullTrust(enabled: boolean): void {
 export type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
 /**
+ * Resolve the caller's permission mask from the MCP SDK auth context.
+ *
+ * L3: fail closed when the mask is absent — only the trusted-local stdio path
+ * (setLocalFullTrust) grants full permissions (0xFF) without an explicit mask.
+ * HTTP requests always carry a mask (bearer-derived, or 0xFF for loopback `none`).
+ *
+ * Exposed so tools that gate per-resource (e.g. the Omada resource-graph
+ * `omada_read`/`omada_browse`) can apply the same extraction + fail-closed
+ * semantics as `wrapToolHandler`, instead of re-reading `authInfo` ad hoc.
+ */
+export function getCallerPermissions(extra: ToolExtra): number {
+  return (extra.authInfo?.extra?.permissions as number | undefined) ?? (localFullTrust ? 0xFF : 0);
+}
+
+/**
  * Convert any value to a CallToolResult
  */
 export function toToolResult(value: unknown, isError = false): CallToolResult {
@@ -76,8 +91,7 @@ export function wrapToolHandler<T>(
     // Extract permissions from MCP SDK authInfo.extra.permissions.
     // L3: fail closed when the mask is absent — only the trusted-local stdio path
     // (setLocalFullTrust) grants full permissions without an explicit mask.
-    const userPermissions =
-      (extra.authInfo?.extra?.permissions as number | undefined) ?? (localFullTrust ? 0xFF : 0);
+    const userPermissions = getCallerPermissions(extra);
 
     // Check permissions if required
     if (requiredPermission !== undefined && !hasPermission(userPermissions, requiredPermission)) {
