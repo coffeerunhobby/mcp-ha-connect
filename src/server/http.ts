@@ -13,7 +13,8 @@ import { logger } from '../utils/logger.js';
 import { handleStreamRequest, type StreamTransportState, type StreamTransportOptions } from './stream.js';
 import { handleEventSubscription, getClientCount } from './eventSubscription.js';
 import { RateLimiter } from './rateLimiter.js';
-import { createAuthMiddleware } from './auth.js';
+import { createAuthMiddleware, type AuthenticatedRequest } from './auth.js';
+import { Permission, hasPermission, getPermissionNames } from '../permissions/index.js';
 import { VERSION } from '../version.js';
 
 // Session storage for stateful mode
@@ -118,10 +119,43 @@ function addRestApiCors(req: IncomingMessage, res: ServerResponse): void {
 }
 
 /**
+ * Resolve the permission a REST `/api/*` route requires.
+ *
+ * Each route mirrors the `Permission.*` bit of its MCP-tool twin so the REST
+ * bridge cannot be used to bypass RBAC (finding H1 / OWASP A01:2021, BFLA).
+ * Read routes require QUERY; the service-call route requires CONTROL (matching
+ * the `callService` tool). Unknown routes return `null` — the handler falls
+ * through to a 404, which needs no permission.
+ */
+export function requiredRestPermission(method: string, pathname: string): number | null {
+  const m = method.toUpperCase();
+
+  if (m === 'GET') {
+    if (
+      pathname === '/api/states' ||
+      pathname === '/api/sensors' ||
+      pathname === '/api/search' ||
+      pathname === '/api/version' ||
+      /^\/api\/states\/[^/]+$/.test(pathname) ||
+      /^\/api\/entities\/[^/]+$/.test(pathname) ||
+      /^\/api\/history\/[^/]+$/.test(pathname)
+    ) {
+      return Permission.QUERY;
+    }
+  }
+
+  if (m === 'POST' && /^\/api\/services\/[^/]+\/[^/]+$/.test(pathname)) {
+    return Permission.CONTROL;
+  }
+
+  return null;
+}
+
+/**
  * Handle REST API requests for Open WebUI compatibility
  * These endpoints translate REST calls to Home Assistant API calls
  */
-async function handleRestApi(
+export async function handleRestApi(
   req: IncomingMessage,
   res: ServerResponse,
   url: string,
@@ -132,6 +166,26 @@ async function handleRestApi(
 
   const parsedUrl = new URL(url, `http://${req.headers.host}`);
   const pathname = parsedUrl.pathname;
+
+  // H1: enforce RBAC on REST routes before touching Home Assistant.
+  const required = requiredRestPermission(req.method ?? 'GET', pathname);
+  if (required !== null) {
+    // Fail closed: a missing mask grants nothing.
+    const userPermissions = ((req as AuthenticatedRequest).auth?.extra?.permissions as number | undefined) ?? 0;
+    if (!hasPermission(userPermissions, required)) {
+      logger.warn('REST API permission denied', {
+        method: req.method,
+        path: pathname,
+        required: getPermissionNames(required),
+        has: getPermissionNames(userPermissions),
+      });
+      sendJson(res, 403, {
+        error: 'Forbidden',
+        message: `This endpoint requires permission: ${getPermissionNames(required).join(', ')}`,
+      });
+      return;
+    }
+  }
 
   try {
     // GET /api/states - Get all entity states
