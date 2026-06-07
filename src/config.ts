@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isValidBindAddress, isValidOrigin } from './utils/config-validations.js';
+import { isValidBindAddress, isValidOrigin, isLoopbackAddress } from './utils/config-validations.js';
 import { parsePermissionsConfig, type PermissionsConfig } from './permissions/index.js';
 import { logger } from './utils/logger.js';
 import type { AIProviderType } from './localAI/types.js';
@@ -137,6 +137,28 @@ const envSchema = z
       message: 'MCP_AUTH_SECRET must be at least 32 characters when MCP_AUTH_METHOD is "bearer"',
       path: ['authSecret'],
     }
+  )
+  .refine(
+    (data) => {
+      // H5: an unauthenticated server must never be reachable off-host. Allow
+      // method=none only when the (explicit) bind address is loopback. A missing
+      // bind address defaults to 127.0.0.1 later, so it is safe.
+      if (
+        data.authMethod === 'none' &&
+        data.httpBindAddr &&
+        !isLoopbackAddress(data.httpBindAddr)
+      ) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message:
+        'MCP_AUTH_METHOD=none is only permitted on a loopback bind address ' +
+        '(127.0.0.0/8 or ::1). Set MCP_AUTH_METHOD=bearer (with MCP_AUTH_SECRET) ' +
+        'to bind a public interface such as 0.0.0.0.',
+      path: ['authMethod'],
+    }
   );
 
 export interface EnvironmentConfig {
@@ -269,11 +291,27 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
 
   const httpPath = parsed.data.httpPath ?? '/mcp';
   const httpBindAddr = parsed.data.httpBindAddr ?? '127.0.0.1';
-  let httpAllowedOrigins = parsed.data.httpAllowedOrigins ?? ['127.0.0.1', 'localhost'];
+  const httpPort = parsed.data.httpPort ?? 3000;
+
+  // M3: default origins must be full scheme://host:port so they actually match a
+  // real browser `Origin` header (the SDK compares it by exact string). Bare
+  // hostnames like "localhost" never match "http://localhost:3000" and so left
+  // DNS-rebinding/CORS protection effectively disabled for the default config.
+  let httpAllowedOrigins =
+    parsed.data.httpAllowedOrigins ??
+    [`http://localhost:${httpPort}`, `http://127.0.0.1:${httpPort}`];
 
   if (httpAllowedOrigins.includes('*')) {
     logger.warn('Wildcard (*) origin allowed - origin validation disabled');
     httpAllowedOrigins = [];
+  }
+
+  // H5: make the no-auth posture loud even when the bind is loopback.
+  if (parsed.data.authMethod === 'none') {
+    logger.warn(
+      'MCP_AUTH_METHOD=none: authentication is DISABLED. This is only permitted ' +
+        'on a loopback bind; set MCP_AUTH_METHOD=bearer to expose the server.'
+    );
   }
 
   return {
@@ -311,7 +349,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     stateful: parsed.data.stateful,
 
     // MCP Server HTTP Configuration
-    httpPort: parsed.data.httpPort,
+    httpPort,
     httpBindAddr,
     httpPath,
     httpEnableHealthcheck: parsed.data.httpEnableHealthcheck,

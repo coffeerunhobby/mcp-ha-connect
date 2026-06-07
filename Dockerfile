@@ -28,4 +28,9 @@ RUN apk add --no-cache curl
 COPY package*.json ./
 RUN npm install --omit=dev
 COPY --from=build /app/dist ./dist
+
+# M10: drop root. The official node image ships a non-root `node` user (uid 1000).
+# Built artifacts under /app are world-readable, so no chown is required; the
+# server listens on 3000 (>1024) which needs no privileged capability.
+USER node
 CMD ["node", "--experimental-quic", "dist/index.js"]
