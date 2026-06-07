@@ -1,3 +1,12 @@
+### 1.2.0
+- **Omada Client Block/Unblock**: Block or unblock a network client by MAC address
+  - New tool `omada_blockClient`: denies a client all network access until unblocked
+  - New tool `omada_unblockClient`: restores a previously blocked client's access
+  - Backed by the Omada Open API `POST .../clients/{mac}/block` and `/unblock` endpoints
+  - Both require the `CONTROL` permission and return a `{ mac, siteId, blocked }` status object
+  - Total Omada tools: 23 → 25
+- All tests passing
+
 ### 1.1.0
 - **Performance: Paginated Entity Queries**: Reduced response sizes by ~98% for entity queries
   - New `LightweightEntity` type returns only essential fields (entity_id, state, friendly_name, unit_of_measurement, last_changed)

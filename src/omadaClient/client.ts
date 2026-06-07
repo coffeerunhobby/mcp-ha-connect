@@ -1,6 +1,7 @@
 import type {
     ActiveClientInfo,
     ClientActivity,
+    ClientBlockStatus,
     ClientPastConnection,
     ClientRateLimitSetting,
     GetClientActivityOptions,
@@ -221,5 +222,38 @@ export class ClientOperations {
             requestBody
         );
         return this.request.ensureSuccess(response);
+    }
+
+    /**
+     * Block a client from the network.
+     * The client is denied network access until it is unblocked.
+     *
+     * @param clientMac - MAC address of the client to block
+     * @param siteId - Optional site ID, uses default from config if not provided
+     * @returns Status object confirming the client was blocked
+     */
+    public async blockClient(clientMac: string, siteId?: string): Promise<ClientBlockStatus> {
+        const resolvedSiteId = this.site.resolveSiteId(siteId);
+        const response = await this.request.post<OmadaApiResponse<unknown>>(
+            this.buildPath(`/sites/${encodeURIComponent(resolvedSiteId)}/clients/${encodeURIComponent(clientMac)}/block`)
+        );
+        this.request.ensureSuccess(response);
+        return { mac: clientMac, siteId: resolvedSiteId, blocked: true };
+    }
+
+    /**
+     * Unblock a previously blocked client, restoring its network access.
+     *
+     * @param clientMac - MAC address of the client to unblock
+     * @param siteId - Optional site ID, uses default from config if not provided
+     * @returns Status object confirming the client was unblocked
+     */
+    public async unblockClient(clientMac: string, siteId?: string): Promise<ClientBlockStatus> {
+        const resolvedSiteId = this.site.resolveSiteId(siteId);
+        const response = await this.request.post<OmadaApiResponse<unknown>>(
+            this.buildPath(`/sites/${encodeURIComponent(resolvedSiteId)}/clients/${encodeURIComponent(clientMac)}/unblock`)
+        );
+        this.request.ensureSuccess(response);
+        return { mac: clientMac, siteId: resolvedSiteId, blocked: false };
     }
 }

@@ -208,8 +208,28 @@ npm run test:integration
   `MCP_HTTP_BIND_ADDR=0.0.0.0` is set.
 - **MCP client connects but tools fail**: check `MCP_HTTP_ALLOWED_ORIGINS` includes
   the Cloudflare domain in both bare and `https://` form.
+- **Claude Desktop shows "Server disconnected" but `/health` is 200**: the client's
+  mcp-remote auth header is malformed. A `"Authorization: Bearer ${MCP_AUTH_TOKEN}"`
+  placeholder does NOT expand on Windows (`cmd /c` uses `%VAR%`, mcp-remote doesn't
+  substitute `${VAR}`) → literal text is sent → server 401 → mcp-remote drops into a
+  failing OAuth flow. Fix: inline the literal JWT in `claude_desktop_config.json`'s
+  `--header` arg, and add `-y` to `npx` so first run doesn't hang. Verify the server
+  side first with a direct `curl` POST to `/mcp` carrying the token.
 - **npm publish returns 404 on PUT**: token likely has per-package scope instead of
   scope-level access, or "Bypass 2FA" is not ticked. Delete token and recreate.
 - **Omada auth error -44106**: check `OMADA_OMADAC_ID` first, not just credentials —
   this error code covers both cases.
 - **Before a release**: always run `npm test` and `npm run build` clean.
+- **On release, bump the version everywhere**: `package.json`, `src/version.ts`,
+  `docs/CHANGELOG.md`, AND `openapi.json` (`info.version`) — the last one drifts easily.
+
+---
+
+## Known gaps
+
+- **`MCP_TOOL_REGISTRATION_MODE` is NOT implemented.** Lazy/meta-tool registration
+  (`list_tools` + `execute` instead of all ~60 tool schemas, to save context on small
+  models) was designed but never built — `config.ts` doesn't parse the var and there is
+  no `src/tools/registry.ts` / `metaTools.ts` / `allMetadata.ts`. Setting it in `.env`
+  is a silent no-op; the server always registers every tool eagerly. Either build the
+  feature or drop the var from the NAS `.env`.
