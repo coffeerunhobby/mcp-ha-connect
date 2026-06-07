@@ -7,7 +7,8 @@ export type { HaConfig } from './haConfig.js';
 export type { HaVersion } from './config.js';
 
 // State types
-export type { Entity, EntityListResponse } from './states.js';
+export type { Entity, EntityListResponse, LightweightEntity, PaginatedEntityResponse } from './states.js';
+export { toLightweight } from './states.js';
 
 // Automation types
 export type {

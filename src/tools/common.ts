@@ -319,3 +319,50 @@ export const customRequestSchema = z.object({
   data: z.unknown().optional().describe('Request body data'),
   siteId: z.string().min(1).optional().describe('Site ID'),
 });
+
+// =============================================================================
+// Home Assistant pagination schemas
+// =============================================================================
+
+/**
+ * Pagination schema for Home Assistant entity queries.
+ * Reduces response size by returning paginated, lightweight entities by default.
+ */
+export const haPaginationSchema = z.object({
+  page: z.number().int().min(1).default(1).describe('Page number (starts at 1)'),
+  pageSize: z.number().int().min(1).max(200).default(50).describe('Entities per page (1-200, default 50)'),
+  includeAttributes: z.boolean().default(false).describe('Include full attributes (increases response size significantly)'),
+});
+
+/**
+ * Pagination parameters interface for Home Assistant queries.
+ */
+export interface HAPaginationParams {
+  page: number;
+  pageSize: number;
+  includeAttributes: boolean;
+}
+
+/**
+ * Apply pagination to an array and return paginated result metadata.
+ */
+export function paginateArray<T>(items: T[], page: number, pageSize: number): {
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+  items: T[];
+} {
+  const totalCount = items.length;
+  const totalPages = Math.ceil(totalCount / pageSize);
+  const start = (page - 1) * pageSize;
+  const paginatedItems = items.slice(start, start + pageSize);
+
+  return {
+    page,
+    pageSize,
+    totalCount,
+    totalPages,
+    items: paginatedItems,
+  };
+}

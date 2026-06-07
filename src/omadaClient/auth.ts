@@ -143,11 +143,20 @@ export class AuthManager {
             const data = (await response.json()) as OmadaApiResponse<TokenResult>;
 
             if (data.errorCode !== 0) {
+                // Error code -44106 is returned by Omada for both invalid client credentials
+                // AND an incorrect omadacId — the API does not distinguish between them.
+                const hint = data.errorCode === -44106
+                    ? ' Check OMADA_CLIENT_ID, OMADA_CLIENT_SECRET, and OMADA_OMADAC_ID.'
+                    : '';
+                const message = `${data.msg ?? 'Omada authentication failed'} (errorCode=${data.errorCode})${hint}`;
                 logger.error('Omada authentication error', {
                     errorCode: data.errorCode,
                     message: data.msg,
+                    ...(data.errorCode === -44106 && {
+                        hint: 'Verify OMADA_CLIENT_ID, OMADA_CLIENT_SECRET, and OMADA_OMADAC_ID are all correct',
+                    }),
                 });
-                throw new Error(data.msg ?? 'Omada authentication failed');
+                throw new Error(message);
             }
 
             const token = data.result ?? ({} as TokenResult);

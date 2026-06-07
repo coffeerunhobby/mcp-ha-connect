@@ -58,19 +58,26 @@ async function main(): Promise<void> {
     let omadaClient: OmadaClient | undefined;
     if (config.omadaPluginEnabled) {
       if (config.omadaBaseUrl && config.omadaClientId && config.omadaClientSecret && config.omadacId) {
-        omadaClient = new OmadaClient({
-          baseUrl: config.omadaBaseUrl,
-          clientId: config.omadaClientId,
-          clientSecret: config.omadaClientSecret,
-          omadacId: config.omadacId,
-          siteId: config.siteId,
-          strictSsl: config.omadaStrictSsl,
-          requestTimeout: config.requestTimeout,
-        });
+        try {
+          omadaClient = new OmadaClient({
+            baseUrl: config.omadaBaseUrl,
+            clientId: config.omadaClientId,
+            clientSecret: config.omadaClientSecret,
+            omadacId: config.omadacId,
+            siteId: config.siteId,
+            strictSsl: config.omadaStrictSsl,
+            requestTimeout: config.requestTimeout,
+          });
 
-        // Test Omada connection by listing sites
-        const sites = await omadaClient.listSites();
-        logger.info('Connected to Omada controller', { siteCount: sites.length });
+          // Test Omada connection by listing sites
+          const sites = await omadaClient.listSites();
+          logger.info('Connected to Omada controller', { siteCount: sites.length });
+        } catch (error) {
+          logger.warn('Omada controller not available - Omada tools will be disabled', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          omadaClient = undefined;
+        }
       } else {
         logger.warn('Omada plugin enabled but required config not set (OMADA_BASE_URL, OMADA_CLIENT_ID, OMADA_CLIENT_SECRET, OMADA_OMADAC_ID)');
       }

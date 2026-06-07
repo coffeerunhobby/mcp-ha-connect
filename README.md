@@ -49,6 +49,7 @@ See [docs/QUICK_START.md](docs/QUICK_START.md) for Docker, HTTP server mode, n8n
 - Full type safety with TypeScript
 - Stateful and stateless session support
 - JWT authentication with role-based access control
+- MCP Server Instructions for improved LLM tool selection
 
 ## Available Tools (60 Total)
 
@@ -58,12 +59,12 @@ See [docs/QUICK_START.md](docs/QUICK_START.md) for Docker, HTTP server mode, n8n
 
 | Tool | Description |
 |------|-------------|
-| `getStates` | Get all entity states from Home Assistant |
+| `getStates` | Get all entity states (paginated, 50/page default). Use `includeAttributes=true` for full data |
 | `getState` | Get the state of a specific entity by entity_id |
-| `getEntitiesByDomain` | Get all entities for a specific domain |
-| `searchEntities` | Search for entities by name or entity_id |
-| `getAllSensors` | Get all sensor and binary_sensor entities |
-| `listEntities` | List entities with filtering (domain, state, search, limit) |
+| `getEntitiesByDomain` | Get entities for a domain (paginated, 50/page default). Use `includeAttributes=true` for full data |
+| `searchEntities` | Search entities by name/entity_id (paginated, 50/page default). Use `includeAttributes=true` for full data |
+| `getAllSensors` | Get all sensors (paginated, 50/page default). Use `includeAttributes=true` for full data |
+| `listEntities` | List entities with filtering (domain, state, search, limit). Use `includeAttributes=true` for full data |
 | `getDomainSummary` | Get summary statistics for a domain |
 | `getHistory` | Get historical data for an entity |
 | `listPersons` | List all household members with location state (home/away) |
@@ -603,6 +604,18 @@ Connect to a remote MCP server using mcp-remote:
 - Setting file permissions on config files (e.g., `chmod 600`)
 - Using environment variable substitution if supported by your client
 - Never committing config files with real tokens to version control
+
+## Server Instructions
+
+The server provides MCP Server Instructions during initialization to help LLMs understand how to optimally use the available tools. Instructions are dynamically generated based on enabled plugins and include:
+
+- **Entity Queries**: Guidance on pagination, attribute inclusion, and using specialized tools like `listPersons`
+- **Device Control**: When to use specialized control tools vs generic `callService`
+- **Automation Workflows**: Best practices for creating and testing automations
+- **Omada Operations**: Site context requirements, client vs device distinction, rate limiting safety
+- **Cross-Plugin Integration**: How HA presence detection correlates with Omada network clients
+
+Instructions follow MCP best practices: concise, actionable, and focused on tool relationships rather than repeating individual tool descriptions.
 
 ## Troubleshooting
 

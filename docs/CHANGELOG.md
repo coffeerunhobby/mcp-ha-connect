@@ -1,3 +1,22 @@
+### 1.1.0
+- **Performance: Paginated Entity Queries**: Reduced response sizes by ~98% for entity queries
+  - New `LightweightEntity` type returns only essential fields (entity_id, state, friendly_name, unit_of_measurement, last_changed)
+  - Default response size reduced from ~800KB-1MB to ~15KB for typical queries
+  - Pagination with configurable page size (1-200, default 50)
+  - Tools updated: `getStates`, `getAllSensors`, `searchEntities`, `getEntitiesByDomain`, `listEntities`
+  - New parameters: `page`, `pageSize`, `includeAttributes` (set `includeAttributes=true` for full entity data)
+  - Backward compatible: tools work without parameters using sensible defaults
+- **MCP Server Instructions**: Added server instructions for improved LLM tool selection
+  - Instructions are sent during MCP initialization to guide LLMs on optimal tool usage
+  - Dynamically generated based on enabled plugins (HA, Omada, AI)
+  - Covers entity queries, device control, automation workflows, Omada operations, and cross-plugin integration
+  - Follows MCP best practices for concise, actionable guidance
+- **Fix: Graceful Omada startup degradation**: Server no longer crashes when Omada credentials are invalid or controller is unreachable
+  - Omada plugin disables itself with a warning instead of taking down the whole server
+  - Home Assistant and AI plugins continue working normally
+- **Fix: Omada auth error clarity**: Error code `-44106` now explicitly hints to check `OMADA_OMADAC_ID` in addition to client credentials, since Omada returns the same code for both invalid credentials and an incorrect controller ID (e.g. after a controller version upgrade)
+- All 829 tests passing
+
 ### 1.0.0
 - **TP-Link Omada Network Integration**: Full support for Omada SDN controller
   - 24 new tools for network management (total tools: 60)

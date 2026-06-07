@@ -114,18 +114,21 @@ describe('HomeAssistant Tool Handlers', () => {
   describe('getStates', () => {
     it('should return all entity states', async () => {
       const states = [
-        { entity_id: 'light.living_room', state: 'on' },
-        { entity_id: 'sensor.temperature', state: '22.5' },
+        { entity_id: 'light.living_room', state: 'on', attributes: { friendly_name: 'Living Room Light' }, last_changed: '2026-01-01T00:00:00Z' },
+        { entity_id: 'sensor.temperature', state: '22.5', attributes: { friendly_name: 'Temperature', unit_of_measurement: '°C' }, last_changed: '2026-01-01T00:00:00Z' },
       ];
       mockClient.getStates.mockResolvedValue(states);
       registerGetStatesTool(server as any, mockClient as any);
 
       const handler = server.getHandler('getStates')!;
-      const result = await handler({}, mockExtra);
+      // Pass pagination defaults explicitly (MCP SDK applies Zod defaults in production)
+      const result = await handler({ page: 1, pageSize: 50, includeAttributes: false }, mockExtra);
 
       expect(mockClient.getStates).toHaveBeenCalled();
-      const parsed = parseResult(result) as { count: number };
-      expect(parsed.count).toBe(2);
+      const parsed = parseResult(result) as { totalCount: number; page: number; pageSize: number };
+      expect(parsed.totalCount).toBe(2);
+      expect(parsed.page).toBe(1);
+      expect(parsed.pageSize).toBe(50);
     });
   });
 
@@ -369,39 +372,46 @@ describe('HomeAssistant Tool Handlers', () => {
 
   describe('query tools', () => {
     it('getEntitiesByDomain should return entities', async () => {
-      mockClient.getEntitiesByDomain.mockResolvedValue([{ entity_id: 'light.test', state: 'on' }]);
+      mockClient.getEntitiesByDomain.mockResolvedValue([{ entity_id: 'light.test', state: 'on', attributes: {}, last_changed: '2026-01-01' }]);
       registerGetEntitiesByDomainTool(server as any, mockClient as any);
 
       const handler = server.getHandler('getEntitiesByDomain')!;
-      const result = await handler({ domain: 'light' }, mockExtra);
+      // Pass pagination defaults explicitly (MCP SDK applies Zod defaults in production)
+      const result = await handler({ domain: 'light', page: 1, pageSize: 50, includeAttributes: false }, mockExtra);
 
       expect(mockClient.getEntitiesByDomain).toHaveBeenCalledWith('light');
-      const parsed = parseResult(result) as { count: number };
-      expect(parsed.count).toBe(1);
+      const parsed = parseResult(result) as { totalCount: number; page: number };
+      expect(parsed.totalCount).toBe(1);
+      expect(parsed.page).toBe(1);
     });
 
     it('searchEntities should search entities', async () => {
-      mockClient.searchEntities.mockResolvedValue([{ entity_id: 'light.living_room', state: 'on' }]);
+      mockClient.searchEntities.mockResolvedValue([{ entity_id: 'light.living_room', state: 'on', attributes: { friendly_name: 'Living Room' }, last_changed: '2026-01-01' }]);
       registerSearchEntitiesTool(server as any, mockClient as any);
 
       const handler = server.getHandler('searchEntities')!;
-      const result = await handler({ query: 'living' }, mockExtra);
+      // Pass pagination defaults explicitly (MCP SDK applies Zod defaults in production)
+      const result = await handler({ query: 'living', page: 1, pageSize: 50, includeAttributes: false }, mockExtra);
 
       expect(mockClient.searchEntities).toHaveBeenCalledWith('living');
-      expect(result.content[0].text).toContain('light.living_room');
+      const parsed = parseResult(result) as { totalCount: number; entities: Array<{ entity_id: string }> };
+      expect(parsed.totalCount).toBe(1);
+      expect(parsed.entities[0].entity_id).toBe('light.living_room');
     });
 
     it('getAllSensors should return sensors', async () => {
-      const sensors = { count: 1, sensors: [{ entity_id: 'sensor.temp', state: '22' }] };
+      const sensors = [{ entity_id: 'sensor.temp', state: '22', attributes: {}, last_changed: '2026-01-01' }];
       mockClient.getAllSensors.mockResolvedValue(sensors);
       registerGetAllSensorsTool(server as any, mockClient as any);
 
       const handler = server.getHandler('getAllSensors')!;
-      const result = await handler({}, mockExtra);
+      // Pass pagination defaults explicitly (MCP SDK applies Zod defaults in production)
+      const result = await handler({ page: 1, pageSize: 50, includeAttributes: false }, mockExtra);
 
       expect(mockClient.getAllSensors).toHaveBeenCalled();
-      const parsed = parseResult(result) as { count: number };
-      expect(parsed.count).toBe(1);
+      const parsed = parseResult(result) as { totalCount: number; page: number };
+      expect(parsed.totalCount).toBe(1);
+      expect(parsed.page).toBe(1);
     });
 
     it('getDomainSummary should return summary', async () => {
@@ -417,13 +427,14 @@ describe('HomeAssistant Tool Handlers', () => {
     });
 
     it('listEntities should list entities', async () => {
-      mockClient.listEntities.mockResolvedValue([{ entity_id: 'light.test', state: 'on' }]);
+      mockClient.listEntities.mockResolvedValue([{ entity_id: 'light.test', state: 'on', attributes: {}, last_changed: '2026-01-01' }]);
       registerListEntitiesTool(server as any, mockClient as any);
 
       const handler = server.getHandler('listEntities')!;
-      const result = await handler({ domain: 'light', state: 'on' }, mockExtra);
+      // Pass defaults explicitly (MCP SDK applies Zod defaults in production)
+      const result = await handler({ domain: 'light', state: 'on', limit: 50, includeAttributes: false }, mockExtra);
 
-      expect(mockClient.listEntities).toHaveBeenCalledWith({ domain: 'light', state: 'on' });
+      expect(mockClient.listEntities).toHaveBeenCalledWith({ domain: 'light', state: 'on', limit: 50 });
       expect(result.content[0].text).toContain('light.test');
     });
 
