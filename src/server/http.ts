@@ -500,6 +500,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
     secret: config.authSecret,
     permissions: config.permissions,
     skipPaths: [healthPath, '/openapi.json'],
+    requireExp: config.authRequireExp,
+    issuer: config.authIssuer,
+    audience: config.authAudience,
   });
 
   // Initialize event subscriber if SSE events are enabled and HA is configured

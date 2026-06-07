@@ -15,7 +15,16 @@ export interface AuthConfig {
   secret?: string;
   permissions?: PermissionsConfig;
   skipPaths?: string[];
+  /** Reject tokens without an exp claim (H3). */
+  requireExp?: boolean;
+  /** Expected JWT issuer, if any (L6). */
+  issuer?: string;
+  /** Expected JWT audience, if any (L6). */
+  audience?: string;
 }
+
+/** Emit the "no exp" advisory at most once per process. */
+let warnedNoExp = false;
 
 export interface AuthResult {
   authenticated: boolean;
@@ -32,7 +41,18 @@ export interface AuthenticatedRequest extends IncomingMessage {
 /**
  * Validate JWT from Authorization header
  */
-function validateJwt(req: IncomingMessage, secret: string, permConfig?: PermissionsConfig): AuthResult {
+interface ClaimPolicy {
+  requireExp?: boolean;
+  issuer?: string;
+  audience?: string;
+}
+
+function validateJwt(
+  req: IncomingMessage,
+  secret: string,
+  permConfig?: PermissionsConfig,
+  policy: ClaimPolicy = {}
+): AuthResult {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
@@ -44,10 +64,21 @@ function validateJwt(req: IncomingMessage, secret: string, permConfig?: Permissi
   }
 
   const token = authHeader.slice(7);
-  const result = verifyJwt(token, secret);
+  const result = verifyJwt(token, secret, {
+    requireExp: policy.requireExp,
+    issuer: policy.issuer,
+    audience: policy.audience,
+    clockSkewSec: 60,
+  });
 
   if (!result.valid) {
     return { authenticated: false, error: result.error };
+  }
+
+  // H3: warn (once) when accepting a token that can never expire.
+  if (!policy.requireExp && result.payload?.exp === undefined && !warnedNoExp) {
+    warnedNoExp = true;
+    logger.warn('Accepting a JWT without an exp claim; set MCP_AUTH_REQUIRE_EXP=true to enforce token expiry');
   }
 
   // Get user permissions from config
@@ -63,7 +94,7 @@ function validateJwt(req: IncomingMessage, secret: string, permConfig?: Permissi
  * Returns true if request should proceed, false if blocked
  */
 export function createAuthMiddleware(config: AuthConfig): (req: IncomingMessage, res: ServerResponse) => boolean {
-  const { method, secret, permissions: permConfig, skipPaths = [] } = config;
+  const { method, secret, permissions: permConfig, skipPaths = [], requireExp, issuer, audience } = config;
 
   return (req: IncomingMessage, res: ServerResponse): boolean => {
     if (method === 'none') {
@@ -95,7 +126,7 @@ export function createAuthMiddleware(config: AuthConfig): (req: IncomingMessage,
         return false;
       }
 
-      const result = validateJwt(req, secret, permConfig);
+      const result = validateJwt(req, secret, permConfig, { requireExp, issuer, audience });
 
       if (!result.authenticated) {
         logger.warn('Auth failed', { path, error: result.error, ip: req.socket.remoteAddress });
