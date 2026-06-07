@@ -64,6 +64,7 @@ const envSchema = z
     httpHealthcheckPath: z.string().optional(),
     httpAllowCors: createBooleanStringSchema(true),
     httpAllowedOrigins: z.string().optional().transform((v) => v?.split(',').map((s) => s.trim()).filter(Boolean)),
+    httpAllowedHosts: z.string().optional().transform((v) => v?.split(',').map((s) => s.trim()).filter(Boolean)),
 
     // SSE Event Subscription Configuration
     sseEventsEnabled: createBooleanStringSchema(true),
@@ -208,6 +209,12 @@ export interface EnvironmentConfig {
   httpHealthcheckPath?: string;
   httpAllowCors: boolean;
   httpAllowedOrigins?: string[];
+  /**
+   * Opt-in list of Host-header values (host[:port]) the server is reached by.
+   * When set, DNS-rebinding Host validation is enforced at the transport (M3);
+   * when unset, Host validation is OFF (origin/CORS is handled separately).
+   */
+  httpAllowedHosts?: string[];
 
   // SSE Event Subscription Configuration
   sseEventsEnabled: boolean;
@@ -271,6 +278,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     httpHealthcheckPath: env.MCP_HTTP_HEALTHCHECK_PATH,
     httpAllowCors: env.MCP_HTTP_ALLOW_CORS,
     httpAllowedOrigins: env.MCP_HTTP_ALLOWED_ORIGINS,
+    httpAllowedHosts: env.MCP_HTTP_ALLOWED_HOSTS,
 
     // SSE Event Subscription Configuration
     sseEventsEnabled: env.MCP_SSE_EVENTS_ENABLED,
@@ -363,6 +371,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     httpHealthcheckPath: parsed.data.httpHealthcheckPath,
     httpAllowCors: parsed.data.httpAllowCors,
     httpAllowedOrigins,
+    httpAllowedHosts: parsed.data.httpAllowedHosts,
 
     // SSE Event Subscription Configuration
     sseEventsEnabled: parsed.data.sseEventsEnabled,
