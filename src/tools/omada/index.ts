@@ -6,6 +6,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { OmadaClient } from '../../omadaClient/index.js';
 import { logger } from '../../utils/logger.js';
 
+import { registerBlockClientTool } from './blockClient.js';
 import { registerDisableClientRateLimitTool } from './disableClientRateLimit.js';
 import { registerGetClientTool } from './getClient.js';
 import { registerGetDeviceTool } from './getDevice.js';
@@ -30,6 +31,7 @@ import { registerListSitesTool } from './listSites.js';
 import { registerSearchDevicesTool } from './searchDevices.js';
 import { registerSetClientRateLimitTool } from './setClientRateLimit.js';
 import { registerSetClientRateLimitProfileTool } from './setClientRateLimitProfile.js';
+import { registerUnblockClientTool } from './unblockClient.js';
 
 export function registerOmadaTools(server: McpServer, client: OmadaClient): number {
   logger.debug('Registering Omada tools');
@@ -61,6 +63,11 @@ export function registerOmadaTools(server: McpServer, client: OmadaClient): numb
   registerSetClientRateLimitProfileTool(server, client);
   registerDisableClientRateLimitTool(server, client);
   toolCount += 4;
+
+  // Client block tools
+  registerBlockClientTool(server, client);
+  registerUnblockClientTool(server, client);
+  toolCount += 2;
 
   // Security tools
   registerGetThreatListTool(server, client);

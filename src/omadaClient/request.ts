@@ -51,6 +51,13 @@ export class RequestHandler {
     }
 
     /**
+     * Make a POST request to the Omada API.
+     */
+    public async post<T>(path: string, data?: unknown): Promise<T> {
+        return await this.request<T>({ method: 'POST', url: path, data });
+    }
+
+    /**
      * Make an arbitrary HTTP request to the Omada API.
      */
     public async request<T>(config: RequestOptions, retry = true): Promise<T> {

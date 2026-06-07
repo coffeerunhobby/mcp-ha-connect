@@ -1,5 +1,6 @@
 export type { ActiveClientInfo } from './activeClientInfo.js';
 export type { ClientActivity, GetClientActivityOptions } from './clientActivity.js';
+export type { ClientBlockStatus } from './clientBlockStatus.js';
 export type { ClientPastConnection, ListClientsPastConnectionsOptions } from './clientPastConnection.js';
 export type { OmadaApiResponse } from './omadaApiResponse.js';
 export type { OmadaClientInfo } from './omadaClientInfo.js';

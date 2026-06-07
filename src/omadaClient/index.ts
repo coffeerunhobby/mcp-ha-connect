@@ -1,6 +1,7 @@
 import type {
     ActiveClientInfo,
     ClientActivity,
+    ClientBlockStatus,
     ClientPastConnection,
     ClientRateLimitSetting,
     GetClientActivityOptions,
@@ -149,6 +150,15 @@ export class OmadaClient {
 
     public async disableClientRateLimit(clientMac: string, siteId?: string): Promise<ClientRateLimitSetting> {
         return await this.clientOps.disableClientRateLimit(clientMac, siteId);
+    }
+
+    // Client block operations
+    public async blockClient(clientMac: string, siteId?: string): Promise<ClientBlockStatus> {
+        return await this.clientOps.blockClient(clientMac, siteId);
+    }
+
+    public async unblockClient(clientMac: string, siteId?: string): Promise<ClientBlockStatus> {
+        return await this.clientOps.unblockClient(clientMac, siteId);
     }
 
     // Security operations

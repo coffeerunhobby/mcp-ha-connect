@@ -550,23 +550,39 @@ Use the HTTP transport with your MCP-compatible web client:
 3. Set transport to Streamable HTTP (MCP 2025-03-26)
 4. Enable CORS by adding your origin to `MCP_HTTP_ALLOWED_ORIGINS`
 
-### With Remote MCP Proxy (uvx)
+### With Remote MCP Proxy (mcp-remote)
 
-Connect to a remote MCP server using mcp-remote:
+Connect a stdio-only client (Claude Desktop, LM Studio) to a remote HTTP MCP
+server using [`mcp-remote`](https://www.npmjs.com/package/mcp-remote). On Windows,
+launch it through `cmd /c` and include `-y` so the first run never blocks on the
+npx install prompt:
 
 ```json
 {
   "mcpServers": {
     "homeassistant": {
-      "command": "uvx",
+      "command": "cmd",
       "args": [
+        "/c",
+        "npx",
+        "-y",
         "mcp-remote",
-        "http://your-server:3000/mcp"
+        "https://your-server.example/mcp",
+        "--header",
+        "Authorization: Bearer <your-jwt-token>"
       ]
     }
   }
 }
 ```
+
+> ⚠️ **Do not use `${VAR}` placeholders in the `--header` value.** A config like
+> `"Authorization: Bearer ${MCP_AUTH_TOKEN}"` with a matching `env` block does **not**
+> work on Windows: `cmd /c` only expands `%VAR%` (not `${VAR}`), and mcp-remote does
+> not substitute it either. The literal text `${MCP_AUTH_TOKEN}` is sent as the token,
+> the server replies `401`, and mcp-remote then falls into a failing OAuth flow that
+> surfaces as **"Server disconnected"**. Inline the actual JWT instead. (On macOS/Linux
+> you can instead let your shell expand the variable before the client launches.)
 
 ## Network Configuration Notes
 
@@ -636,6 +652,25 @@ docker run --rm -i \
   -e HA_TOKEN=your_token \
   ghcr.io/coffeerunhobby/mcp-ha-connect:latest
 ```
+
+### mcp-remote Shows "Server disconnected" (401)
+
+If `/health` returns `200` but the client shows **"Server disconnected"**, the
+auth header is almost certainly malformed. Most common cause: a `${VAR}`
+placeholder in the `--header` value that never got expanded (see the warning under
+[With Remote MCP Proxy](#with-remote-mcp-proxy-mcp-remote)). Verify the endpoint
+accepts your token directly:
+
+```bash
+curl -i -X POST https://your-server.example/mcp \
+  -H "Authorization: Bearer <your-jwt-token>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"diag","version":"1.0"}}}'
+```
+
+A `200` with an `initialize` result means the server and token are fine — fix the
+client config (inline the literal token). A `401` means the token itself is wrong.
 
 ### Docker `host.docker.internal` Not Working (Linux)
 

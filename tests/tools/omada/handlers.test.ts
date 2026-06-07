@@ -22,6 +22,8 @@ import { registerGetRateLimitProfilesTool } from '../../../src/tools/omada/getRa
 import { registerSetClientRateLimitTool } from '../../../src/tools/omada/setClientRateLimit.js';
 import { registerSetClientRateLimitProfileTool } from '../../../src/tools/omada/setClientRateLimitProfile.js';
 import { registerDisableClientRateLimitTool } from '../../../src/tools/omada/disableClientRateLimit.js';
+import { registerBlockClientTool } from '../../../src/tools/omada/blockClient.js';
+import { registerUnblockClientTool } from '../../../src/tools/omada/unblockClient.js';
 import { registerGetThreatListTool } from '../../../src/tools/omada/getThreatList.js';
 import { registerGetInternetInfoTool } from '../../../src/tools/omada/getInternetInfo.js';
 import { registerGetPortForwardingStatusTool } from '../../../src/tools/omada/getPortForwardingStatus.js';
@@ -61,6 +63,8 @@ function createMockClient() {
     setClientRateLimit: vi.fn(),
     setClientRateLimitProfile: vi.fn(),
     disableClientRateLimit: vi.fn(),
+    blockClient: vi.fn(),
+    unblockClient: vi.fn(),
     getThreatList: vi.fn(),
     getInternetInfo: vi.fn(),
     getPortForwardingStatus: vi.fn(),
@@ -521,6 +525,54 @@ describe('Omada Tool Handlers - Rate Limit Tools', () => {
 
       expect(parsed).toEqual(mockResult);
       expect(client.disableClientRateLimit).toHaveBeenCalledWith('AA:BB:CC:DD:EE:FF', 'site1');
+    });
+  });
+
+  describe('omada_blockClient', () => {
+    it('should register the tool', () => {
+      registerBlockClientTool(server, client as OmadaClient);
+      expect(server.registerTool).toHaveBeenCalledWith(
+        'omada_blockClient',
+        expect.objectContaining({ description: expect.any(String) }),
+        expect.any(Function)
+      );
+    });
+
+    it('should block a client', async () => {
+      const mockResult = { mac: 'AA:BB:CC:DD:EE:FF', siteId: 'site1', blocked: true };
+      (client.blockClient as ReturnType<typeof vi.fn>).mockResolvedValue(mockResult);
+
+      registerBlockClientTool(server, client as OmadaClient);
+      const handler = server.handlers.get('omada_blockClient')!.handler;
+      const result = await handler({ clientMac: 'AA:BB:CC:DD:EE:FF', siteId: 'site1' }, mockExtra);
+      const parsed = parseResult(result);
+
+      expect(parsed).toEqual(mockResult);
+      expect(client.blockClient).toHaveBeenCalledWith('AA:BB:CC:DD:EE:FF', 'site1');
+    });
+  });
+
+  describe('omada_unblockClient', () => {
+    it('should register the tool', () => {
+      registerUnblockClientTool(server, client as OmadaClient);
+      expect(server.registerTool).toHaveBeenCalledWith(
+        'omada_unblockClient',
+        expect.objectContaining({ description: expect.any(String) }),
+        expect.any(Function)
+      );
+    });
+
+    it('should unblock a client', async () => {
+      const mockResult = { mac: 'AA:BB:CC:DD:EE:FF', siteId: 'site1', blocked: false };
+      (client.unblockClient as ReturnType<typeof vi.fn>).mockResolvedValue(mockResult);
+
+      registerUnblockClientTool(server, client as OmadaClient);
+      const handler = server.handlers.get('omada_unblockClient')!.handler;
+      const result = await handler({ clientMac: 'AA:BB:CC:DD:EE:FF', siteId: 'site1' }, mockExtra);
+      const parsed = parseResult(result);
+
+      expect(parsed).toEqual(mockResult);
+      expect(client.unblockClient).toHaveBeenCalledWith('AA:BB:CC:DD:EE:FF', 'site1');
     });
   });
 });
