@@ -1,3 +1,30 @@
+### 1.4.0
+**Feature — Omada resource graph expanded to broad read coverage (no tool-schema cost).**
+Because `graph` mode keeps the tool surface at two tools (`omada_browse` + `omada_read`)
+regardless of how many resources the manifest declares, the namespace was widened from ~33
+to **54 readable nodes** with zero increase in the tool-schema budget — the "breadth without
+bloat" payoff of progressive disclosure. Every new node is grounded in the controller's own
+OpenAPI spec (required params verified) and the reference TP-Link Omada API client, then
+backed by the existing generic `OmadaClient.readResource()` primitive (no new client code):
+
+- *Completed the typed-read parity set* — `/devices/search` (global device search) and
+  `/network/load-balance` (multi-WAN status) close the last gaps so every typed Omada read
+  getter now has a graph node.
+- *Tier 2 (network insight)* — `/devices/cable-test` (`/ports`, `/results`, `/logs`; requires
+  `switchMac`), `/network/port-forwarding/rules` (the full NAT rule list, vs. status only),
+  `/network/dhcp-leases` (active leases), and dashboard analytics
+  `/dashboard/client-distribution`, `/dashboard/traffic-distribution`,
+  `/dashboard/traffic-activities` (the latter two default to a last-24h epoch-seconds window).
+- *Tier 3 (curated home-relevant subset)* — selected from the controller's ~900-endpoint
+  long tail, skipping enterprise gear (fiber/OLT, site-templates, RADIUS/LDAP, enterprise
+  VPN): `/devices/poe`, `/devices/lldp`, `/network/dhcp-reservations`, `/network/static-routes`,
+  `/network/ip-mac-binding`, `/network/attack-defense`, `/network/acls/{gateway,switch,eap}`,
+  `/network/url-filters/{gateway,eap}`, `/network/mac-filters/{allow,deny}`, and
+  `/wifi/band-steering`. All read-only and QUERY-gated, consistent with `/network/firewall`.
+
+Paginated nodes forward a single `page`/`pageSize` to one GET (no page-walking). Suite grew
+by the corresponding namespace wiring tests.
+
 ### 1.3.4
 **Feature — Omada resource-graph tool registration (`MCP_TOOL_REGISTRATION_MODE`).**
 Implements the previously-designed-but-unbuilt registration-mode switch as a *resource

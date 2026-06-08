@@ -22,6 +22,11 @@ function makeRecordingClient(): { client: any; calls: Array<Record<string, unkno
       calls.push(opts);
       return Promise.resolve({ ok: true });
     },
+    // Typed client methods backing a few graph nodes (recorded like readResource).
+    searchDevices: (searchKey: string) => {
+      calls.push({ __method: 'searchDevices', searchKey });
+      return Promise.resolve([]);
+    },
   };
   return { client, calls };
 }
@@ -251,6 +256,128 @@ describe('Omada namespace - fixed node wiring', () => {
       expect(opts.paginated).toBe(true);
       expect(opts.page).toBe(2);
       expect(opts.pageSize).toBe(25);
+    }
+  });
+});
+
+describe('Omada namespace - Tier-2 / loose-end node wiring', () => {
+  it('/devices/search forwards searchKey to the typed client method', async () => {
+    const opts = await fetchOpts('/devices/search', { params: { searchKey: 'switch' } });
+    expect(opts.__method).toBe('searchDevices');
+    expect(opts.searchKey).toBe('switch');
+  });
+
+  it('/devices/cable-test is a browse-only container', () => {
+    const node = getResourceNode('/devices/cable-test');
+    expect(node?.kind).toBe('container');
+    expect(node?.fetch).toBeUndefined();
+    const children = childrenOf('/devices/cable-test').map((n) => n.path);
+    expect(children).toEqual(
+      expect.arrayContaining(['/devices/cable-test/ports', '/devices/cable-test/results', '/devices/cable-test/logs'])
+    );
+  });
+
+  it('cable-test nodes substitute switchMac into the path template', async () => {
+    const cases: Array<[string, string]> = [
+      ['/devices/cable-test/ports', '/sites/{siteId}/cable-test/switches/{switchMac}/ports'],
+      ['/devices/cable-test/results', '/sites/{siteId}/cable-test/switches/{switchMac}/full-results'],
+      ['/devices/cable-test/logs', '/sites/{siteId}/cable-test/switches/{switchMac}/logs'],
+    ];
+    for (const [path, tmpl] of cases) {
+      const opts = await fetchOpts(path, { params: { switchMac: 'AA-BB-CC-DD-EE-FF' } });
+      expect(opts.pathTemplate).toBe(tmpl);
+      expect((opts.pathParams as Record<string, string>).switchMac).toBe('AA-BB-CC-DD-EE-FF');
+    }
+  });
+
+  it('/network/port-forwarding/rules reads the NAT rule list, paginated', async () => {
+    const opts = await fetchOpts('/network/port-forwarding/rules', { page: 3, pageSize: 20 });
+    expect(opts.pathTemplate).toBe('/sites/{siteId}/nat/port-forwardings');
+    expect(opts.paginated).toBe(true);
+    expect(opts.page).toBe(3);
+    expect(opts.pageSize).toBe(20);
+  });
+
+  it('/network/dhcp-leases reads the DHCP user-list, paginated', async () => {
+    const opts = await fetchOpts('/network/dhcp-leases');
+    expect(opts.pathTemplate).toBe('/sites/{siteId}/setting/service/dhcp/user-list');
+    expect(opts.paginated).toBe(true);
+  });
+
+  it('/network/load-balance reads WAN load-balance status (no params)', async () => {
+    const opts = await fetchOpts('/network/load-balance');
+    expect(opts.pathTemplate).toBe('/sites/{siteId}/internet/load-balance/status');
+    expect(opts.paginated).toBeFalsy();
+  });
+
+  it('/dashboard/client-distribution reads with no time window', async () => {
+    const opts = await fetchOpts('/dashboard/client-distribution');
+    expect(opts.pathTemplate).toBe('/sites/{siteId}/dashboard/client-distribution');
+    expect(opts.query).toBeUndefined();
+  });
+
+  it('/dashboard/traffic-distribution and /dashboard/traffic-activities forward a second-precision window', async () => {
+    for (const path of ['/dashboard/traffic-distribution', '/dashboard/traffic-activities']) {
+      const opts = await fetchOpts(path);
+      const query = opts.query as Record<string, number>;
+      expect(query.start).toBeTypeOf('number');
+      expect(query.end).toBeTypeOf('number');
+      expect(query.end).toBeGreaterThan(query.start);
+      // 10-digit epoch-seconds, not ms.
+      expect(String(query.end).length).toBeLessThanOrEqual(11);
+    }
+  });
+});
+
+describe('Omada namespace - Tier-3 curated node wiring', () => {
+  // Each entry: graph path → expected controller path template (all paginated unless noted).
+  const PAGINATED: Array<[string, string]> = [
+    ['/devices/poe', '/sites/{siteId}/switches/ports/poe-info'],
+    ['/network/dhcp-reservations', '/sites/{siteId}/setting/service/dhcp'],
+    ['/network/static-routes', '/sites/{siteId}/routing/static-routings'],
+    ['/network/ip-mac-binding', '/sites/{siteId}/ip-mac-binds'],
+    ['/network/acls/gateway', '/sites/{siteId}/acls/osg-acls'],
+    ['/network/acls/switch', '/sites/{siteId}/acls/osw-acls'],
+    ['/network/acls/eap', '/sites/{siteId}/acls/eap-acls'],
+    ['/network/url-filters/gateway', '/sites/{siteId}/url-filters/gateway'],
+    ['/network/url-filters/eap', '/sites/{siteId}/url-filters/eap'],
+    ['/network/mac-filters/allow', '/sites/{siteId}/mac-filters/allow'],
+    ['/network/mac-filters/deny', '/sites/{siteId}/mac-filters/deny'],
+  ];
+  const SIMPLE: Array<[string, string]> = [
+    ['/devices/lldp', '/sites/{siteId}/lldp'],
+    ['/network/attack-defense', '/sites/{siteId}/attack-defense'],
+    ['/wifi/band-steering', '/sites/{siteId}/band-steering'],
+  ];
+
+  it('paginated Tier-3 nodes map to the correct controller path and forward page/pageSize', async () => {
+    for (const [path, tmpl] of PAGINATED) {
+      const opts = await fetchOpts(path, { page: 2, pageSize: 10 });
+      expect(opts.pathTemplate).toBe(tmpl);
+      expect(opts.paginated).toBe(true);
+      expect(opts.page).toBe(2);
+      expect(opts.pageSize).toBe(10);
+    }
+  });
+
+  it('simple Tier-3 nodes map to the correct controller path with no pagination', async () => {
+    for (const [path, tmpl] of SIMPLE) {
+      const opts = await fetchOpts(path);
+      expect(opts.pathTemplate).toBe(tmpl);
+      expect(opts.paginated).toBeFalsy();
+    }
+  });
+
+  it('Tier-3 grouping containers are browse-only with the expected children', () => {
+    const groups: Array<[string, string[]]> = [
+      ['/network/acls', ['/network/acls/gateway', '/network/acls/switch', '/network/acls/eap']],
+      ['/network/url-filters', ['/network/url-filters/gateway', '/network/url-filters/eap']],
+      ['/network/mac-filters', ['/network/mac-filters/allow', '/network/mac-filters/deny']],
+    ];
+    for (const [parent, kids] of groups) {
+      expect(getResourceNode(parent)?.kind).toBe('container');
+      expect(getResourceNode(parent)?.fetch).toBeUndefined();
+      expect(childrenOf(parent).map((n) => n.path)).toEqual(expect.arrayContaining(kids));
     }
   });
 });

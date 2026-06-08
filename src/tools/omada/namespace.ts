@@ -167,6 +167,90 @@ export const OMADA_RESOURCES: ResourceNode[] = [
     params: [{ name: 'stackId', required: true, description: 'Switch stack identifier' }],
     fetch: (c, a) => c.getSwitchStackDetail(a.params?.stackId ?? '', a.siteId),
   },
+  {
+    path: '/devices/search',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Search infrastructure devices across all sites by name/MAC/model. Requires searchKey.',
+    params: [{ name: 'searchKey', required: true, description: 'Text to match against device name, MAC, or model' }],
+    fetch: (c, a) => c.searchDevices(a.params?.searchKey ?? ''),
+  },
+
+  // ---- Cable test (switch port diagnostics) -----------------------------
+  {
+    path: '/devices/cable-test',
+    kind: 'container',
+    permission: Q,
+    description: 'Switch-port cable diagnostics. Children require a switchMac (find via /devices).',
+  },
+  {
+    path: '/devices/cable-test/ports',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Ports available for cable testing on a switch. Requires switchMac.',
+    params: [{ name: 'switchMac', required: true, description: 'Switch MAC address' }],
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/cable-test/switches/{switchMac}/ports',
+        siteId: a.siteId,
+        pathParams: { switchMac: a.params?.switchMac ?? '' },
+      }),
+  },
+  {
+    path: '/devices/cable-test/results',
+    kind: 'leaf',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Full cable-test results (pair status, length, fault distance) for a switch. Requires switchMac.',
+    params: [{ name: 'switchMac', required: true, description: 'Switch MAC address' }],
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/cable-test/switches/{switchMac}/full-results',
+        siteId: a.siteId,
+        pathParams: { switchMac: a.params?.switchMac ?? '' },
+      }),
+  },
+  {
+    path: '/devices/cable-test/logs',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Cable-test run history for a switch. Requires switchMac.',
+    params: [{ name: 'switchMac', required: true, description: 'Switch MAC address' }],
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/cable-test/switches/{switchMac}/logs',
+        siteId: a.siteId,
+        pathParams: { switchMac: a.params?.switchMac ?? '' },
+      }),
+  },
+  {
+    path: '/devices/poe',
+    kind: 'collection',
+    permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
+    estimatedSize: 'small',
+    description: 'Per-port PoE status across switches (which ports deliver power, to what, and how much). Paginated.',
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/switches/ports/poe-info',
+        siteId: a.siteId,
+        paginated: true,
+        page: a.page,
+        pageSize: a.pageSize,
+      }),
+  },
+  {
+    path: '/devices/lldp',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Site-wide LLDP neighbor information (physical link/topology discovery between devices).',
+    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/lldp', siteId: a.siteId }),
+  },
 
   // ---- Clients (connected users) ----------------------------------------
   {
@@ -300,6 +384,193 @@ export const OMADA_RESOURCES: ResourceNode[] = [
       c.getPortForwardingStatus(a.params?.type === 'UPnP' ? 'UPnP' : 'User', a.siteId, a.page ?? 1, a.pageSize ?? 10),
   },
   {
+    path: '/network/port-forwarding/rules',
+    kind: 'collection',
+    permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
+    estimatedSize: 'small',
+    description: 'Configured NAT port-forwarding rules (the full rule list, not just status). Paginated — use page/pageSize.',
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/nat/port-forwardings',
+        siteId: a.siteId,
+        paginated: true,
+        page: a.page,
+        pageSize: a.pageSize,
+      }),
+  },
+  {
+    path: '/network/dhcp-leases',
+    kind: 'collection',
+    permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
+    estimatedSize: 'medium',
+    description: 'Active DHCP leases across all DHCP servers on the site (paginated). Use page/pageSize. See /network/dhcp-reservations for static reservations.',
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/setting/service/dhcp/user-list',
+        siteId: a.siteId,
+        paginated: true,
+        page: a.page,
+        pageSize: a.pageSize,
+      }),
+  },
+  {
+    path: '/network/load-balance',
+    kind: 'leaf',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Multi-WAN load-balance status for the gateway (which WANs are up / in the balancing pool).',
+    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/internet/load-balance/status', siteId: a.siteId }),
+  },
+  {
+    path: '/network/dhcp-reservations',
+    kind: 'collection',
+    permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
+    estimatedSize: 'small',
+    description: 'Static DHCP reservations (each maps a client MAC to a fixed IP). Paginated. See /network/dhcp-leases for active leases.',
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/setting/service/dhcp',
+        siteId: a.siteId,
+        paginated: true,
+        page: a.page,
+        pageSize: a.pageSize,
+      }),
+  },
+  {
+    path: '/network/static-routes',
+    kind: 'collection',
+    permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
+    estimatedSize: 'small',
+    description: 'Configured static routes for the gateway (destination → next-hop). Paginated.',
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/routing/static-routings',
+        siteId: a.siteId,
+        paginated: true,
+        page: a.page,
+        pageSize: a.pageSize,
+      }),
+  },
+  {
+    path: '/network/ip-mac-binding',
+    kind: 'collection',
+    permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
+    estimatedSize: 'small',
+    description: 'IP↔MAC binding entries (ARP-spoofing protection: which MACs are pinned to which IPs). Paginated.',
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/ip-mac-binds',
+        siteId: a.siteId,
+        paginated: true,
+        page: a.page,
+        pageSize: a.pageSize,
+      }),
+  },
+  {
+    path: '/network/attack-defense',
+    kind: 'leaf',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Gateway attack-defense settings (flood/scan/spoof protection toggles and thresholds).',
+    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/attack-defense', siteId: a.siteId }),
+  },
+
+  // ---- Access-control lists (read-only policy visibility) ---------------
+  { path: '/network/acls', kind: 'container', permission: Q, description: 'Access-control lists by enforcement point (gateway, switch, EAP/AP).' },
+  {
+    path: '/network/acls/gateway',
+    kind: 'collection',
+    permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
+    estimatedSize: 'small',
+    description: 'Gateway ACL rules (osg-acls). Paginated.',
+    fetch: (c, a) =>
+      c.readResource({ pathTemplate: '/sites/{siteId}/acls/osg-acls', siteId: a.siteId, paginated: true, page: a.page, pageSize: a.pageSize }),
+  },
+  {
+    path: '/network/acls/switch',
+    kind: 'collection',
+    permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
+    estimatedSize: 'small',
+    description: 'Switch ACL rules (osw-acls). Paginated.',
+    fetch: (c, a) =>
+      c.readResource({ pathTemplate: '/sites/{siteId}/acls/osw-acls', siteId: a.siteId, paginated: true, page: a.page, pageSize: a.pageSize }),
+  },
+  {
+    path: '/network/acls/eap',
+    kind: 'collection',
+    permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
+    estimatedSize: 'small',
+    description: 'EAP/AP ACL rules (eap-acls). Paginated.',
+    fetch: (c, a) =>
+      c.readResource({ pathTemplate: '/sites/{siteId}/acls/eap-acls', siteId: a.siteId, paginated: true, page: a.page, pageSize: a.pageSize }),
+  },
+
+  // ---- URL filtering (content controls) ---------------------------------
+  { path: '/network/url-filters', kind: 'container', permission: Q, description: 'URL-filtering rules (content/parental controls) by enforcement point.' },
+  {
+    path: '/network/url-filters/gateway',
+    kind: 'collection',
+    permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
+    estimatedSize: 'small',
+    description: 'Gateway URL-filter rules. Paginated.',
+    fetch: (c, a) =>
+      c.readResource({ pathTemplate: '/sites/{siteId}/url-filters/gateway', siteId: a.siteId, paginated: true, page: a.page, pageSize: a.pageSize }),
+  },
+  {
+    path: '/network/url-filters/eap',
+    kind: 'collection',
+    permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
+    estimatedSize: 'small',
+    description: 'EAP/AP URL-filter rules. Paginated.',
+    fetch: (c, a) =>
+      c.readResource({ pathTemplate: '/sites/{siteId}/url-filters/eap', siteId: a.siteId, paginated: true, page: a.page, pageSize: a.pageSize }),
+  },
+
+  // ---- MAC filtering -----------------------------------------------------
+  { path: '/network/mac-filters', kind: 'container', permission: Q, description: 'Wireless MAC allow/deny filtering lists.' },
+  {
+    path: '/network/mac-filters/allow',
+    kind: 'collection',
+    permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
+    estimatedSize: 'small',
+    description: 'MAC addresses on the allow list. Paginated.',
+    fetch: (c, a) =>
+      c.readResource({ pathTemplate: '/sites/{siteId}/mac-filters/allow', siteId: a.siteId, paginated: true, page: a.page, pageSize: a.pageSize }),
+  },
+  {
+    path: '/network/mac-filters/deny',
+    kind: 'collection',
+    permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
+    estimatedSize: 'small',
+    description: 'MAC addresses on the deny list. Paginated.',
+    fetch: (c, a) =>
+      c.readResource({ pathTemplate: '/sites/{siteId}/mac-filters/deny', siteId: a.siteId, paginated: true, page: a.page, pageSize: a.pageSize }),
+  },
+  {
     path: '/network/rate-limit-profiles',
     kind: 'collection',
     permission: Q,
@@ -375,6 +646,14 @@ export const OMADA_RESOURCES: ResourceNode[] = [
       a.params?.ssidId
         ? c.getSsidDetail(a.params.wlanId ?? '', a.params.ssidId, a.siteId)
         : c.getSsidList(a.params?.wlanId ?? '', a.siteId),
+  },
+  {
+    path: '/wifi/band-steering',
+    kind: 'leaf',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Band-steering settings for the site (steering clients between 2.4/5/6 GHz radios).',
+    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/band-steering', siteId: a.siteId }),
   },
 
   // ---- Events / alerts (paginated) --------------------------------------
@@ -471,6 +750,44 @@ export const OMADA_RESOURCES: ResourceNode[] = [
     ],
     fetch: (c, a) =>
       c.readResource({ pathTemplate: '/sites/{siteId}/dashboard/top-device-memory-usage', siteId: a.siteId, query: resolveUsageWindowSec(a.params) }),
+  },
+  {
+    path: '/dashboard/client-distribution',
+    kind: 'leaf',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Breakdown of connected clients by category (wired/wireless, band, SSID). No time window required.',
+    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/dashboard/client-distribution', siteId: a.siteId }),
+  },
+  {
+    path: '/dashboard/traffic-distribution',
+    kind: 'leaf',
+    permission: Q,
+    estimatedSize: 'small',
+    description:
+      'Traffic distribution across the site over a time window (default: last 24h). Override with params.startTime / ' +
+      'params.endTime (epoch SECONDS).',
+    params: [
+      { name: 'startTime', required: false, description: 'Window start, epoch seconds (default: 24h ago)' },
+      { name: 'endTime', required: false, description: 'Window end, epoch seconds (default: now)' },
+    ],
+    fetch: (c, a) =>
+      c.readResource({ pathTemplate: '/sites/{siteId}/dashboard/traffic-distribution', siteId: a.siteId, query: resolveUsageWindowSec(a.params) }),
+  },
+  {
+    path: '/dashboard/traffic-activities',
+    kind: 'leaf',
+    permission: Q,
+    estimatedSize: 'medium',
+    description:
+      'Traffic activity over time (a time-series for charting) for the site (default window: last 24h). Override with ' +
+      'params.startTime / params.endTime (epoch SECONDS).',
+    params: [
+      { name: 'startTime', required: false, description: 'Window start, epoch seconds (default: 24h ago)' },
+      { name: 'endTime', required: false, description: 'Window end, epoch seconds (default: now)' },
+    ],
+    fetch: (c, a) =>
+      c.readResource({ pathTemplate: '/sites/{siteId}/dashboard/traffic-activities', siteId: a.siteId, query: resolveUsageWindowSec(a.params) }),
   },
 
   // ---- Firmware ----------------------------------------------------------
