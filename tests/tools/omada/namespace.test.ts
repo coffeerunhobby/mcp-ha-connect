@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   OMADA_RESOURCES,
+  auditFilters,
   childrenOf,
   getResourceNode,
   normalizePath,
@@ -149,12 +150,12 @@ describe('Omada namespace - manifest invariants', () => {
     }
   });
 
-  it('reads are QUERY except the ADMIN-gated security subtree', () => {
+  it('reads are QUERY except the ADMIN-gated security and audit subtrees', () => {
     for (const node of OMADA_RESOURCES) {
       if (!node.fetch) {
         continue;
       }
-      if (node.path.startsWith('/security')) {
+      if (node.path.startsWith('/security') || node.path.startsWith('/audit')) {
         expect(node.permission).toBe(Permission.ADMIN);
       } else {
         expect((node.permission & Permission.QUERY) === Permission.QUERY).toBe(true);
@@ -162,8 +163,9 @@ describe('Omada namespace - manifest invariants', () => {
     }
   });
 
-  it('the /security container is also ADMIN-gated', () => {
+  it('the /security and /audit containers are ADMIN-gated', () => {
     expect(getResourceNode('/security')?.permission).toBe(Permission.ADMIN);
+    expect(getResourceNode('/audit')?.permission).toBe(Permission.ADMIN);
   });
 
   it('paginated nodes declare a default page size', () => {
@@ -379,5 +381,103 @@ describe('Omada namespace - Tier-3 curated node wiring', () => {
       expect(getResourceNode(parent)?.fetch).toBeUndefined();
       expect(childrenOf(parent).map((n) => n.path)).toEqual(expect.arrayContaining(kids));
     }
+  });
+});
+
+describe('Omada namespace - Tier-4 node wiring (VPN / profiles / schedules / backup / audit)', () => {
+  it('exposes the Tier-4 subtrees at the root', () => {
+    const paths = childrenOf('/').map((n) => n.path);
+    expect(paths).toEqual(expect.arrayContaining(['/vpn', '/profiles', '/schedules', '/backup', '/audit']));
+  });
+
+  it('Tier-4 grouping containers are browse-only with the expected children', () => {
+    const groups: Array<[string, string[]]> = [
+      ['/vpn', ['/vpn/site-to-site', '/vpn/client-to-site', '/vpn/wireguard', '/vpn/ipsec-stats']],
+      ['/vpn/client-to-site', ['/vpn/client-to-site/servers', '/vpn/client-to-site/clients']],
+      ['/profiles', ['/profiles/ppsk', '/profiles/time-range']],
+      ['/schedules', ['/schedules/poe', '/schedules/port', '/schedules/upgrade']],
+      ['/backup', ['/backup/files', '/backup/result']],
+      ['/audit', ['/audit/site', '/audit/global']],
+    ];
+    for (const [parent, kids] of groups) {
+      expect(getResourceNode(parent)?.kind).toBe('container');
+      expect(getResourceNode(parent)?.fetch).toBeUndefined();
+      expect(childrenOf(parent).map((n) => n.path)).toEqual(expect.arrayContaining(kids));
+    }
+  });
+
+  it('simple Tier-4 reads map to the correct controller path with no pagination', async () => {
+    const SIMPLE: Array<[string, string]> = [
+      ['/vpn/site-to-site', '/sites/{siteId}/vpn/site-to-site-vpns'],
+      ['/vpn/client-to-site/servers', '/sites/{siteId}/vpn/client-to-site-vpn-servers'],
+      ['/vpn/client-to-site/clients', '/sites/{siteId}/vpn/client-to-site-vpn-clients'],
+      ['/vpn/wireguard', '/sites/{siteId}/vpn/wireguards'],
+      ['/profiles/time-range', '/sites/{siteId}/time-range-profiles'],
+      ['/schedules/poe', '/sites/{siteId}/poe-schedules'],
+      ['/schedules/port', '/sites/{siteId}/port-schedules'],
+      ['/schedules/upgrade', '/sites/{siteId}/upgrade-schedules'],
+      ['/backup/files', '/sites/{siteId}/maintenance/backup/files'],
+      ['/backup/result', '/sites/{siteId}/backup/result'],
+    ];
+    for (const [path, tmpl] of SIMPLE) {
+      const opts = await fetchOpts(path);
+      expect(opts.pathTemplate).toBe(tmpl);
+      expect(opts.paginated).toBeFalsy();
+    }
+  });
+
+  it('/vpn/site-to-site fetches a single tunnel by id', async () => {
+    const opts = await fetchOpts('/vpn/site-to-site', { id: 'vpn-123' });
+    expect(opts.pathTemplate).toBe('/sites/{siteId}/vpn/site-to-site-vpns/{vpnId}');
+    expect((opts.pathParams as Record<string, string>).vpnId).toBe('vpn-123');
+  });
+
+  it('/vpn/ipsec-stats is a paginated single-page read', async () => {
+    const opts = await fetchOpts('/vpn/ipsec-stats', { page: 2, pageSize: 25 });
+    expect(opts.pathTemplate).toBe('/sites/{siteId}/setting/vpn/stats/ipsec');
+    expect(opts.paginated).toBe(true);
+    expect(opts.page).toBe(2);
+    expect(opts.pageSize).toBe(25);
+  });
+
+  it('/profiles/ppsk forwards the required type as a query param', async () => {
+    const opts = await fetchOpts('/profiles/ppsk', { params: { type: '1' } });
+    expect(opts.pathTemplate).toBe('/sites/{siteId}/ppsk-profiles');
+    expect((opts.query as Record<string, unknown>).type).toBe(1);
+  });
+
+  it('/audit/site is a site-scoped paginated ADMIN read', async () => {
+    const opts = await fetchOpts('/audit/site', { page: 3, pageSize: 20 });
+    expect(opts.pathTemplate).toBe('/sites/{siteId}/audit-logs');
+    expect(opts.paginated).toBe(true);
+    expect(opts.page).toBe(3);
+    expect(opts.pageSize).toBe(20);
+    // No filters supplied → empty query object.
+    expect(opts.query).toEqual({});
+  });
+
+  it('/audit/global is NOT site-scoped and reads the controller-wide log', async () => {
+    const opts = await fetchOpts('/audit/global');
+    expect(opts.pathTemplate).toBe('/audit-logs');
+    expect(opts.siteScoped).toBe(false);
+    expect(opts.paginated).toBe(true);
+  });
+});
+
+describe('Omada namespace - auditFilters helper', () => {
+  it('returns an empty object when no params are given', () => {
+    expect(auditFilters(undefined)).toEqual({});
+    expect(auditFilters({})).toEqual({});
+  });
+
+  it('maps startTime/endTime to numeric filters.* keys', () => {
+    expect(auditFilters({ startTime: '1700000000000', endTime: '1700003600000' })).toEqual({
+      'filters.startTime': 1700000000000,
+      'filters.endTime': 1700003600000,
+    });
+  });
+
+  it('passes searchKey through and omits absent bounds', () => {
+    expect(auditFilters({ searchKey: 'login' })).toEqual({ searchKey: 'login' });
   });
 });
