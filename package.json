@@ -19,6 +19,7 @@
     "test:coverage": "vitest run --coverage --no-color --exclude 'tests/integration/**'",
     "test:integration": "node --env-file=.env node_modules/vitest/vitest.mjs run --no-color tests/integration/",
     "lint": "eslint src tests",
+    "check:sync": "node scripts/check-version-sync.mjs",
     "generate:jwt": "tsx --env-file=.env scripts/generate-jwt.ts"
   },
   "keywords": [
