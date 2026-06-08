@@ -9,6 +9,7 @@ import { loadConfig } from './config.js';
 import { HaClient } from './haClient/index.js';
 import { LocalAIClient } from './localAI/index.js';
 import { OmadaClient } from './omadaClient/index.js';
+import { checkConfiguredSite } from './omadaClient/site.js';
 import { startHttpServer } from './server/http.js';
 import { startStdioServer } from './server/stdio.js';
 import { initLogger, logger } from './utils/logger.js';
@@ -71,7 +72,18 @@ async function main(): Promise<void> {
 
           // Test Omada connection by listing sites
           const sites = await omadaClient.listSites();
-          logger.info('Connected to Omada controller', { siteCount: sites.length });
+
+          // Omada is the source of truth: a configured OMADA_SITE_ID that isn't
+          // on the controller is a deployment bug (drifted site id), not a
+          // transient outage. Fail the Omada plugin loudly — HA and AI keep
+          // working — instead of silently scoping every read to a dead site.
+          const siteError = checkConfiguredSite(config.siteId, sites);
+          if (siteError) {
+            logger.error(`Omada plugin disabled - invalid OMADA_SITE_ID. ${siteError}`);
+            omadaClient = undefined;
+          } else {
+            logger.info('Connected to Omada controller', { siteCount: sites.length });
+          }
         } catch (error) {
           logger.warn('Omada controller not available - Omada tools will be disabled', {
             error: error instanceof Error ? error.message : String(error),

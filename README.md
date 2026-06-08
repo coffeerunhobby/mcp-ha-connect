@@ -4,6 +4,7 @@ A production-ready Model Context Protocol (MCP) server for Home Assistant integr
 
 [![npm version](https://badge.fury.io/js/%40coffeerunhobby%2Fmcp-ha-connect.svg)](https://www.npmjs.com/package/@coffeerunhobby/mcp-ha-connect)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/coffeerunhobby/mcp-ha-connect/pkgs/container/mcp-ha-connect)
+[![Discord](https://img.shields.io/badge/Discord-join%20chat-5865F2?logo=discord&logoColor=white)](https://discord.gg/zeQ6aWVFgS)
 
 See [docs/QUICK_START.md](docs/QUICK_START.md) for Docker, HTTP server mode, n8n integration, and more installation options.
 
@@ -50,6 +51,31 @@ See [docs/QUICK_START.md](docs/QUICK_START.md) for Docker, HTTP server mode, n8n
 - Stateful and stateless session support
 - JWT authentication with role-based access control
 - MCP Server Instructions for improved LLM tool selection
+
+### Network Monitoring & Security (TP-Link Omada)
+
+Bring your home network into the same assistant that runs your home. These are the
+high-value questions an LLM can actually answer about your network:
+
+- **Internet & WAN status** — "Is my internet up? What's my WAN IP and uplink speed?" Live
+  per-WAN status, plus multi-WAN / ISP health and load-balancing for the gateway.
+- **Event & alert logs** — "What happened on my network?" The site event and alert logs,
+  time-windowed (defaults to the last 7 days), to correlate with Home Assistant history.
+- **Wireless security** — rogue-AP scan results and (on Omada Pro) wireless intrusion
+  detection (WIDS) for genuine network-security awareness.
+- **Controller & device health** — dashboard overview plus top devices by CPU and memory
+  usage, HA-style monitoring of your network stack.
+- **Speed tests** — surface the controller's own speed-test results, pairing with
+  AI-powered `analyzeSensors` for anomaly detection.
+- **Pending devices** — "Is there a new device waiting to be adopted?"
+- **Firmware awareness** — per-device firmware info and a controller-wide critical-upgrade
+  overview, mirroring the Home Assistant `checkUpdates` philosophy across the network.
+- **Client management** — list/inspect connected clients, traffic activity, and apply
+  rate-limit profiles, with presence correlation against Home Assistant device trackers.
+
+> A discoverable resource-graph mode (`MCP_TOOL_REGISTRATION_MODE=graph`) exposes all of the
+> above through two tools — `omada_browse` + `omada_read` — keeping the tool-schema budget
+> small for low-context models. See the Omada tool tables below for the full eager surface.
 
 ## Available Tools (60 Total)
 

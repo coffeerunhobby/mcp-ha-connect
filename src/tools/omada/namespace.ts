@@ -64,6 +64,39 @@ export interface ResourceNode {
 const Q = Permission.QUERY;
 const A = Permission.ADMIN;
 
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * Resolve an epoch-MILLISECONDS time window for the event/alert log endpoints
+ * (`/sites/{siteId}/logs/{events,alerts}`), which require `filters.timeStart` and
+ * `filters.timeEnd`. Explicit `params.startTime`/`params.endTime` win; otherwise
+ * default to the last 7 days so a bare `omada_read('/events')` "just works".
+ * Exported for unit testing (inject `now` to keep tests deterministic).
+ */
+export function resolveLogWindowMs(
+  params: Record<string, string> | undefined,
+  now = Date.now()
+): { timeStart: number; timeEnd: number } {
+  const timeEnd = params?.endTime ? Number(params.endTime) : now;
+  const timeStart = params?.startTime ? Number(params.startTime) : timeEnd - 7 * 24 * HOUR_MS;
+  return { timeStart, timeEnd };
+}
+
+/**
+ * Resolve an epoch-SECONDS time window for the dashboard top-usage endpoints
+ * (`top-device-cpu-usage` / `top-device-memory-usage`), which require `start` and
+ * `end`. Explicit `params.startTime`/`params.endTime` (seconds) win; otherwise
+ * default to the last 24 hours. Exported for unit testing.
+ */
+export function resolveUsageWindowSec(
+  params: Record<string, string> | undefined,
+  now = Date.now()
+): { start: number; end: number } {
+  const end = params?.endTime ? Number(params.endTime) : Math.floor(now / 1000);
+  const start = params?.startTime ? Number(params.startTime) : end - 24 * 60 * 60;
+  return { start, end };
+}
+
 /**
  * The Omada resource graph. Containers have no `fetch` (browse-only); collections
  * and leaves fetch data. Existing client methods back the well-trodden reads;
@@ -102,9 +135,18 @@ export const OMADA_RESOURCES: ResourceNode[] = [
     path: '/devices/pending',
     kind: 'collection',
     permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
     estimatedSize: 'small',
-    description: 'Devices discovered but not yet adopted into the site.',
-    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/grid/devices/pending', siteId: a.siteId }),
+    description: 'Devices discovered but not yet adopted into the site (paginated). Use page/pageSize.',
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/grid/devices/pending',
+        siteId: a.siteId,
+        paginated: true,
+        page: a.page,
+        pageSize: a.pageSize,
+      }),
   },
   {
     path: '/devices/stats',
@@ -286,17 +328,38 @@ export const OMADA_RESOURCES: ResourceNode[] = [
     path: '/wifi/rogue',
     kind: 'collection',
     permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
     estimatedSize: 'small',
-    description: 'Rogue access points detected near the site.',
-    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/insight/rogueaps', siteId: a.siteId }),
+    description: 'Rogue access points detected near the site (paginated). Use page/pageSize.',
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/insight/rogueaps',
+        siteId: a.siteId,
+        paginated: true,
+        page: a.page,
+        pageSize: a.pageSize,
+      }),
   },
   {
     path: '/wifi/wids',
     kind: 'collection',
     permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
     estimatedSize: 'small',
-    description: 'Wireless Intrusion Detection System (WIDS) events.',
-    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/insight/wids', siteId: a.siteId }),
+    description:
+      'Wireless Intrusion Detection System (WIDS) entries (paginated). Use page/pageSize. ' +
+      'Note: the controller restricts this endpoint to Omada Pro controllers/sites; on a ' +
+      'standard controller it returns a "Pro only" message rather than data.',
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/insight/wids',
+        siteId: a.siteId,
+        paginated: true,
+        page: a.page,
+        pageSize: a.pageSize,
+      }),
   },
   {
     path: '/wifi/ssids',
@@ -322,9 +385,23 @@ export const OMADA_RESOURCES: ResourceNode[] = [
     paginated: true,
     defaultPageSize: 50,
     estimatedSize: 'large',
-    description: 'Site event log (paginated). Use page/pageSize to page through.',
-    fetch: (c, a) =>
-      c.readResource({ pathTemplate: '/sites/{siteId}/logs/events', siteId: a.siteId, paginated: true, page: a.page, pageSize: a.pageSize }),
+    description:
+      'Site event log (paginated). Use page/pageSize. The controller requires a time window: by default this ' +
+      'returns the last 7 days. Override with params.startTime / params.endTime (epoch MILLISECONDS, e.g. ' +
+      '1679297710438). Optional params.module filters by source module.',
+    params: [
+      { name: 'startTime', required: false, description: 'Window start, epoch ms (default: 7 days ago)' },
+      { name: 'endTime', required: false, description: 'Window end, epoch ms (default: now)' },
+      { name: 'module', required: false, description: 'Filter by module (e.g. "Device", "Client", "User")' },
+    ],
+    fetch: (c, a) => {
+      const { timeStart, timeEnd } = resolveLogWindowMs(a.params);
+      const query: Record<string, unknown> = { 'filters.timeStart': timeStart, 'filters.timeEnd': timeEnd };
+      if (a.params?.module) {
+        query['filters.module'] = a.params.module;
+      }
+      return c.readResource({ pathTemplate: '/sites/{siteId}/logs/events', siteId: a.siteId, paginated: true, page: a.page, pageSize: a.pageSize, query });
+    },
   },
   {
     path: '/events/alerts',
@@ -333,9 +410,27 @@ export const OMADA_RESOURCES: ResourceNode[] = [
     paginated: true,
     defaultPageSize: 50,
     estimatedSize: 'large',
-    description: 'Site alert log (paginated). Use page/pageSize to page through.',
-    fetch: (c, a) =>
-      c.readResource({ pathTemplate: '/sites/{siteId}/logs/alerts', siteId: a.siteId, paginated: true, page: a.page, pageSize: a.pageSize }),
+    description:
+      'Site alert log (paginated). Use page/pageSize. The controller requires a time window: by default this ' +
+      'returns the last 7 days. Override with params.startTime / params.endTime (epoch MILLISECONDS). Optional ' +
+      'params.module filters by source module; params.resolved ("true"/"false") filters by resolution state.',
+    params: [
+      { name: 'startTime', required: false, description: 'Window start, epoch ms (default: 7 days ago)' },
+      { name: 'endTime', required: false, description: 'Window end, epoch ms (default: now)' },
+      { name: 'module', required: false, description: 'Filter by module (e.g. "Device", "Client", "User")' },
+      { name: 'resolved', required: false, description: '"true" or "false" to filter by resolution state' },
+    ],
+    fetch: (c, a) => {
+      const { timeStart, timeEnd } = resolveLogWindowMs(a.params);
+      const query: Record<string, unknown> = { 'filters.timeStart': timeStart, 'filters.timeEnd': timeEnd };
+      if (a.params?.module) {
+        query['filters.module'] = a.params.module;
+      }
+      if (a.params?.resolved === 'true' || a.params?.resolved === 'false') {
+        query['filters.resolved'] = a.params.resolved;
+      }
+      return c.readResource({ pathTemplate: '/sites/{siteId}/logs/alerts', siteId: a.siteId, paginated: true, page: a.page, pageSize: a.pageSize, query });
+    },
   },
 
   // ---- Dashboard ---------------------------------------------------------
@@ -352,16 +447,30 @@ export const OMADA_RESOURCES: ResourceNode[] = [
     kind: 'collection',
     permission: Q,
     estimatedSize: 'small',
-    description: 'Devices with the highest CPU usage.',
-    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/dashboard/top-device-cpu-usage', siteId: a.siteId }),
+    description:
+      'Devices with the highest CPU usage over a time window (default: last 24h). Override with params.startTime / ' +
+      'params.endTime (epoch SECONDS, e.g. 1682000000).',
+    params: [
+      { name: 'startTime', required: false, description: 'Window start, epoch seconds (default: 24h ago)' },
+      { name: 'endTime', required: false, description: 'Window end, epoch seconds (default: now)' },
+    ],
+    fetch: (c, a) =>
+      c.readResource({ pathTemplate: '/sites/{siteId}/dashboard/top-device-cpu-usage', siteId: a.siteId, query: resolveUsageWindowSec(a.params) }),
   },
   {
     path: '/dashboard/memory',
     kind: 'collection',
     permission: Q,
     estimatedSize: 'small',
-    description: 'Devices with the highest memory usage.',
-    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/dashboard/top-device-memory-usage', siteId: a.siteId }),
+    description:
+      'Devices with the highest memory usage over a time window (default: last 24h). Override with params.startTime / ' +
+      'params.endTime (epoch SECONDS, e.g. 1682000000).',
+    params: [
+      { name: 'startTime', required: false, description: 'Window start, epoch seconds (default: 24h ago)' },
+      { name: 'endTime', required: false, description: 'Window end, epoch seconds (default: now)' },
+    ],
+    fetch: (c, a) =>
+      c.readResource({ pathTemplate: '/sites/{siteId}/dashboard/top-device-memory-usage', siteId: a.siteId, query: resolveUsageWindowSec(a.params) }),
   },
 
   // ---- Firmware ----------------------------------------------------------

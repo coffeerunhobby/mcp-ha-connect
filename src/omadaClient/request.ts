@@ -156,8 +156,21 @@ export class RequestHandler {
                     url: config.url,
                     status: response.status,
                     statusText: response.statusText,
+                    errorCode,
+                    message: errorMsg,
                 });
-                throw new Error(`Omada API request failed: ${response.status} ${response.statusText}`);
+                // Surface the controller's own structured errorCode/msg when present
+                // (safe diagnostic data — the controller's description, not an internal
+                // hostname/header) so a rejected request explains itself instead of
+                // collapsing to a bare HTTP status like "400 ".
+                const parts = [`${response.status} ${response.statusText}`.trim()];
+                if (errorMsg) {
+                    parts.push(`- ${errorMsg}`);
+                }
+                if (errorCode !== undefined && errorCode !== 0) {
+                    parts.push(`(errorCode ${errorCode})`);
+                }
+                throw new Error(`Omada API request failed: ${parts.join(' ')}`);
             }
 
             return responseData;

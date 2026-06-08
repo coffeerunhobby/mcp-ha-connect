@@ -1,4 +1,4 @@
-### Unreleased
+### 1.3.4
 **Feature — Omada resource-graph tool registration (`MCP_TOOL_REGISTRATION_MODE`).**
 Implements the previously-designed-but-unbuilt registration-mode switch as a *resource
 graph* for the Omada plugin. `MCP_TOOL_REGISTRATION_MODE=graph` registers two discovery
@@ -16,6 +16,42 @@ the first node to require a higher permission bit (ADMIN) than QUERY, demonstrat
 per-path RBAC. New manifest (`namespace.ts`) + tools (`graph.ts`); `getCallerPermissions()`
 extracted in `tools/common.ts` and reused for per-path checks. Suite grew by 47 unit tests
 (namespace + graph + config parsing).
+
+**Fix — `OMADA_SITE_ID` is validated against the live controller at startup.** The Omada
+controller's site list is now treated as the source of truth; `OMADA_SITE_ID` is only a
+selector against it. At boot (reusing the existing `listSites()` connection test) a
+configured `OMADA_SITE_ID` that is **not** present on the controller — e.g. a site id that
+drifted after a controller migration, the same way `OMADA_OMADAC_ID` does — now disables the
+**Omada plugin** with a clear, actionable error that names the bad value and lists the valid
+sites, instead of silently scoping every site-scoped read to a dead site and surfacing later
+as a confusing "user does not have permissions to access this site" error. The failure is
+scoped to the Omada plugin only — Home Assistant and Local AI keep working (graceful
+degradation preserved). Default-site auto-resolution for site-scoped reads is otherwise
+unchanged: callers still need not pass `siteId` when a valid default is configured. New pure
+`checkConfiguredSite()` helper + 4 unit tests.
+
+**Fix — graph reads that require query parameters now send them (events/alerts, dashboard
+CPU/memory, rogue-AP/WIDS, pending devices).** Seven graph nodes were authored from endpoint
+paths alone and never sent the query parameters the controller requires, so every call
+returned a bare framework `400 Bad Request` (rejected before reaching the Omada handler — no
+`errorCode`/`msg` envelope). Verified against the live controller's own OpenAPI spec and
+fixed:
+- `/events` and `/events/alerts` now send the mandatory `filters.timeStart`/`filters.timeEnd`
+  window (epoch **milliseconds**). The window is optional to the caller and **defaults to the
+  last 7 days**, so a bare `omada_read('/events')` works; override via `params.startTime` /
+  `params.endTime`, with optional `params.module` (and `params.resolved` for alerts).
+- `/dashboard/cpu` and `/dashboard/memory` now send the mandatory `start`/`end` window
+  (epoch **seconds**), defaulting to the **last 24 h**; override via `params.startTime` /
+  `params.endTime`.
+- `/wifi/rogue`, `/wifi/wids`, and `/devices/pending` are now declared `paginated` so they
+  forward `page`/`pageSize` (all three are paginated list endpoints). `/wifi/wids` is
+  documented as Omada **Pro-only** — on a standard controller it returns a clear "Pro only"
+  message rather than data.
+Two pure, unit-tested window helpers (`resolveLogWindowMs`, `resolveUsageWindowSec`) back the
+defaults. Also surfaces the controller's own `errorCode`/`msg` in `RequestHandler`'s thrown
+HTTP-error message (when present) so a rejected request explains itself instead of collapsing
+to `"400 "` — internal hostnames/headers are still kept out of the message. Suite grew by 10
+unit tests (window helpers + fixed-node wiring).
 
 ### 1.3.1
 **Patch — RBAC role-name case-insensitivity.** Follow-up to the v1.3.0 fail-closed
