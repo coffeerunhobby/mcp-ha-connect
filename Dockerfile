@@ -3,7 +3,10 @@
 FROM node:25-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+# npm ci installs exactly from the committed package-lock.json (reproducible) and
+# fails if package.json and the lockfile have drifted. The `package*.json` COPY
+# above pulls in package-lock.json, so the lockfile is present in this stage.
+RUN npm ci
 
 FROM node:25-alpine AS build
 WORKDIR /app
@@ -26,7 +29,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 RUN apk add --no-cache curl
 COPY package*.json ./
-RUN npm install --omit=dev
+# Reproducible prod-only install from the lockfile (drops devDependencies).
+RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 
 # M10: drop root. The official node image ships a non-root `node` user (uid 1000).
