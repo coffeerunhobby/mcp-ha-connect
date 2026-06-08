@@ -1,4 +1,4 @@
-### Unreleased
+### 1.5.0
 **Feature — Omada resource graph: Tier 4 read coverage (VPN · profiles · schedules · backup · audit).**
 Extends graph mode with the *home-relevant* slice of the previously zero-coverage Omada
 categories — still at the same two-tool surface (`omada_browse` + `omada_read`), zero
