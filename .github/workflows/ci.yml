@@ -8,9 +8,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   # Lets you re-run it by hand from the Actions tab.
   workflow_dispatch:
 
