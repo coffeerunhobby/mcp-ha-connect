@@ -98,6 +98,27 @@ export function resolveUsageWindowSec(
 }
 
 /**
+ * Build the optional query filters for the audit-log endpoints from caller params.
+ * `startTime`/`endTime` are epoch MILLISECONDS, forwarded as the controller's
+ * `filters.startTime`/`filters.endTime`; `searchKey` is fuzzy text. Absent params
+ * are omitted so a bare read returns the most recent page unfiltered. Exported for
+ * unit testing.
+ */
+export function auditFilters(params: Record<string, string> | undefined): Record<string, unknown> {
+  const query: Record<string, unknown> = {};
+  if (params?.startTime !== undefined) {
+    query['filters.startTime'] = Number(params.startTime);
+  }
+  if (params?.endTime !== undefined) {
+    query['filters.endTime'] = Number(params.endTime);
+  }
+  if (params?.searchKey) {
+    query.searchKey = params.searchKey;
+  }
+  return query;
+}
+
+/**
  * The Omada resource graph. Containers have no `fetch` (browse-only); collections
  * and leaves fetch data. Existing client methods back the well-trodden reads;
  * the generic `client.readResource(...)` backs newly-added endpoints with zero
@@ -812,6 +833,228 @@ export const OMADA_RESOURCES: ResourceNode[] = [
     estimatedSize: 'small',
     description: 'Controller-wide overview of critical firmware upgrades (not site-scoped).',
     fetch: (c) => c.readResource({ pathTemplate: '/upgrade/overview/critical', siteScoped: false }),
+  },
+
+  // ---- VPN (status & tunnels) -------------------------------------------
+  {
+    path: '/vpn',
+    kind: 'container',
+    permission: Q,
+    description: 'VPN status: site-to-site, client-to-site, WireGuard, and IPsec tunnel stats.',
+  },
+  {
+    path: '/vpn/site-to-site',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Site-to-site VPN tunnels. Pass id=<vpnId> to fetch a single tunnel.',
+    params: [{ name: 'id', required: false, description: 'VPN id to fetch a single site-to-site tunnel' }],
+    fetch: (c, a) =>
+      a.id
+        ? c.readResource({
+            pathTemplate: '/sites/{siteId}/vpn/site-to-site-vpns/{vpnId}',
+            siteId: a.siteId,
+            pathParams: { vpnId: a.id },
+          })
+        : c.readResource({ pathTemplate: '/sites/{siteId}/vpn/site-to-site-vpns', siteId: a.siteId }),
+  },
+  {
+    path: '/vpn/client-to-site',
+    kind: 'container',
+    permission: Q,
+    description: 'Client-to-site (remote-access) VPN: configured servers and connected clients.',
+  },
+  {
+    path: '/vpn/client-to-site/servers',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Configured client-to-site VPN servers (L2TP/OpenVPN/etc.).',
+    fetch: (c, a) =>
+      c.readResource({ pathTemplate: '/sites/{siteId}/vpn/client-to-site-vpn-servers', siteId: a.siteId }),
+  },
+  {
+    path: '/vpn/client-to-site/clients',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Currently connected client-to-site (remote-access) VPN clients.',
+    fetch: (c, a) =>
+      c.readResource({ pathTemplate: '/sites/{siteId}/vpn/client-to-site-vpn-clients', siteId: a.siteId }),
+  },
+  {
+    path: '/vpn/wireguard',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Configured WireGuard VPN interfaces on the gateway.',
+    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/vpn/wireguards', siteId: a.siteId }),
+  },
+  {
+    path: '/vpn/ipsec-stats',
+    kind: 'collection',
+    permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
+    estimatedSize: 'small',
+    description: 'IPsec VPN tunnel statistics (paginated — use page/pageSize).',
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/setting/vpn/stats/ipsec',
+        siteId: a.siteId,
+        paginated: true,
+        page: a.page,
+        pageSize: a.pageSize,
+      }),
+  },
+
+  // ---- Profiles (reusable network profiles) -----------------------------
+  {
+    path: '/profiles',
+    kind: 'container',
+    permission: Q,
+    description: 'Reusable network profiles: per-device Wi-Fi keys (PPSK) and time-range schedules.',
+  },
+  {
+    path: '/profiles/ppsk',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description:
+      'PPSK (Private Pre-Shared Key) profiles — unique per-user/per-device Wi-Fi passwords on a shared SSID. ' +
+      'REQUIRES params.type: 0 = PPSK without RADIUS, 1 = PPSK with RADIUS.',
+    params: [{ name: 'type', required: true, description: '0 = PPSK without RADIUS, 1 = PPSK with RADIUS' }],
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/ppsk-profiles',
+        siteId: a.siteId,
+        query: { type: Number(a.params?.type) },
+      }),
+  },
+  {
+    path: '/profiles/time-range',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Time-range profiles — reusable schedules referenced by ACLs, Wi-Fi, and PoE rules.',
+    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/time-range-profiles', siteId: a.siteId }),
+  },
+
+  // ---- Schedules (PoE / port / firmware-upgrade) ------------------------
+  {
+    path: '/schedules',
+    kind: 'container',
+    permission: Q,
+    description:
+      'Device schedules: PoE power, switch-port on/off, and firmware-upgrade windows. ' +
+      '(Reboot schedules are site-template-scoped enterprise config and are intentionally not exposed here.)',
+  },
+  {
+    path: '/schedules/poe',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'PoE schedules — when switch ports deliver power to PoE devices.',
+    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/poe-schedules', siteId: a.siteId }),
+  },
+  {
+    path: '/schedules/port',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Port schedules — when switch ports are administratively up/down.',
+    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/port-schedules', siteId: a.siteId }),
+  },
+  {
+    path: '/schedules/upgrade',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Firmware-upgrade schedules — planned maintenance windows for device upgrades.',
+    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/upgrade-schedules', siteId: a.siteId }),
+  },
+
+  // ---- Backup (controller/site backup status) ---------------------------
+  {
+    path: '/backup',
+    kind: 'container',
+    permission: Q,
+    description: 'Site backup status: available backup files and the most recent backup result.',
+  },
+  {
+    path: '/backup/files',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'List of available site backup files.',
+    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/maintenance/backup/files', siteId: a.siteId }),
+  },
+  {
+    path: '/backup/result',
+    kind: 'leaf',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'Result of the most recent site backup operation.',
+    fetch: (c, a) => c.readResource({ pathTemplate: '/sites/{siteId}/backup/result', siteId: a.siteId }),
+  },
+
+  // ---- Audit logs (administrative operation history) — ADMIN only -------
+  {
+    path: '/audit',
+    kind: 'container',
+    permission: A,
+    description:
+      'Administrative audit logs — who did what on the controller. ADMIN only (reveals full admin activity).',
+  },
+  {
+    path: '/audit/site',
+    kind: 'collection',
+    permission: A,
+    paginated: true,
+    defaultPageSize: 10,
+    estimatedSize: 'large',
+    description:
+      'Site-scoped administrative audit log (paginated, ADMIN). Optional params: startTime/endTime ' +
+      '(epoch MILLISECONDS) to bound the window, and searchKey (fuzzy text).',
+    params: [
+      { name: 'startTime', required: false, description: 'Window start, epoch milliseconds' },
+      { name: 'endTime', required: false, description: 'Window end, epoch milliseconds' },
+      { name: 'searchKey', required: false, description: 'Fuzzy search on the log text' },
+    ],
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/audit-logs',
+        siteId: a.siteId,
+        paginated: true,
+        page: a.page,
+        pageSize: a.pageSize,
+        query: auditFilters(a.params),
+      }),
+  },
+  {
+    path: '/audit/global',
+    kind: 'collection',
+    permission: A,
+    paginated: true,
+    defaultPageSize: 10,
+    estimatedSize: 'large',
+    description:
+      'Controller-wide administrative audit log across all sites (paginated, ADMIN). Optional params: ' +
+      'startTime/endTime (epoch MILLISECONDS) and searchKey (fuzzy text).',
+    params: [
+      { name: 'startTime', required: false, description: 'Window start, epoch milliseconds' },
+      { name: 'endTime', required: false, description: 'Window end, epoch milliseconds' },
+      { name: 'searchKey', required: false, description: 'Fuzzy search on the log text' },
+    ],
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/audit-logs',
+        siteScoped: false,
+        paginated: true,
+        page: a.page,
+        pageSize: a.pageSize,
+        query: auditFilters(a.params),
+      }),
   },
 
   // ---- Security (IDS/IPS) — ADMIN only -----------------------------------

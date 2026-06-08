@@ -1,3 +1,26 @@
+### 1.5.0
+**Feature — Omada resource graph: Tier 4 read coverage (VPN · profiles · schedules · backup · audit).**
+Extends graph mode with the *home-relevant* slice of the previously zero-coverage Omada
+categories — still at the same two-tool surface (`omada_browse` + `omada_read`), zero
+tool-schema cost. Every node is grounded in the reference TP-Link Omada API client's actual
+paths and required params, backed by the existing `OmadaClient.readResource()` primitive (no
+new client code):
+
+- *VPN status* (`/vpn`) — `/vpn/site-to-site` (list, or a single tunnel via `id`),
+  `/vpn/client-to-site/servers`, `/vpn/client-to-site/clients`, `/vpn/wireguard`, and the
+  paginated `/vpn/ipsec-stats`.
+- *Profiles* (`/profiles`) — `/profiles/ppsk` (per-device Wi-Fi keys; **requires** `params.type`:
+  0 = without RADIUS, 1 = with RADIUS) and `/profiles/time-range`.
+- *Schedules* (`/schedules`) — `/schedules/poe`, `/schedules/port`, `/schedules/upgrade`.
+  (Reboot schedules are site-template-scoped enterprise config and are intentionally omitted.)
+- *Backup status* (`/backup`) — `/backup/files` and `/backup/result`.
+- *Audit logs* (`/audit`) — **ADMIN-gated** (like `/security`): `/audit/site` (site-scoped) and
+  `/audit/global` (controller-wide, not site-scoped). Both paginated, with optional epoch-ms
+  `startTime`/`endTime` + `searchKey` filters via the new `auditFilters` helper.
+
+This is the first subtree beyond `/security` to require ADMIN, further exercising per-path RBAC.
+Suite grew by the corresponding namespace wiring + `auditFilters` tests.
+
 ### 1.4.0
 **Feature — Omada resource graph expanded to broad read coverage (no tool-schema cost).**
 Because `graph` mode keeps the tool surface at two tools (`omada_browse` + `omada_read`)
