@@ -191,6 +191,17 @@ If Omada is unreachable or credentials are wrong, the server **gracefully degrad
 Omada tools are disabled but HA and AI keep working. Set `OMADA_PLUGIN_ENABLED=false`
 to disable Omada entirely while troubleshooting.
 
+**`OMADA_SITE_ID` is validated at startup against the live site list** (the controller is
+the source of truth; the env var is only a selector). If `OMADA_SITE_ID` is set but **not**
+present on the controller — a site id can drift after a controller migration, exactly like
+`OMADA_OMADAC_ID` — the **Omada plugin is disabled** at boot with a `logger.error` that
+names the bad value and lists the valid sites (HA + AI stay up). This turns the old failure
+mode (a silent default scoping every read to a dead site → later "user does not have
+permissions to access this site") into a loud, self-diagnosing startup error. Fix by setting
+`OMADA_SITE_ID` to one of the listed ids. Validation lives in `checkConfiguredSite()`
+(`src/omadaClient/site.ts`); a *valid* default still auto-resolves, so site-scoped reads need
+no explicit `siteId`.
+
 ---
 
 ## Code Quality — fix every error and warning
@@ -230,6 +241,34 @@ npm run generate:jwt    # generate a test JWT token
 ```powershell
 npm run test:integration
 ```
+
+---
+
+## Live testing against the running server
+
+The dev machine can exercise the deployed MCP server two ways:
+
+1. **Connected `homeassistant` MCP in Claude Desktop** — this agent has the live server
+   wired in as an MCP connection, so HA/Omada tools can be invoked directly (no curl, no
+   manual token; the configured bearer is used). **Caveat:** the MCP client caches the tool
+   list at *connection time*. After flipping `MCP_TOOL_REGISTRATION_MODE` (eager ⇄ graph)
+   and redeploying, that cached list is **stale** — Claude Desktop must reconnect (restart)
+   before the new tool surface (`omada_browse`/`omada_read`, or the typed getters) shows up.
+   Until it reconnects, calling a tool the live server no longer registers will fail.
+
+2. **Direct `/mcp` curl** — generate a token with
+   `npm run generate:jwt -- --sub <user> --exp 1h` (signs with the local `.env`
+   `MCP_AUTH_SECRET`, which currently matches the NAS), then POST JSON-RPC to the server's
+   `/mcp` with headers `Authorization: Bearer <tok>`, `Content-Type: application/json`,
+   `Accept: application/json, text/event-stream`. Responses come back as SSE
+   (`data: {...}` lines). `tools/list` and `tools/call` work **without** an initialize
+   handshake in stateless mode. The reachable server address lives in
+   `.claude/NEXT-SESSION.md` (gitignored — never put the real IP/domain here).
+
+Permissions are resolved **server-side** from the token's `sub` via `MCP_PERMISSIONS_CONFIG`
+(they are NOT carried in the token). Pick a `sub` whose mapped role has the bit you need —
+e.g. the ADMIN-gated `/security/threats` node needs a `sub` mapped to an ADMIN role. The NAS
+role map differs from the local `.env`, so don't assume `sub=admin` is actually ADMIN there.
 
 ---
 
