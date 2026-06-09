@@ -3,11 +3,16 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { ServerResponse } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { HaClient } from '../../src/haClient/index.js';
 import type { EnvironmentConfig } from '../../src/config.js';
 import { VERSION } from '../../src/version.js';
-import { resolveForwardedProto, getOpenApiSpec } from '../../src/server/http.js';
+import {
+  resolveForwardedProto,
+  getOpenApiSpec,
+  addRestApiCors,
+  isRestApiCorsPath,
+} from '../../src/server/http.js';
 
 // Mock dependencies
 vi.mock('node:http');
@@ -452,6 +457,75 @@ describe('HTTP Server', () => {
       };
       expect(spec.servers[0].url).toBe('https://mcp.example.com');
       expect(spec.info.version).toBe(VERSION);
+    });
+  });
+
+  describe('REST API CORS on pre-handler rejections', () => {
+    const SSE_PATH = '/subscribe_events';
+
+    it('identifies the browser-facing REST surface', () => {
+      expect(isRestApiCorsPath('/openapi.json', '/openapi.json', SSE_PATH)).toBe(true);
+      expect(isRestApiCorsPath('/api/version', '/api/version', SSE_PATH)).toBe(true);
+      expect(isRestApiCorsPath('/api/states/light.x', '/api/states/light.x', SSE_PATH)).toBe(true);
+      expect(isRestApiCorsPath('/subscribe_events', '/subscribe_events', SSE_PATH)).toBe(true);
+      // Query string must not defeat the SSE path match (urlPath is path-only).
+      expect(isRestApiCorsPath('/subscribe_events?token=x', '/subscribe_events', SSE_PATH)).toBe(true);
+    });
+
+    it('excludes MCP / health / unknown paths from the REST CORS surface', () => {
+      expect(isRestApiCorsPath('/mcp', '/mcp', SSE_PATH)).toBe(false);
+      expect(isRestApiCorsPath('/health', '/health', SSE_PATH)).toBe(false);
+      expect(isRestApiCorsPath('/', '/', SSE_PATH)).toBe(false);
+      // Must not be fooled by a path that merely contains "/api/".
+      expect(isRestApiCorsPath('/not/api/x', '/not/api/x', SSE_PATH)).toBe(false);
+    });
+
+    it('reflects the request Origin in the CORS headers', () => {
+      const set: Record<string, string> = {};
+      const res = { setHeader: (k: string, v: string) => { set[k] = v; } } as unknown as ServerResponse;
+      const req = { headers: { origin: 'https://owui.example.com' } } as unknown as IncomingMessage;
+      addRestApiCors(req, res);
+      expect(set['Access-Control-Allow-Origin']).toBe('https://owui.example.com');
+      expect(set['Access-Control-Allow-Methods']).toContain('GET');
+      expect(set['Access-Control-Allow-Headers']).toContain('Authorization');
+      expect(set['Access-Control-Max-Age']).toBe('86400');
+    });
+
+    it('falls back to * when the request has no Origin', () => {
+      const set: Record<string, string> = {};
+      const res = { setHeader: (k: string, v: string) => { set[k] = v; } } as unknown as ServerResponse;
+      const req = { headers: {} } as unknown as IncomingMessage;
+      addRestApiCors(req, res);
+      expect(set['Access-Control-Allow-Origin']).toBe('*');
+    });
+
+    it('REGRESSION: a 401 on /api/* still carries Access-Control-Allow-Origin', () => {
+      // Reproduces the request pipeline ordering: REST CORS is applied for the path
+      // BEFORE the auth middleware rejects, so the browser sees the real 401 instead
+      // of an opaque "NetworkError when attempting to fetch resource".
+      const set: Record<string, string> = {};
+      let status = 0;
+      const res = {
+        setHeader: (k: string, v: string) => { set[k] = v; },
+        writeHead: (code: number) => { status = code; },
+        end: () => {},
+      } as unknown as ServerResponse;
+      const req = { headers: { origin: 'https://owui.example.com' } } as unknown as IncomingMessage;
+
+      const url = '/api/version';
+      // 1) dispatcher applies REST CORS for the path...
+      if (isRestApiCorsPath(url, url, SSE_PATH)) {
+        addRestApiCors(req, res);
+      }
+      // 2) ...then auth fails and writes a 401.
+      const authOk = false;
+      if (!authOk) {
+        res.writeHead(401);
+        res.end();
+      }
+
+      expect(status).toBe(401);
+      expect(set['Access-Control-Allow-Origin']).toBe('https://owui.example.com');
     });
   });
 });

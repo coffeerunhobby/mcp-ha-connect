@@ -159,12 +159,27 @@ export function handleHealthCheck(res: ServerResponse): void {
 /**
  * Add CORS headers for REST API endpoints (always enabled for Open WebUI compatibility)
  */
-function addRestApiCors(req: IncomingMessage, res: ServerResponse): void {
+export function addRestApiCors(req: IncomingMessage, res: ServerResponse): void {
   const origin = req.headers.origin;
   res.setHeader('Access-Control-Allow-Origin', origin ?? '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Max-Age', '86400');
+}
+
+/**
+ * Whether a request path is served by the browser-facing REST surface
+ * (`/openapi.json`, the `/api/*` bridge, or the SSE events stream) and therefore
+ * must always carry CORS headers — INCLUDING on responses produced before the
+ * route handler runs (rate-limit 429, auth 401). If those rejections go back
+ * without `Access-Control-Allow-Origin`, the browser discards the response and
+ * surfaces it as an opaque "NetworkError when attempting to fetch resource",
+ * masking the real status (this is why an Open WebUI 401 looked like a network
+ * failure). `url` is the raw request URL (query string included); `urlPath` is
+ * the path-only form used to match the configurable SSE events path.
+ */
+export function isRestApiCorsPath(url: string, urlPath: string, sseEventsPath: string): boolean {
+  return url === '/openapi.json' || url.startsWith('/api/') || urlPath === sseEventsPath;
 }
 
 /**
@@ -625,7 +640,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
 
     // Handle OPTIONS (CORS preflight) - add CORS headers for REST API endpoints
     if (req.method === 'OPTIONS') {
-      if (url === '/openapi.json' || url.startsWith('/api/') || urlPath === sseEventsPath) {
+      if (isRestApiCorsPath(url, urlPath, sseEventsPath)) {
         addRestApiCors(req, res);
       } else {
         handleCors(req, res, config);
@@ -633,6 +648,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       res.writeHead(204);
       res.end();
       return;
+    }
+
+    // Apply CORS headers for the browser-facing REST surface BEFORE rate limiting
+    // and auth, so a 429 or 401 rejection still carries `Access-Control-Allow-Origin`.
+    // Otherwise the browser masks the real status as an opaque "NetworkError when
+    // attempting to fetch resource" (Open WebUI auth failures looked like this).
+    if (isRestApiCorsPath(url, urlPath, sseEventsPath)) {
+      addRestApiCors(req, res);
     }
 
     // Apply rate limiting (skip health checks and certain paths)

@@ -1,3 +1,21 @@
+### 1.5.2
+**Fix — CORS headers on `/api/*` and `/openapi.json` rejections (401 / 429) so auth
+failures stop masquerading as "NetworkError".**
+The REST-bridge CORS headers were applied only *inside* the route handlers, which run
+**after** the auth and rate-limit middleware. So a `401 Unauthorized` (bad/missing token)
+or a `429` (rate limited) on a browser-facing endpoint went back with **no**
+`Access-Control-Allow-Origin` header. A browser that receives a cross-origin response
+without that header discards it and reports the generic *"NetworkError when attempting to
+fetch resource"* — completely hiding the real `401`. This made an Open WebUI auth
+misconfiguration look identical to a network/tunnel failure.
+
+CORS headers for the browser-facing REST surface (`/openapi.json`, `/api/*`, the SSE
+events path) are now applied **before** rate limiting and authentication, so every
+rejection carries `Access-Control-Allow-Origin` and the browser surfaces the true status.
+The path test is extracted into the `isRestApiCorsPath()` helper (shared by the preflight
+and the new early-CORS step); `addRestApiCors()` is unchanged. No behavior change for a
+successful (200) request — it already carried CORS.
+
 ### 1.5.1
 **Fix — `/openapi.json` now advertises the correct scheme behind a TLS-terminating proxy.**
 The OpenAPI document's `servers[0].url` was built with a hardcoded `http://`. Behind the
