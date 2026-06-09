@@ -1,3 +1,13 @@
+### 1.5.3
+**Fix — allow the `x-session-id` request header in CORS so Open WebUI tool calls work.**
+Open WebUI sends an `x-session-id` header on every OpenAPI tool call. The REST bridge's
+CORS preflight only advertised `Access-Control-Allow-Headers: Content-Type, Authorization`,
+so the browser's preflight check failed on the unlisted header and blocked the request
+before it was sent — surfacing (yet again) as *"NetworkError when attempting to fetch
+resource."* `Access-Control-Allow-Headers` now includes `x-session-id`. This was the final
+piece: combined with v1.5.1 (https scheme) and v1.5.2 (CORS on 401/429), Open WebUI tool
+calls against the `/api/*` bridge now complete.
+
 ### 1.5.2
 **Fix — CORS headers on `/api/*` and `/openapi.json` rejections (401 / 429) so auth
 failures stop masquerading as "NetworkError".**

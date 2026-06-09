@@ -163,7 +163,10 @@ export function addRestApiCors(req: IncomingMessage, res: ServerResponse): void 
   const origin = req.headers.origin;
   res.setHeader('Access-Control-Allow-Origin', origin ?? '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  // `x-session-id` is sent by Open WebUI on every tool call. A browser blocks the
+  // request entirely (CORS preflight failure -> "NetworkError when attempting to
+  // fetch resource") if a requested header is not listed here, so it must be allowed.
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-session-id');
   res.setHeader('Access-Control-Max-Age', '86400');
 }
 
