@@ -7,6 +7,7 @@ import type { ServerResponse } from 'node:http';
 import type { HaClient } from '../../src/haClient/index.js';
 import type { EnvironmentConfig } from '../../src/config.js';
 import { VERSION } from '../../src/version.js';
+import { resolveForwardedProto, getOpenApiSpec } from '../../src/server/http.js';
 
 // Mock dependencies
 vi.mock('node:http');
@@ -412,6 +413,45 @@ describe('HTTP Server', () => {
       expect(duration).toBeGreaterThanOrEqual(5);
       // But not too long (sanity check)
       expect(duration).toBeLessThan(1000);
+    });
+  });
+
+  describe('OpenAPI spec scheme (X-Forwarded-Proto)', () => {
+    it('returns https only when the header is exactly https', () => {
+      expect(resolveForwardedProto('https')).toBe('https');
+      expect(resolveForwardedProto('HTTPS')).toBe('https');
+      expect(resolveForwardedProto(' https ')).toBe('https');
+    });
+
+    it('takes the first hop from a comma-separated proxy chain', () => {
+      expect(resolveForwardedProto('https,http')).toBe('https');
+      expect(resolveForwardedProto('http, https')).toBe('http');
+    });
+
+    it('falls back to http for missing, empty, or unknown values', () => {
+      expect(resolveForwardedProto(undefined)).toBe('http');
+      expect(resolveForwardedProto('')).toBe('http');
+      expect(resolveForwardedProto('http')).toBe('http');
+      // A spoofed/garbage scheme can never be injected into the advertised URL.
+      expect(resolveForwardedProto('javascript')).toBe('http');
+      expect(resolveForwardedProto('ftp')).toBe('http');
+    });
+
+    it('handles array-valued headers by using the first entry', () => {
+      expect(resolveForwardedProto(['https', 'http'])).toBe('https');
+      expect(resolveForwardedProto(['http'])).toBe('http');
+    });
+
+    it('advertises the resolved scheme + host as the OpenAPI server url', () => {
+      // The regression: behind Cloudflare the spec must say https, not http, or the
+      // browser blocks tool calls from the https Open WebUI page as mixed content.
+      const scheme = resolveForwardedProto('https');
+      const spec = getOpenApiSpec(`${scheme}://mcp.example.com`) as {
+        servers: { url: string }[];
+        info: { version: string };
+      };
+      expect(spec.servers[0].url).toBe('https://mcp.example.com');
+      expect(spec.info.version).toBe(VERSION);
     });
   });
 });

@@ -349,9 +349,25 @@ export async function handleRestApi(
 }
 
 /**
+ * Resolve the public URL scheme, honoring `X-Forwarded-Proto` (set by Cloudflare /
+ * reverse proxies that TLS-terminate upstream). The header is validated against an
+ * allowlist so a spoofed value can't inject an arbitrary scheme; anything other than
+ * a literal `https` falls back to `http`. Comma-separated values (proxy chains) take
+ * the first hop.
+ */
+export function resolveForwardedProto(headerValue: string | string[] | undefined): 'http' | 'https' {
+  const first = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  const proto = String(first ?? '')
+    .split(',')[0]
+    ?.trim()
+    .toLowerCase();
+  return proto === 'https' ? 'https' : 'http';
+}
+
+/**
  * Generate OpenAPI spec for Open WebUI compatibility
  */
-function getOpenApiSpec(baseUrl: string): object {
+export function getOpenApiSpec(baseUrl: string): object {
   return {
     openapi: '3.1.0',
     info: {
@@ -656,7 +672,12 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       // OpenAPI spec endpoint for Open WebUI compatibility
       if (req.method === 'GET' && url === '/openapi.json') {
         addRestApiCors(req, res);
-        const baseUrl = `http://${req.headers.host ?? `${bindAddr}:${port}`}`;
+        // Honor X-Forwarded-Proto (set by Cloudflare / reverse proxies) so the advertised
+        // server URL is https when the public endpoint is TLS-terminated upstream. Without
+        // this, an https Open WebUI page is handed an http:// server URL and the browser
+        // blocks tool calls as mixed content ("NetworkError when attempting to fetch resource").
+        const scheme = resolveForwardedProto(req.headers['x-forwarded-proto']);
+        const baseUrl = `${scheme}://${req.headers.host ?? `${bindAddr}:${port}`}`;
         sendJson(res, 200, getOpenApiSpec(baseUrl));
         return;
       }

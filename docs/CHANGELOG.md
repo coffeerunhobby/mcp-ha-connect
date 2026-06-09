@@ -1,3 +1,20 @@
+### 1.5.1
+**Fix — `/openapi.json` now advertises the correct scheme behind a TLS-terminating proxy.**
+The OpenAPI document's `servers[0].url` was built with a hardcoded `http://`. Behind the
+Cloudflare tunnel (which terminates TLS and forwards to the origin over plain HTTP), the
+spec therefore advertised an `http://` server URL even though the public endpoint is
+`https://`. An OpenAPI tool client loaded on an **https** page (e.g. Open WebUI) then
+refused to call any tool, because the browser blocks `http://` subresource fetches from an
+https origin as **mixed content** — surfacing as *"NetworkError when attempting to fetch
+resource."*
+
+The handler now honors the `X-Forwarded-Proto` header (set by Cloudflare / reverse
+proxies) when constructing the advertised base URL, so a TLS-terminated deployment
+advertises `https://`. The new `resolveForwardedProto()` helper validates the header
+against an allowlist — anything other than a literal `https` falls back to `http`, and
+comma-separated proxy chains take the first hop — so a spoofed value can't inject an
+arbitrary scheme into the spec. No behavior change for plain-HTTP deployments.
+
 ### 1.5.0
 **Feature — Omada resource graph: Tier 4 read coverage (VPN · profiles · schedules · backup · audit).**
 Extends graph mode with the *home-relevant* slice of the previously zero-coverage Omada
