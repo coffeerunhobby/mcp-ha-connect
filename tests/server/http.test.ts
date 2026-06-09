@@ -488,6 +488,9 @@ describe('HTTP Server', () => {
       expect(set['Access-Control-Allow-Origin']).toBe('https://owui.example.com');
       expect(set['Access-Control-Allow-Methods']).toContain('GET');
       expect(set['Access-Control-Allow-Headers']).toContain('Authorization');
+      // Open WebUI sends x-session-id on every tool call; it must be allowed or the
+      // browser blocks the request as a CORS preflight failure ("NetworkError").
+      expect(set['Access-Control-Allow-Headers']).toContain('x-session-id');
       expect(set['Access-Control-Max-Age']).toBe('86400');
     });
 
