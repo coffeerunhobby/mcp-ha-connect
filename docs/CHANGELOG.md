@@ -1,3 +1,19 @@
+### 1.5.4
+**Improvement — actionable error hints so agents self-correct instead of stalling.**
+Not-found / invalid-input errors now carry a next-step pointer toward the tool that
+resolves them, cutting the retry loops and wrong guesses that waste round-trips:
+- `getState`, `entityAction`, and the `hass://entities/{id}` resources now return a
+  `hint` field on a missing/malformed `entity_id`, pointing at `searchEntities` (and the
+  required `domain.name` format).
+- Omada `resolveSiteId` with no site configured now hints to `omada_browse` at `/` to
+  discover available sites and their IDs.
+- Omada SSID getters with a missing `wlanId`/`ssidId` had stale tool references
+  (`getWlanGroupList`/`getSsidList`) corrected to the real graph-mode paths
+  (`omada_read /wifi/groups`, `omada_read /wifi/ssids`).
+
+Purely additive — no API, schema, or behavior changes; only the human/agent-readable
+error text gains guidance.
+
 ### 1.5.3
 **Fix — allow the `x-session-id` request header in CORS so Open WebUI tool calls work.**
 Open WebUI sends an `x-session-id` header on every OpenAPI tool call. The REST bridge's

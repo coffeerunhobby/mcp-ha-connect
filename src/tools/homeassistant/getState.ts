@@ -16,7 +16,7 @@ export function registerGetStateTool(server: McpServer, client: HaClient): void 
     wrapToolHandler('getState', async ({ entity_id }: { entity_id: string }) => {
       const state = await client.getState(entity_id);
       if (!state) {
-        return toToolResult({ error: 'Entity not found', entity_id }, true);
+        return toToolResult({ error: 'Entity not found', entity_id, hint: 'Use the searchEntities tool with a keyword to find the correct entity_id' }, true);
       }
       return toToolResult(state);
     }, Permission.QUERY)

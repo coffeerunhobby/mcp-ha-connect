@@ -85,7 +85,7 @@ export class NetworkOperations {
      */
     public async getSsidList(wlanId: string, siteId?: string): Promise<unknown[]> {
         if (!wlanId) {
-            throw new Error('A wlanId must be provided. Use getWlanGroupList to get available WLAN group IDs.');
+            throw new Error('A wlanId must be provided. Use omada_read at path /wifi/groups to get available WLAN group IDs.');
         }
 
         const resolvedSiteId = this.site.resolveSiteId(siteId);
@@ -102,10 +102,10 @@ export class NetworkOperations {
      */
     public async getSsidDetail(wlanId: string, ssidId: string, siteId?: string): Promise<unknown> {
         if (!wlanId) {
-            throw new Error('A wlanId must be provided. Use getWlanGroupList to get available WLAN group IDs.');
+            throw new Error('A wlanId must be provided. Use omada_read at path /wifi/groups to get available WLAN group IDs.');
         }
         if (!ssidId) {
-            throw new Error('An ssidId must be provided. Use getSsidList to get available SSID IDs.');
+            throw new Error('An ssidId must be provided. Use omada_read at path /wifi/ssids to get available SSID IDs.');
         }
 
         const resolvedSiteId = this.site.resolveSiteId(siteId);

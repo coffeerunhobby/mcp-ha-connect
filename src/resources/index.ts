@@ -74,7 +74,7 @@ export function registerAllResources(server: McpServer, client: HaClient): void 
             {
               uri: uri.href,
               mimeType: 'application/json',
-              text: JSON.stringify({ error: 'Entity not found', entity_id: entityId }),
+              text: JSON.stringify({ error: 'Entity not found', entity_id: entityId, hint: 'Use the searchEntities tool with a keyword to find the correct entity_id' }),
             },
           ],
         };
@@ -115,7 +115,7 @@ export function registerAllResources(server: McpServer, client: HaClient): void 
             {
               uri: uri.href,
               mimeType: 'application/json',
-              text: JSON.stringify({ error: 'Entity not found', entity_id: entityId }),
+              text: JSON.stringify({ error: 'Entity not found', entity_id: entityId, hint: 'Use the searchEntities tool with a keyword to find the correct entity_id' }),
             },
           ],
         };

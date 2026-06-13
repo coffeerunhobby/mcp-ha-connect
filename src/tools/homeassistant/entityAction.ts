@@ -19,7 +19,7 @@ export function registerEntityActionTool(server: McpServer, client: HaClient): v
     wrapToolHandler('entityAction', async ({ entity_id, action }: EntityActionArgs) => {
       const domain = entity_id.split('.')[0];
       if (!domain) {
-        return toToolResult({ error: 'Invalid entity_id format' }, true);
+        return toToolResult({ error: 'Invalid entity_id format', hint: 'entity_id must be in domain.name format such as light.living_room — use the searchEntities tool to discover valid entity IDs' }, true);
       }
       const result = await client.callService({
         domain,

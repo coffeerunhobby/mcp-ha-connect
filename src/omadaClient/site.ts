@@ -61,6 +61,6 @@ export class SiteOperations {
             return this.defaultSiteId;
         }
 
-        throw new Error('A site id must be provided either in the environment or as a parameter.');
+        throw new Error('A site id must be provided either in the environment or as a parameter. Use omada_browse at path / to discover available sites and their IDs.');
     }
 }
