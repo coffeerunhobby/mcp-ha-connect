@@ -120,7 +120,8 @@ jobs:
     # Replaces the bypass-2FA granular token: npm is restricting those from Aug 2026
     # and banning direct publish ~Jan 2027 (github.blog changelog 2026-07-08), and
     # ours expires 2026-09-12 anyway. --provenance attests the package to this run.
-    # No `npm ci` needed: dist/ is committed and the tarball is packed from files.
+    # dist/ is GITIGNORED (built, not committed) — this job MUST npm ci + build, or
+    # the published tarball ships without the compiled code.
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-test-lint, docker-smoke]
     runs-on: ubuntu-latest
@@ -137,6 +138,12 @@ jobs:
           node-version: '24.x'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Install + build (dist/ is gitignored — the tarball needs it compiled)
+        run: |
+          npm ci
+          npm run build
+          test -f dist/index.js || { echo "FATAL: build produced no dist/index.js"; exit 1; }
+
       - name: Publish (tag must match package version; idempotent if already published)
         run: |
           set -eu
@@ -151,6 +158,8 @@ jobs:
           else
             npm publish --provenance --access public
           fi
+          # Belt-and-braces: the tarball npm just packed must contain the entrypoint.
+          npm pack --dry-run 2>&1 | grep -q 'dist/index.js' || { echo "FATAL: packed tarball missing dist/index.js"; exit 1; }
 
   release:
     # Auto-create the GitHub Release when a `v*` tag passes BOTH gates above —

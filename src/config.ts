@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { isValidBindAddress, isValidOrigin, isLoopbackAddress } from './utils/config-validations.js';
 import { parsePermissionsConfig, type PermissionsConfig } from './permissions/index.js';
+import { parseRestActions, type RestAction } from './tools/infra/actions.js';
 import { logger } from './utils/logger.js';
 import type { AIProviderType } from './localAI/types.js';
 
@@ -42,6 +43,10 @@ const envSchema = z
     omadaSiteId: z.string().min(1).optional(),
     omadaStrictSsl: createBooleanStringSchema(true),
     omadaTimeout: numericStringSchema,
+
+    // Pre-registered REST actions for the invokeAction tool (optional; raw JSON,
+    // parsed + validated by parseRestActions after the env parse)
+    restActions: z.string().optional(),
 
     // AI Provider Configuration (use 'none' to disable AI features)
     aiProvider: z.enum(['ollama', 'openai', 'none']).optional(),
@@ -199,6 +204,9 @@ export interface EnvironmentConfig {
   aiTimeout: number;
   aiApiKey?: string;
 
+  // Pre-registered REST actions for the invokeAction tool (empty = tool not registered)
+  restActions: Record<string, RestAction>;
+
   // MCP Generic Server Configuration
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   logFormat: 'plain' | 'json' | 'gcp-json';
@@ -261,6 +269,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     omadaSiteId: env.OMADA_SITE_ID,
     omadaStrictSsl: env.OMADA_STRICT_SSL,
     omadaTimeout: env.OMADA_TIMEOUT,
+
+    // Pre-registered REST actions
+    restActions: env.MCP_REST_ACTIONS,
 
     // AI Provider Configuration
     aiProvider: env.AI_PROVIDER,
@@ -355,6 +366,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     siteId: parsed.data.omadaSiteId,
     omadaStrictSsl: parsed.data.omadaStrictSsl,
     requestTimeout: parsed.data.omadaTimeout,
+
+    // Pre-registered REST actions (throws on malformed JSON — config typos fail loudly)
+    restActions: parseRestActions(parsed.data.restActions),
 
     // AI Provider Configuration
     aiProvider: (parsed.data.aiProvider ?? 'ollama') as AIProviderType,

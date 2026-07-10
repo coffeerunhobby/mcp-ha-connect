@@ -22,7 +22,7 @@ import type {
 import { AuthManager } from './auth.js';
 import { ClientOperations } from './client.js';
 import { DeviceOperations } from './device.js';
-import { NetworkOperations } from './network.js';
+import { NetworkOperations, type SsidEnableResult } from './network.js';
 import { RequestHandler, type RequestOptions } from './request.js';
 import { SecurityOperations } from './security.js';
 import { SiteOperations } from './site.js';
@@ -198,6 +198,16 @@ export class OmadaClient {
 
     public async getFirewallSetting(siteId?: string): Promise<unknown> {
         return await this.networkOps.getFirewallSetting(siteId);
+    }
+
+    /** Power-cycle PoE on switch ports (remote hard-reboot of PoE-powered devices). */
+    public async cyclePoePorts(switchMac: string, ports: number[], siteId?: string): Promise<void> {
+        return await this.deviceOps.cyclePoePorts(switchMac, ports, siteId);
+    }
+
+    /** Enable/disable an SSID (guest network on/off) via the WLAN-schedule mechanism. */
+    public async setSsidEnabled(ssid: string, enabled: boolean, siteId?: string): Promise<SsidEnableResult> {
+        return await this.networkOps.setSsidEnabled(ssid, enabled, siteId);
     }
 
     // Generic API call

@@ -141,8 +141,10 @@ describe('Server Instructions', () => {
         aiEnabled: true,
       });
 
-      // Instructions should be concise - under 2KB is a good target
-      expect(instructions.length).toBeLessThan(2000);
+      // Instructions should be concise - ceiling raised 2000 -> 2200 for the v1.6
+      // ACTIONS line (PoE cycle + SSID toggle); still deliberately tight so the
+      // budget keeps pushing back on instruction creep.
+      expect(instructions.length).toBeLessThan(2200);
       // But substantial enough to be useful - at least 500 chars with all plugins
       expect(instructions.length).toBeGreaterThan(500);
     });

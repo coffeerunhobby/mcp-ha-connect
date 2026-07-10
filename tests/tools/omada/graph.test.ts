@@ -78,16 +78,19 @@ describe('Omada graph tools - registration', () => {
     expect(server.handlers.has('omada_read')).toBe(true);
   });
 
-  it('graph mode registers browse + read + 5 typed writes, and NO typed getters', () => {
+  it('graph mode registers browse + read + 7 typed writes, and NO typed getters', () => {
     const server = createMockServer();
     const client = createMockClient();
     const count = registerOmadaTools(server, client, 'graph');
-    expect(count).toBe(7);
+    expect(count).toBe(9);
     const names = [...server.handlers.keys()];
     expect(names).toContain('omada_browse');
     expect(names).toContain('omada_read');
     expect(names).toContain('omada_blockClient');
     expect(names).toContain('omada_setClientRateLimit');
+    // v1.6 action tools ride along in graph mode too (writes stay typed).
+    expect(names).toContain('omada_cyclePoePort');
+    expect(names).toContain('omada_setSsidEnabled');
     // Typed read getters must NOT be present in graph mode.
     expect(names).not.toContain('omada_listSites');
     expect(names).not.toContain('omada_getFirewallSetting');

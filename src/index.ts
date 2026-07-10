@@ -131,6 +131,7 @@ async function main(): Promise<void> {
         haClient,
         omadaClient,
         aiClient,
+        restActions: config.restActions,
         toolRegistrationMode: config.toolRegistrationMode,
       });
     }

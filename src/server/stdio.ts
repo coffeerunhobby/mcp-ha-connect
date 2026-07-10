@@ -10,12 +10,15 @@ import type { OmadaClient } from '../omadaClient/index.js';
 import { logger } from '../utils/logger.js';
 import { setLocalFullTrust } from '../tools/common.js';
 import type { OmadaRegistrationMode } from '../tools/omada/index.js';
+import type { RestAction } from '../tools/infra/index.js';
 import { createServer } from './common.js';
 
 export interface StdioServerOptions {
   haClient?: HaClient;
   omadaClient?: OmadaClient;
   aiClient?: LocalAIClient;
+  /** Pre-registered REST actions for invokeAction (empty/undefined = tool not registered). */
+  restActions?: Record<string, RestAction>;
   /** Tool registration strategy for the Omada plugin (default 'eager'). */
   toolRegistrationMode?: OmadaRegistrationMode;
 }

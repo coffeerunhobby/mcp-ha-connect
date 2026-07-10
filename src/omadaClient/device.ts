@@ -88,4 +88,31 @@ export class DeviceOperations {
         const response = await this.request.get<OmadaApiResponse<OmadaDeviceStats>>(path);
         return this.request.ensureSuccess(response);
     }
+
+    /**
+     * Power-cycle PoE on one or more switch ports ("PoE recovery").
+     * OperationId: createSitesSwitchesMultiPortsPoeRecovery
+     *
+     * The switch briefly cuts and restores PoE power on the given ports —
+     * a remote hard-reboot for whatever is powered by them (APs, cameras).
+     * The switch itself and other ports are unaffected.
+     *
+     * @param switchMac - MAC address of the Omada switch
+     * @param ports - Port numbers to cycle, e.g. [1, 2]
+     */
+    public async cyclePoePorts(switchMac: string, ports: number[], siteId?: string): Promise<void> {
+        if (!switchMac) {
+            throw new Error('A switchMac must be provided. Use omada_listDevices to find switch MAC addresses.');
+        }
+        if (!ports.length) {
+            throw new Error('At least one port number must be provided, e.g. ports: [1].');
+        }
+
+        const resolvedSiteId = this.site.resolveSiteId(siteId);
+        const path = this.buildPath(
+            `/sites/${encodeURIComponent(resolvedSiteId)}/switches/${encodeURIComponent(switchMac)}/multi-ports/poe-recovery`
+        );
+        const response = await this.request.post<OmadaApiResponse<unknown>>(path, { ports });
+        this.request.ensureSuccess(response);
+    }
 }

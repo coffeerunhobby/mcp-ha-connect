@@ -9,6 +9,7 @@ import type { LocalAIClient } from '../localAI/index.js';
 import type { OmadaClient } from '../omadaClient/index.js';
 import { registerAllTools } from '../tools/index.js';
 import type { OmadaRegistrationMode } from '../tools/omada/index.js';
+import type { RestAction } from '../tools/infra/index.js';
 import { registerAllResources } from '../resources/index.js';
 import { generateInstructions } from './instructions.js';
 import { logger } from '../utils/logger.js';
@@ -18,12 +19,14 @@ export interface CreateServerOptions {
   haClient?: HaClient;
   omadaClient?: OmadaClient;
   aiClient?: LocalAIClient;
+  /** Pre-registered REST actions for invokeAction (empty/undefined = tool not registered). */
+  restActions?: Record<string, RestAction>;
   /** Tool registration strategy for the Omada plugin (default 'eager'). */
   toolRegistrationMode?: OmadaRegistrationMode;
 }
 
 export function createServer(options: CreateServerOptions): McpServer {
-  const { haClient, omadaClient, aiClient, toolRegistrationMode } = options;
+  const { haClient, omadaClient, aiClient, restActions, toolRegistrationMode } = options;
   logger.debug('Creating MCP server instance');
 
   // Generate instructions based on enabled plugins
@@ -51,6 +54,7 @@ export function createServer(options: CreateServerOptions): McpServer {
     haClient,
     omadaClient,
     aiClient,
+    restActions,
     toolRegistrationMode,
   });
 

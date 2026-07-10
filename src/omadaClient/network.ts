@@ -126,4 +126,159 @@ export class NetworkOperations {
         const response = await this.request.get<OmadaApiResponse<unknown>>(path);
         return this.request.ensureSuccess(response);
     }
+
+    /**
+     * List every SSID on the site, flattened across WLAN groups.
+     * OperationId: listAllSsids — returns [{wlanId, wlanName, ssidList:[{ssidId, ssidName}]}].
+     */
+    public async listAllSsids(siteId?: string): Promise<WlanSimpleInfo[]> {
+        const resolvedSiteId = this.site.resolveSiteId(siteId);
+        const path = this.buildPath(`/sites/${encodeURIComponent(resolvedSiteId)}/wireless-network/ssids`);
+        const response = await this.request.get<OmadaApiResponse<WlanSimpleInfo[]>>(path);
+        return this.request.ensureSuccess(response);
+    }
+
+    /**
+     * List time-range profiles for the site.
+     * OperationId: listTimeRangeProfiles — returns [{profileId, name, dayMode, ...}].
+     */
+    public async listTimeRangeProfiles(siteId?: string): Promise<TimeRangeProfileInfo[]> {
+        const resolvedSiteId = this.site.resolveSiteId(siteId);
+        const path = this.buildPath(`/sites/${encodeURIComponent(resolvedSiteId)}/time-range-profiles`);
+        const response = await this.request.get<OmadaApiResponse<TimeRangeProfileInfo[]>>(path);
+        return this.request.ensureSuccess(response);
+    }
+
+    /**
+     * Create a time-range profile. The API returns no profileId — callers must
+     * re-list and match by name to obtain the created profile's id.
+     * OperationId: createSitesTimeRangeProfiles
+     */
+    public async createTimeRangeProfile(profile: CreateTimeRangeProfile, siteId?: string): Promise<void> {
+        const resolvedSiteId = this.site.resolveSiteId(siteId);
+        const path = this.buildPath(`/sites/${encodeURIComponent(resolvedSiteId)}/time-range-profiles`);
+        const response = await this.request.post<OmadaApiResponse<unknown>>(path, profile);
+        this.request.ensureSuccess(response);
+    }
+
+    /**
+     * Update the WLAN-schedule config of a single SSID.
+     * OperationId: updateSitesWirelessNetworkWlansSsidsUpdateWlanSchedule
+     * Omada has no direct SSID on/off — the WLAN schedule (action 0 = radio off
+     * during the scheduled period) is the controller's sanctioned mechanism.
+     */
+    public async updateSsidWlanSchedule(
+        wlanId: string,
+        ssidId: string,
+        schedule: { wlanScheduleEnable: boolean; action?: number; scheduleId?: string },
+        siteId?: string
+    ): Promise<void> {
+        const resolvedSiteId = this.site.resolveSiteId(siteId);
+        const path = this.buildPath(
+            `/sites/${encodeURIComponent(resolvedSiteId)}/wireless-network/wlans/${encodeURIComponent(wlanId)}/ssids/${encodeURIComponent(ssidId)}/update-wlan-schedule`
+        );
+        const response = await this.request.patch<OmadaApiResponse<unknown>>(path, schedule);
+        this.request.ensureSuccess(response);
+    }
+
+    /**
+     * Enable or disable an SSID (e.g. the guest network) by name or ssidId.
+     *
+     * Omada 6.x exposes no direct enable flag on an SSID; the sanctioned lever is
+     * the per-SSID WLAN schedule. Disabling applies an always-on "radio off"
+     * schedule (a 24/7 time-range profile is created once and reused); enabling
+     * simply turns the schedule off again. Fully reversible, and unlike a MAC
+     * filter it actually stops the SSID from broadcasting.
+     */
+    public async setSsidEnabled(ssid: string, enabled: boolean, siteId?: string): Promise<SsidEnableResult> {
+        const wlans = await this.listAllSsids(siteId);
+        const needle = ssid.trim().toLowerCase();
+        let match: { wlanId: string; ssidId: string; ssidName: string } | undefined;
+        for (const wlan of wlans) {
+            for (const s of wlan.ssidList ?? []) {
+                if (s.ssidId === ssid || s.ssidName.toLowerCase() === needle) {
+                    match = { wlanId: wlan.wlanId, ssidId: s.ssidId, ssidName: s.ssidName };
+                    break;
+                }
+            }
+            if (match) break;
+        }
+        if (!match) {
+            const available = wlans.flatMap((w) => (w.ssidList ?? []).map((s) => s.ssidName)).join(', ');
+            throw new Error(`SSID '${ssid}' not found. Available SSIDs: ${available || '(none)'}`);
+        }
+
+        if (enabled) {
+            await this.updateSsidWlanSchedule(match.wlanId, match.ssidId, { wlanScheduleEnable: false }, siteId);
+            return { ...match, enabled: true, method: 'wlan-schedule disabled' };
+        }
+
+        const scheduleId = await this.ensureAlwaysProfile(siteId);
+        await this.updateSsidWlanSchedule(
+            match.wlanId,
+            match.ssidId,
+            { wlanScheduleEnable: true, action: 0, scheduleId },
+            siteId
+        );
+        return { ...match, enabled: false, method: 'wlan-schedule radio-off 24/7', scheduleId };
+    }
+
+    /**
+     * Find-or-create the 24/7 time-range profile used to switch SSIDs off.
+     * Created once per site under a fixed name, then reused forever.
+     */
+    private async ensureAlwaysProfile(siteId?: string): Promise<string> {
+        const existing = await this.listTimeRangeProfiles(siteId);
+        const found = existing.find((p) => p.name === ALWAYS_PROFILE_NAME);
+        if (found) {
+            return found.profileId;
+        }
+
+        await this.createTimeRangeProfile(
+            {
+                name: ALWAYS_PROFILE_NAME,
+                dayMode: 0, // Every Day
+                timeList: [{ dayType: 1, startTimeH: 0, startTimeM: 0, endTimeH: 24, endTimeM: 0 }],
+            },
+            siteId
+        );
+
+        // The create endpoint returns no id — re-list and match by name.
+        const after = await this.listTimeRangeProfiles(siteId);
+        const created = after.find((p) => p.name === ALWAYS_PROFILE_NAME);
+        if (!created) {
+            throw new Error(`Time-range profile '${ALWAYS_PROFILE_NAME}' was created but not found on re-list`);
+        }
+        return created.profileId;
+    }
+}
+
+/** Fixed name of the reusable 24/7 profile that backs omada_setSsidEnabled(false). */
+export const ALWAYS_PROFILE_NAME = 'mcp-always (24/7, used by omada_setSsidEnabled)';
+
+export interface WlanSimpleInfo {
+    wlanId: string;
+    wlanName: string;
+    ssidList?: Array<{ ssidId: string; ssidName: string }>;
+}
+
+export interface TimeRangeProfileInfo {
+    profileId: string;
+    name: string;
+    dayMode?: number;
+}
+
+export interface CreateTimeRangeProfile {
+    name: string;
+    dayMode: number;
+    timeList: Array<{ dayType: number; startTimeH: number; startTimeM: number; endTimeH: number; endTimeM: number }>;
+}
+
+export interface SsidEnableResult {
+    wlanId: string;
+    ssidId: string;
+    ssidName: string;
+    enabled: boolean;
+    method: string;
+    scheduleId?: string;
 }

@@ -7,7 +7,9 @@ import type { OmadaClient } from '../../omadaClient/index.js';
 import { logger } from '../../utils/logger.js';
 
 import { registerBlockClientTool } from './blockClient.js';
+import { registerCyclePoePortTool } from './cyclePoePort.js';
 import { registerOmadaGraphTools } from './graph.js';
+import { registerSetSsidEnabledTool } from './setSsidEnabled.js';
 import { registerDisableClientRateLimitTool } from './disableClientRateLimit.js';
 import { registerGetClientTool } from './getClient.js';
 import { registerGetDeviceTool } from './getDevice.js';
@@ -87,6 +89,10 @@ export function registerOmadaTools(
   registerUnblockClientTool(server, client);
   toolCount += 2;
 
+  // Device action tools
+  registerCyclePoePortTool(server, client);
+  toolCount += 1;
+
   // Security tools
   registerGetThreatListTool(server, client);
   toolCount += 1;
@@ -100,7 +106,8 @@ export function registerOmadaTools(
   registerGetSsidListTool(server, client);
   registerGetSsidDetailTool(server, client);
   registerGetFirewallSettingTool(server, client);
-  toolCount += 8;
+  registerSetSsidEnabledTool(server, client);
+  toolCount += 9;
 
   logger.info('Omada tools registered', { mode, toolCount });
   return toolCount;
@@ -127,7 +134,9 @@ function registerOmadaToolsGraph(server: McpServer, client: OmadaClient): number
   registerDisableClientRateLimitTool(server, client);
   registerBlockClientTool(server, client);
   registerUnblockClientTool(server, client);
-  toolCount += 5;
+  registerCyclePoePortTool(server, client);
+  registerSetSsidEnabledTool(server, client);
+  toolCount += 7;
 
   logger.info('Omada tools registered', { mode: 'graph', toolCount });
   return toolCount;

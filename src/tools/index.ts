@@ -12,12 +12,15 @@ import { logger } from '../utils/logger.js';
 import { registerHomeAssistantTools } from './homeassistant/index.js';
 import { registerOmadaTools, type OmadaRegistrationMode } from './omada/index.js';
 import { registerAITools } from './ai/index.js';
+import { registerInfraTools, type RestAction } from './infra/index.js';
 
 export interface RegisterToolsOptions {
   server: McpServer;
   haClient?: HaClient;
   omadaClient?: OmadaClient;
   aiClient?: LocalAIClient;
+  /** Pre-registered REST actions for invokeAction (empty/undefined = tool not registered). */
+  restActions?: Record<string, RestAction>;
   /** Tool registration strategy for the Omada plugin (default 'eager'). */
   toolRegistrationMode?: OmadaRegistrationMode;
 }
@@ -26,7 +29,7 @@ export interface RegisterToolsOptions {
  * Register all available tools based on configured clients
  */
 export function registerAllTools(options: RegisterToolsOptions): void {
-  const { server, haClient, omadaClient, aiClient, toolRegistrationMode } = options;
+  const { server, haClient, omadaClient, aiClient, restActions, toolRegistrationMode } = options;
   logger.debug('Registering all tools');
 
   let totalTools = 0;
@@ -47,11 +50,15 @@ export function registerAllTools(options: RegisterToolsOptions): void {
   const aiToolCount = registerAITools(server, aiClient);
   totalTools += aiToolCount;
 
+  // Infra tools (only when REST actions are configured)
+  totalTools += registerInfraTools(server, restActions ?? {});
+
   logger.info('All tools registered successfully', {
     totalTools,
     haEnabled: !!haClient,
     omadaEnabled: !!omadaClient,
     aiEnabled: !!aiClient,
+    infraEnabled: Object.keys(restActions ?? {}).length > 0,
   });
 }
 

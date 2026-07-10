@@ -76,8 +76,11 @@ function getOmadaInstructions(): string {
     // Rate limiting
     'RATE LIMITS: Use omada_getRateLimitProfiles before setting limits. omada_setClientRateLimitProfile applies predefined profiles; omada_setClientRateLimit sets custom Kbps values.',
 
+    // Remote-hands actions (v1.6)
+    'ACTIONS: omada_cyclePoePort power-cycles PoE ports (remote-reboots APs/cameras; switch MAC via omada_listDevices). omada_setSsidEnabled toggles an SSID by name (guest WiFi on/off).',
+
     // Read-only preference
-    'SAFETY: Prefer read-only Omada tools. Rate limiting affects real network traffic - confirm with user before applying.',
+    'SAFETY: Prefer read-only Omada tools. Rate limits, PoE cycling, and SSID toggles affect real availability - confirm with user before applying.',
   ].join(' ');
 }
 

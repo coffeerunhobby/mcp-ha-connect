@@ -98,6 +98,7 @@ export function createStreamTransport(options: StreamTransportOptions): StreamTr
     haClient,
     omadaClient,
     aiClient,
+    restActions: config.restActions,
     toolRegistrationMode: config.toolRegistrationMode,
   });
 
