@@ -48,9 +48,13 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
 
-      # npm ci installs exactly what's in package-lock.json (reproducible),
-      # the same command Docker uses. It never edits the lockfile.
-      - name: Install dependencies
+      # Install deps from the lockfile (reproducible; same command Docker uses; never
+      # edits the lockfile). RECURRING TRAP: `npm ci` fails here if the lockfile was
+      # regenerated on Windows — that OMITS linux-only optional deps (@emnapi/*) and
+      # the Linux install rejects it. FIX: regenerate the lockfile on Linux / in the
+      # node:24-alpine build image (docker run … npm install --package-lock-only),
+      # never `npm install` on Windows.
+      - name: Install dependencies (npm ci — fails on a Windows-drifted lockfile)
         run: npm ci
 
       # 1. Compile cleanly (tsc -> dist/). Catches type errors.
