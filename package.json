@@ -30,6 +30,14 @@
   ],
   "author": "Coffee Run Hobby",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coffeerunhobby/mcp-ha-connect.git"
+  },
+  "homepage": "https://github.com/coffeerunhobby/mcp-ha-connect#readme",
+  "bugs": {
+    "url": "https://github.com/coffeerunhobby/mcp-ha-connect/issues"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "undici": "^6.26.0",
