@@ -32,9 +32,9 @@ jobs:
       # we want to see both results.
       fail-fast: false
       matrix:
-        # The LTS lines we support (package.json engines: ">=20") plus 26 —
-        # the Docker image's actual runtime since v1.5.5 (LTS from 2026-10).
-        node-version: ['20.x', '22.x', '26.x']
+        # The LTS lines we support (package.json engines: ">=20"). 24.x is the
+        # Docker image's actual runtime (since v1.5.6); 26 is the next LTS (2026-10).
+        node-version: ['20.x', '22.x', '24.x', '26.x']
 
     name: node ${{ matrix.node-version }}
 
@@ -73,13 +73,55 @@ jobs:
       - name: Test + coverage gate
         run: npm run test:coverage
 
+  docker-smoke:
+    # Boot-test the ACTUAL image: build it, point it at a mock Home Assistant,
+    # and require /health to answer. Motivation: v1.5.5 shipped without ever
+    # having been run — its first boot was in production on the NAS (where the
+    # node:26 base then failed its first fetch). A release must never again be
+    # the image's first boot.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t mcp-smoke:ci .
+
+      - name: Boot against a mock HA and assert /health
+        run: |
+          set -eu
+          docker network create smoke
+          # Mock HA: 200 {"message":"API running."} — the same body the real
+          # /api/ startup check (checkApi) expects.
+          docker run -d --name mockha --network smoke node:24-alpine \
+            node -e 'require("http").createServer((q,s)=>{s.writeHead(200,{"Content-Type":"application/json"});s.end(JSON.stringify({message:"API running."}))}).listen(8123,()=>console.log("mock HA up"))'
+          docker run -d --name mcp --network smoke \
+            -e MCP_SERVER_USE_HTTP=true \
+            -e MCP_HTTP_PORT=3000 -e MCP_HTTP_BIND_ADDR=0.0.0.0 \
+            -e MCP_HTTP_ENABLE_HEALTHCHECK=true -e MCP_HTTP_HEALTHCHECK_PATH=/health \
+            -e MCP_AUTH_METHOD=bearer -e MCP_AUTH_SECRET=ci-smoke-dummy-secret-0123456789 \
+            -e HA_PLUGIN_ENABLED=true -e HA_URL=http://mockha:8123 -e HA_TOKEN=ci-dummy \
+            -e AI_PLUGIN_ENABLED=false -e OMADA_PLUGIN_ENABLED=false \
+            mcp-smoke:ci
+          for i in $(seq 1 15); do
+            if docker run --rm --network smoke curlimages/curl:latest -sf http://mcp:3000/health >/dev/null 2>&1; then
+              echo "smoke OK: image boots, startup HA check passes, /health answers"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "SMOKE FAILED — container logs:"
+          docker logs mcp
+          exit 1
+
   release:
-    # Auto-create the GitHub Release when a `v*` tag passes the gate above.
-    # Notes are auto-generated from the commits since the previous release;
-    # polish them in the web UI afterwards if the release deserves prose.
+    # Auto-create the GitHub Release when a `v*` tag passes BOTH gates above —
+    # the test matrix AND the image boot-test. Notes are auto-generated from the
+    # commits since the previous release; polish them in the web UI afterwards
+    # if the release deserves prose.
     # Idempotent: if the Release already exists (created by hand), this no-ops.
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-test-lint
+    needs: [build-test-lint, docker-smoke]
     runs-on: ubuntu-latest
     permissions:
       contents: write
