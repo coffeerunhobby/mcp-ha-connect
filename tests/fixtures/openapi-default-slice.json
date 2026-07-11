@@ -1,0 +1,290 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Home Assistant MCP Tools",
+    "description": "MCP server for Home Assistant - exposes entity states and service calls",
+    "version": "1.6.0"
+  },
+  "servers": [
+    {
+      "url": "http://__BASE_URL__"
+    }
+  ],
+  "paths": {
+    "/api/states": {
+      "get": {
+        "operationId": "getStates",
+        "summary": "Get all entity states from Home Assistant",
+        "responses": {
+          "200": {
+            "description": "List of all entity states",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EntityState"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/states/{entity_id}": {
+      "get": {
+        "operationId": "getState",
+        "summary": "Get state of a specific entity",
+        "parameters": [
+          {
+            "name": "entity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Entity ID (e.g., light.living_room)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Entity state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntityState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/services/{domain}/{service}": {
+      "post": {
+        "operationId": "callService",
+        "summary": "Call a Home Assistant service",
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Service domain (e.g., light, switch)"
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Service name (e.g., turn_on, turn_off)"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "entity_id": {
+                    "type": "string",
+                    "description": "Target entity ID"
+                  },
+                  "data": {
+                    "type": "object",
+                    "description": "Service data"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Service call result"
+          }
+        }
+      }
+    },
+    "/api/sensors": {
+      "get": {
+        "operationId": "getAllSensors",
+        "summary": "Get all sensor and binary_sensor states",
+        "responses": {
+          "200": {
+            "description": "List of sensor states",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EntityState"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/entities/{domain}": {
+      "get": {
+        "operationId": "getEntitiesByDomain",
+        "summary": "Get all entities for a specific domain",
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Domain name (e.g., light, sensor)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of entities in domain",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EntityState"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/search": {
+      "get": {
+        "operationId": "searchEntities",
+        "summary": "Search entities by name or ID",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching entities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EntityState"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/history/{entity_id}": {
+      "get": {
+        "operationId": "getHistory",
+        "summary": "Get historical data for an entity",
+        "parameters": [
+          {
+            "name": "entity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Entity ID"
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "schema": {
+              "type": "number",
+              "default": 24
+            },
+            "description": "Hours of history"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Historical data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/version": {
+      "get": {
+        "operationId": "getVersion",
+        "summary": "Get Home Assistant version information",
+        "responses": {
+          "200": {
+            "description": "Version information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ha_version": {
+                      "type": "string",
+                      "description": "Home Assistant version"
+                    },
+                    "mcp_version": {
+                      "type": "string",
+                      "description": "MCP server version"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "EntityState": {
+        "type": "object",
+        "properties": {
+          "entity_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "attributes": {
+            "type": "object"
+          },
+          "last_changed": {
+            "type": "string"
+          },
+          "last_updated": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { isValidBindAddress, isValidOrigin, isLoopbackAddress } from './utils/config-validations.js';
 import { parsePermissionsConfig, type PermissionsConfig } from './permissions/index.js';
 import { parseRestActions, type RestAction } from './tools/infra/actions.js';
+import { parseChatTools, type ChatToolsSlice } from './server/chatSlice.js';
 import { logger } from './utils/logger.js';
 import type { AIProviderType } from './localAI/types.js';
 
@@ -47,6 +48,10 @@ const envSchema = z
     // Pre-registered REST actions for the invokeAction tool (optional; raw JSON,
     // parsed + validated by parseRestActions after the env parse)
     restActions: z.string().optional(),
+
+    // Chat-face tool slice for the OpenAPI/REST surface (optional; raw
+    // `category:rw` list, parsed + validated by parseChatTools after the env parse)
+    chatTools: z.string().optional(),
 
     // AI Provider Configuration (use 'none' to disable AI features)
     aiProvider: z.enum(['ollama', 'openai', 'none']).optional(),
@@ -207,6 +212,9 @@ export interface EnvironmentConfig {
   // Pre-registered REST actions for the invokeAction tool (empty = tool not registered)
   restActions: Record<string, RestAction>;
 
+  // Chat-face (OpenAPI/REST) tool slice (undefined = legacy 8-tool default)
+  chatTools?: ChatToolsSlice;
+
   // MCP Generic Server Configuration
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   logFormat: 'plain' | 'json' | 'gcp-json';
@@ -272,6 +280,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
 
     // Pre-registered REST actions
     restActions: env.MCP_REST_ACTIONS,
+
+    // Chat-face tool slice
+    chatTools: env.MCP_CHAT_TOOLS,
 
     // AI Provider Configuration
     aiProvider: env.AI_PROVIDER,
@@ -369,6 +380,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
 
     // Pre-registered REST actions (throws on malformed JSON — config typos fail loudly)
     restActions: parseRestActions(parsed.data.restActions),
+
+    // Chat-face tool slice (throws on unknown category/access — typos fail loudly)
+    chatTools: parseChatTools(parsed.data.chatTools),
 
     // AI Provider Configuration
     aiProvider: (parsed.data.aiProvider ?? 'ollama') as AIProviderType,

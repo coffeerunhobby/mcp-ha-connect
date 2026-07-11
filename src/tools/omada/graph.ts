@@ -36,14 +36,14 @@ function nodeSummary(node: ResourceNode): Record<string, unknown> {
   };
 }
 
-const browseSchema = z.object({
+export const browseSchema = z.object({
   path: z
     .string()
     .default('/')
     .describe('Resource path to explore (default "/"). e.g. "/", "/gateway", "/wifi", "/network".'),
 });
 
-const readSchema = z.object({
+export const readSchema = z.object({
   path: z.string().describe('Resource path discovered via omada_browse, e.g. "/gateway/wan", "/clients", "/events".'),
   siteId: z.string().min(1).optional().describe('Site ID (optional; uses the default site if not set).'),
   id: z.string().min(1).optional().describe('Look up a single member of a collection by id/MAC (where supported).'),
@@ -54,6 +54,96 @@ const readSchema = z.object({
   page: z.number().int().min(1).optional().describe('Page number for paginated resources (e.g. "/events").'),
   pageSize: z.number().int().min(1).max(200).optional().describe('Page size for paginated resources (max 200).'),
 });
+
+/**
+ * Shared `omada_browse` handler — used by both the MCP registration below and
+ * the chat face (`POST /api/tools/omada_browse`), so validation, RBAC, and
+ * behavior stay identical on both faces (v1.7 single-source-of-truth rule).
+ */
+export function createBrowseHandler(client: OmadaClient) {
+  void client; // browse only walks the static manifest; client kept for signature symmetry
+  return wrapToolHandler(
+    'omada_browse',
+    async ({ path }: z.infer<typeof browseSchema>, extra: ToolExtra): Promise<ReturnType<typeof toToolResult>> => {
+      const norm = normalizePath(path);
+      const node = getResourceNode(norm);
+      if (!node) {
+        return toToolResult(
+          { error: 'Unknown path', message: `No Omada resource at '${norm}'. Start at '/' and browse downward.` },
+          true
+        );
+      }
+      const mask = getCallerPermissions(extra);
+      const children = childrenOf(norm)
+        .filter((child) => hasPermission(mask, child.permission))
+        .map(nodeSummary);
+      return toToolResult({
+        path: norm,
+        kind: node.kind,
+        description: node.description,
+        readable: node.fetch !== undefined,
+        ...(node.params && node.params.length > 0 ? { params: node.params } : {}),
+        ...(node.paginated ? { supportsPagination: true, defaultPageSize: node.defaultPageSize ?? 50 } : {}),
+        children,
+      });
+    },
+    Permission.QUERY
+  );
+}
+
+/** Shared `omada_read` handler — same dual-face reuse as createBrowseHandler. */
+export function createReadHandler(client: OmadaClient) {
+  // No static permission: each path declares its own, enforced below (fail-closed).
+  return wrapToolHandler(
+    'omada_read',
+    async (args: z.infer<typeof readSchema>, extra: ToolExtra): Promise<ReturnType<typeof toToolResult>> => {
+      const norm = normalizePath(args.path);
+      const node = getResourceNode(norm);
+      if (!node) {
+        return toToolResult(
+          { error: 'Unknown path', message: `No Omada resource at '${norm}'. Use omada_browse to discover valid paths.` },
+          true
+        );
+      }
+      if (!node.fetch) {
+        return toToolResult(
+          { error: 'Not readable', message: `'${norm}' is a container. Use omada_browse to list its children.` },
+          true
+        );
+      }
+
+      const mask = getCallerPermissions(extra);
+      if (!hasPermission(mask, node.permission)) {
+        const required = getPermissionNames(node.permission);
+        const has = getPermissionNames(mask);
+        return toToolResult(
+          { error: 'Permission denied', message: `Reading '${norm}' requires permission: ${required.join(', ')}`, required, has },
+          true
+        );
+      }
+
+      // Validate required path parameters before touching the controller.
+      const missing = (node.params ?? [])
+        .filter((p) => p.required && !args.params?.[p.name])
+        .map((p) => p.name);
+      if (missing.length > 0) {
+        return toToolResult(
+          { error: 'Missing parameters', message: `'${norm}' requires: ${missing.join(', ')}. Pass them in "params".`, missing },
+          true
+        );
+      }
+
+      const readArgs: ReadArgs = {
+        siteId: args.siteId,
+        id: args.id,
+        params: args.params,
+        page: args.page,
+        pageSize: args.pageSize,
+      };
+      return toToolResult(await node.fetch(client, readArgs));
+    }
+  );
+}
 
 /**
  * Register the resource-graph tools. Returns the number of tools registered (2).
@@ -68,33 +158,7 @@ export function registerOmadaGraphTools(server: McpServer, client: OmadaClient):
         'data. This replaces dozens of individual getters with one discoverable namespace.',
       inputSchema: browseSchema.shape,
     },
-    wrapToolHandler(
-      'omada_browse',
-      async ({ path }: z.infer<typeof browseSchema>, extra: ToolExtra): Promise<ReturnType<typeof toToolResult>> => {
-        const norm = normalizePath(path);
-        const node = getResourceNode(norm);
-        if (!node) {
-          return toToolResult(
-            { error: 'Unknown path', message: `No Omada resource at '${norm}'. Start at '/' and browse downward.` },
-            true
-          );
-        }
-        const mask = getCallerPermissions(extra);
-        const children = childrenOf(norm)
-          .filter((child) => hasPermission(mask, child.permission))
-          .map(nodeSummary);
-        return toToolResult({
-          path: norm,
-          kind: node.kind,
-          description: node.description,
-          readable: node.fetch !== undefined,
-          ...(node.params && node.params.length > 0 ? { params: node.params } : {}),
-          ...(node.paginated ? { supportsPagination: true, defaultPageSize: node.defaultPageSize ?? 50 } : {}),
-          children,
-        });
-      },
-      Permission.QUERY
-    )
+    createBrowseHandler(client)
   );
 
   server.registerTool(
@@ -106,56 +170,7 @@ export function registerOmadaGraphTools(server: McpServer, client: OmadaClient):
         'page/pageSize). Authorization is enforced per-path.',
       inputSchema: readSchema.shape,
     },
-    // No static permission: each path declares its own, enforced below (fail-closed).
-    wrapToolHandler(
-      'omada_read',
-      async (args: z.infer<typeof readSchema>, extra: ToolExtra): Promise<ReturnType<typeof toToolResult>> => {
-        const norm = normalizePath(args.path);
-        const node = getResourceNode(norm);
-        if (!node) {
-          return toToolResult(
-            { error: 'Unknown path', message: `No Omada resource at '${norm}'. Use omada_browse to discover valid paths.` },
-            true
-          );
-        }
-        if (!node.fetch) {
-          return toToolResult(
-            { error: 'Not readable', message: `'${norm}' is a container. Use omada_browse to list its children.` },
-            true
-          );
-        }
-
-        const mask = getCallerPermissions(extra);
-        if (!hasPermission(mask, node.permission)) {
-          const required = getPermissionNames(node.permission);
-          const has = getPermissionNames(mask);
-          return toToolResult(
-            { error: 'Permission denied', message: `Reading '${norm}' requires permission: ${required.join(', ')}`, required, has },
-            true
-          );
-        }
-
-        // Validate required path parameters before touching the controller.
-        const missing = (node.params ?? [])
-          .filter((p) => p.required && !args.params?.[p.name])
-          .map((p) => p.name);
-        if (missing.length > 0) {
-          return toToolResult(
-            { error: 'Missing parameters', message: `'${norm}' requires: ${missing.join(', ')}. Pass them in "params".`, missing },
-            true
-          );
-        }
-
-        const readArgs: ReadArgs = {
-          siteId: args.siteId,
-          id: args.id,
-          params: args.params,
-          page: args.page,
-          pageSize: args.pageSize,
-        };
-        return toToolResult(await node.fetch(client, readArgs));
-      }
-    )
+    createReadHandler(client)
   );
 
   return 2;

@@ -13,10 +13,16 @@ import { logger } from '../utils/logger.js';
 import { handleStreamRequest, type StreamTransportState, type StreamTransportOptions } from './stream.js';
 import { handleEventSubscription } from './eventSubscription.js';
 import { RateLimiter } from './rateLimiter.js';
-import { createAuthMiddleware, type AuthenticatedRequest } from './auth.js';
-import { Permission, hasPermission, getPermissionNames } from '../permissions/index.js';
+import { createAuthMiddleware } from './auth.js';
 import { sanitizeError } from '../utils/sanitizeError.js';
-import { VERSION } from '../version.js';
+import {
+  LEGACY_BINDINGS,
+  resolveChatBindings,
+  buildOpenApiSpec,
+  dispatchChatRequest,
+  requiredPermissionFor,
+  type ChatBinding,
+} from './chatFace.js';
 
 // Session storage for stateful mode
 const sessions = new Map<string, StreamTransportState>();
@@ -186,41 +192,23 @@ export function isRestApiCorsPath(url: string, urlPath: string, sseEventsPath: s
 }
 
 /**
- * Resolve the permission a REST `/api/*` route requires.
+ * Resolve the permission a REST `/api/*` route requires (legacy surface).
  *
- * Each route mirrors the `Permission.*` bit of its MCP-tool twin so the REST
- * bridge cannot be used to bypass RBAC (finding H1 / OWASP A01:2021, BFLA).
- * Read routes require QUERY; the service-call route requires CONTROL (matching
- * the `callService` tool). Unknown routes return `null` — the handler falls
- * through to a 404, which needs no permission.
+ * v1.7: derived from the chat-face binding registry — each binding carries the
+ * `Permission.*` bit of its MCP-tool twin so the REST bridge cannot be used to
+ * bypass RBAC (finding H1 / OWASP A01:2021, BFLA). Unknown routes return
+ * `null` — the handler falls through to a 404, which needs no permission.
  */
 export function requiredRestPermission(method: string, pathname: string): number | null {
-  const m = method.toUpperCase();
-
-  if (m === 'GET') {
-    if (
-      pathname === '/api/states' ||
-      pathname === '/api/sensors' ||
-      pathname === '/api/search' ||
-      pathname === '/api/version' ||
-      /^\/api\/states\/[^/]+$/.test(pathname) ||
-      /^\/api\/entities\/[^/]+$/.test(pathname) ||
-      /^\/api\/history\/[^/]+$/.test(pathname)
-    ) {
-      return Permission.QUERY;
-    }
-  }
-
-  if (m === 'POST' && /^\/api\/services\/[^/]+\/[^/]+$/.test(pathname)) {
-    return Permission.CONTROL;
-  }
-
-  return null;
+  return requiredPermissionFor(LEGACY_BINDINGS, method, pathname);
 }
 
 /**
- * Handle REST API requests for Open WebUI compatibility
- * These endpoints translate REST calls to Home Assistant API calls
+ * Handle REST API requests for Open WebUI compatibility (legacy entry point).
+ *
+ * v1.7: thin delegate to the chat-face dispatcher over the legacy bindings —
+ * kept so existing callers/tests exercise the exact same code path the server
+ * uses. New code should call `dispatchChatRequest` with resolved bindings.
  */
 export async function handleRestApi(
   req: IncomingMessage,
@@ -230,140 +218,12 @@ export async function handleRestApi(
 ): Promise<void> {
   // Always add CORS for REST API
   addRestApiCors(req, res);
-
-  const parsedUrl = new URL(url, `http://${req.headers.host}`);
-  const pathname = parsedUrl.pathname;
-
-  // H1: enforce RBAC on REST routes before touching Home Assistant.
-  const required = requiredRestPermission(req.method ?? 'GET', pathname);
-  if (required !== null) {
-    // Fail closed: a missing mask grants nothing.
-    const userPermissions = ((req as AuthenticatedRequest).auth?.extra?.permissions as number | undefined) ?? 0;
-    if (!hasPermission(userPermissions, required)) {
-      logger.warn('REST API permission denied', {
-        method: req.method,
-        path: pathname,
-        required: getPermissionNames(required),
-        has: getPermissionNames(userPermissions),
-      });
-      sendJson(res, 403, {
-        error: 'Forbidden',
-        message: `This endpoint requires permission: ${getPermissionNames(required).join(', ')}`,
-      });
-      return;
-    }
-  }
-
-  try {
-    // GET /api/states - Get all entity states
-    if (req.method === 'GET' && pathname === '/api/states') {
-      const states = await client.getStates();
-      sendJson(res, 200, states);
-      return;
-    }
-
-    // GET /api/states/{entity_id} - Get specific entity state
-    const stateMatch = pathname.match(/^\/api\/states\/([^/]+)$/);
-    if (req.method === 'GET' && stateMatch) {
-      const entityId = decodeURIComponent(stateMatch[1]);
-      const state = await client.getState(entityId);
-      if (state) {
-        sendJson(res, 200, state);
-      } else {
-        sendJson(res, 404, { error: `Entity ${entityId} not found` });
-      }
-      return;
-    }
-
-    // GET /api/sensors - Get all sensors
-    if (req.method === 'GET' && pathname === '/api/sensors') {
-      const states = await client.getStates();
-      const sensors = states.filter(
-        (s: { entity_id: string }) =>
-          s.entity_id.startsWith('sensor.') || s.entity_id.startsWith('binary_sensor.')
-      );
-      sendJson(res, 200, sensors);
-      return;
-    }
-
-    // GET /api/entities/{domain} - Get entities by domain
-    const domainMatch = pathname.match(/^\/api\/entities\/([^/]+)$/);
-    if (req.method === 'GET' && domainMatch) {
-      const domain = decodeURIComponent(domainMatch[1]);
-      const states = await client.getStates();
-      const filtered = states.filter((s: { entity_id: string }) =>
-        s.entity_id.startsWith(`${domain}.`)
-      );
-      sendJson(res, 200, filtered);
-      return;
-    }
-
-    // GET /api/search?q={query} - Search entities
-    if (req.method === 'GET' && pathname === '/api/search') {
-      const query = parsedUrl.searchParams.get('q')?.toLowerCase() ?? '';
-      const states = await client.getStates();
-      const filtered = states.filter(
-        (s: { entity_id: string; attributes?: { friendly_name?: string } }) =>
-          s.entity_id.toLowerCase().includes(query) ||
-          s.attributes?.friendly_name?.toLowerCase().includes(query)
-      );
-      sendJson(res, 200, filtered);
-      return;
-    }
-
-    // GET /api/history/{entity_id}?hours={hours} - Get entity history
-    const historyMatch = pathname.match(/^\/api\/history\/([^/]+)$/);
-    if (req.method === 'GET' && historyMatch) {
-      const entityId = decodeURIComponent(historyMatch[1]);
-      const hours = parseInt(parsedUrl.searchParams.get('hours') ?? '24', 10);
-      const history = await client.getHistory(entityId, hours);
-      sendJson(res, 200, history);
-      return;
-    }
-
-    // GET /api/version - Get HA and MCP version
-    if (req.method === 'GET' && pathname === '/api/version') {
-      const haConfig = await client.getVersion();
-      sendJson(res, 200, {
-        ha_version: haConfig.version,
-        mcp_version: VERSION,
-      });
-      return;
-    }
-
-    // POST /api/services/{domain}/{service} - Call a service
-    const serviceMatch = pathname.match(/^\/api\/services\/([^/]+)\/([^/]+)$/);
-    if (req.method === 'POST' && serviceMatch) {
-      const domain = decodeURIComponent(serviceMatch[1]);
-      const service = decodeURIComponent(serviceMatch[2]);
-      const body = (await parseBody(req)) as { entity_id?: string; data?: Record<string, unknown> } | undefined;
-      const result = await client.callService({
-        domain,
-        service,
-        target: body?.entity_id ? { entity_id: body.entity_id } : undefined,
-        service_data: body?.data,
-      });
-      sendJson(res, 200, result);
-      return;
-    }
-
-    // Not found
-    sendJson(res, 404, { error: 'API endpoint not found' });
-  } catch (error) {
-    // M5: a body that exceeded the size cap surfaces as 413, not a generic 500.
-    if (errorStatusCode(error) === 413) {
-      if (!res.headersSent) {
-        sendJson(res, 413, { error: 'Payload Too Large', message: 'Request body exceeds the size limit' });
-      }
-      return;
-    }
-    logger.error('REST API error', { error, url });
-    // M6: log the detail above; never echo raw error text to the client.
-    sendJson(res, 500, {
-      error: 'Internal server error',
-      message: sanitizeError(error),
-    });
-  }
+  await dispatchChatRequest(req, res, url, {
+    bindings: LEGACY_BINDINGS,
+    deps: { haClient: client },
+    parseBody,
+    sendJson,
+  });
 }
 
 /**
@@ -383,159 +243,14 @@ export function resolveForwardedProto(headerValue: string | string[] | undefined
 }
 
 /**
- * Generate OpenAPI spec for Open WebUI compatibility
+ * Generate OpenAPI spec for Open WebUI compatibility (legacy entry point).
+ *
+ * v1.7: generated from the chat-face binding registry. With no MCP_CHAT_TOOLS
+ * slice this renders the legacy 8-tool spec byte-for-byte (golden-file test:
+ * tests/fixtures/openapi-default-slice.json).
  */
 export function getOpenApiSpec(baseUrl: string): object {
-  return {
-    openapi: '3.1.0',
-    info: {
-      title: 'Home Assistant MCP Tools',
-      description: 'MCP server for Home Assistant - exposes entity states and service calls',
-      version: VERSION,
-    },
-    servers: [{ url: baseUrl }],
-    paths: {
-      '/api/states': {
-        get: {
-          operationId: 'getStates',
-          summary: 'Get all entity states from Home Assistant',
-          responses: {
-            '200': {
-              description: 'List of all entity states',
-              content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/EntityState' } } } },
-            },
-          },
-        },
-      },
-      '/api/states/{entity_id}': {
-        get: {
-          operationId: 'getState',
-          summary: 'Get state of a specific entity',
-          parameters: [{ name: 'entity_id', in: 'path', required: true, schema: { type: 'string' }, description: 'Entity ID (e.g., light.living_room)' }],
-          responses: {
-            '200': {
-              description: 'Entity state',
-              content: { 'application/json': { schema: { $ref: '#/components/schemas/EntityState' } } },
-            },
-          },
-        },
-      },
-      '/api/services/{domain}/{service}': {
-        post: {
-          operationId: 'callService',
-          summary: 'Call a Home Assistant service',
-          parameters: [
-            { name: 'domain', in: 'path', required: true, schema: { type: 'string' }, description: 'Service domain (e.g., light, switch)' },
-            { name: 'service', in: 'path', required: true, schema: { type: 'string' }, description: 'Service name (e.g., turn_on, turn_off)' },
-          ],
-          requestBody: {
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    entity_id: { type: 'string', description: 'Target entity ID' },
-                    data: { type: 'object', description: 'Service data' },
-                  },
-                },
-              },
-            },
-          },
-          responses: { '200': { description: 'Service call result' } },
-        },
-      },
-      '/api/sensors': {
-        get: {
-          operationId: 'getAllSensors',
-          summary: 'Get all sensor and binary_sensor states',
-          responses: {
-            '200': {
-              description: 'List of sensor states',
-              content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/EntityState' } } } },
-            },
-          },
-        },
-      },
-      '/api/entities/{domain}': {
-        get: {
-          operationId: 'getEntitiesByDomain',
-          summary: 'Get all entities for a specific domain',
-          parameters: [{ name: 'domain', in: 'path', required: true, schema: { type: 'string' }, description: 'Domain name (e.g., light, sensor)' }],
-          responses: {
-            '200': {
-              description: 'List of entities in domain',
-              content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/EntityState' } } } },
-            },
-          },
-        },
-      },
-      '/api/search': {
-        get: {
-          operationId: 'searchEntities',
-          summary: 'Search entities by name or ID',
-          parameters: [{ name: 'q', in: 'query', required: true, schema: { type: 'string' }, description: 'Search query' }],
-          responses: {
-            '200': {
-              description: 'Matching entities',
-              content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/EntityState' } } } },
-            },
-          },
-        },
-      },
-      '/api/history/{entity_id}': {
-        get: {
-          operationId: 'getHistory',
-          summary: 'Get historical data for an entity',
-          parameters: [
-            { name: 'entity_id', in: 'path', required: true, schema: { type: 'string' }, description: 'Entity ID' },
-            { name: 'hours', in: 'query', schema: { type: 'number', default: 24 }, description: 'Hours of history' },
-          ],
-          responses: {
-            '200': {
-              description: 'Historical data',
-              content: { 'application/json': { schema: { type: 'array' } } },
-            },
-          },
-        },
-      },
-      '/api/version': {
-        get: {
-          operationId: 'getVersion',
-          summary: 'Get Home Assistant version information',
-          responses: {
-            '200': {
-              description: 'Version information',
-              content: {
-                'application/json': {
-                  schema: {
-                    type: 'object',
-                    properties: {
-                      ha_version: { type: 'string', description: 'Home Assistant version' },
-                      mcp_version: { type: 'string', description: 'MCP server version' },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-    components: {
-      schemas: {
-        EntityState: {
-          type: 'object',
-          properties: {
-            entity_id: { type: 'string' },
-            state: { type: 'string' },
-            attributes: { type: 'object' },
-            last_changed: { type: 'string' },
-            last_updated: { type: 'string' },
-          },
-        },
-      },
-    },
-  };
+  return buildOpenApiSpec(baseUrl, LEGACY_BINDINGS);
 }
 
 /**
@@ -570,6 +285,18 @@ export interface HttpServerOptions {
 
 export async function startHttpServer(options: HttpServerOptions): Promise<void> {
   const { haClient: client, omadaClient, config, aiClient } = options;
+
+  // v1.7: resolve the ACTIVE chat-face bindings once at startup — the operator's
+  // MCP_CHAT_TOOLS slice ∩ code-side chat-eligible bindings (unset = legacy 8).
+  const chatBindings: ChatBinding[] = resolveChatBindings(config.chatTools, {
+    haClient: client,
+    omadaClient,
+  });
+  logger.info('Chat face resolved', {
+    tools: chatBindings.map((b) => b.operationId),
+    sliceConfigured: config.chatTools !== undefined,
+  });
+
   const port = config.httpPort ?? 3000;
   const bindAddr = config.httpBindAddr ?? '127.0.0.1';
   const mcpPath = config.httpPath ?? '/mcp';
@@ -704,17 +431,19 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         // blocks tool calls as mixed content ("NetworkError when attempting to fetch resource").
         const scheme = resolveForwardedProto(req.headers['x-forwarded-proto']);
         const baseUrl = `${scheme}://${req.headers.host ?? `${bindAddr}:${port}`}`;
-        sendJson(res, 200, getOpenApiSpec(baseUrl));
+        sendJson(res, 200, buildOpenApiSpec(baseUrl, chatBindings));
         return;
       }
 
-      // REST API endpoints for Open WebUI compatibility (requires HA client)
+      // REST API endpoints for Open WebUI compatibility (chat face). Per-binding
+      // client requirements (HA vs Omada) are enforced inside the dispatcher.
       if (url.startsWith('/api/')) {
-        if (!client) {
-          sendJson(res, 503, { error: 'Home Assistant not configured' });
-          return;
-        }
-        await handleRestApi(req, res, url, client);
+        await dispatchChatRequest(req, res, url, {
+          bindings: chatBindings,
+          deps: { haClient: client, omadaClient },
+          parseBody,
+          sendJson,
+        });
         return;
       }
 

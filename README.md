@@ -274,6 +274,20 @@ high-value questions an LLM can actually answer about your network:
 | `MCP_HTTP_ALLOW_CORS` | `true` | Enable CORS |
 | `MCP_HTTP_ALLOWED_ORIGINS` | `127.0.0.1,localhost` | Allowed CORS origins |
 
+### Optional - Chat face (OpenAPI/REST surface)
+
+The server also serves an OpenAPI/REST face (`/openapi.json` + `/api/*`) for chat UIs
+like Open WebUI. By default it exposes the classic 8 Home Assistant tools. Tools marked
+chat-eligible in code can be activated per category with read/write granularity:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_CHAT_TOOLS` | unset (= legacy 8 HA tools) | Category slice, e.g. `ha-core:rw,ha-history:r,omada-read:r`. Categories: `ha-core`, `ha-history`, `ha-automations`, `omada-read`, `omada-write`. Config can only narrow what the code marks chat-eligible; ADMIN tools (`invokeAction`) can never appear on this face. |
+| `MCP_REST_ACTIONS` | unset (= tool not registered) | JSON map of pre-registered REST actions for the `invokeAction` MCP tool (ADMIN; MCP face only), e.g. `{"deploy":{"url":"http://host:8425/v1/update","bearerToken":"..."}}` |
+
+Activated chat tools appear in the generated `/openapi.json` as `POST /api/tools/<name>`
+and dispatch through the same handlers, validation, and RBAC as the MCP face.
+
 ### Optional - SSE Events
 
 | Variable | Default | Description |

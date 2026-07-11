@@ -113,14 +113,17 @@ describe('Server Integration', () => {
       expect(instructions).toContain('INTEGRATION');
     });
 
-    it('should generate concise instructions under 2KB', () => {
+    it('should generate concise instructions under the size ceiling', () => {
       const instructions = generateInstructions({
         haEnabled: true,
         omadaEnabled: true,
         aiEnabled: true,
       });
 
-      expect(instructions.length).toBeLessThan(2000);
+      // Keep in sync with tests/server/instructions.test.ts — the ceiling was
+      // raised 2000 -> 2200 in v1.6.0 (ACTIONS line); this integration twin was
+      // stale until the suite was actually run (2026-07-11).
+      expect(instructions.length).toBeLessThan(2200);
     });
   });
 
