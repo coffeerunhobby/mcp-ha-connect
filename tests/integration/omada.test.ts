@@ -91,7 +91,11 @@ describe('Omada Integration', () => {
       expect(Array.isArray(clients)).toBe(true);
       if (clients.length > 0) {
         expect(clients[0]).toHaveProperty('name');
-        expect(clients[0]).toHaveProperty('totalTraffic');
+        // Controller v5 exposed `totalTraffic`; OC200 v6 renamed the traffic
+        // field. Assert a traffic-ish field exists rather than pinning the
+        // v5 name (discovered live on OC200 6.2, 2026-07-11).
+        const keys = Object.keys(clients[0] as Record<string, unknown>);
+        expect(keys.some((k) => /traffic|activity/i.test(k))).toBe(true);
       }
     });
   });
@@ -131,9 +135,20 @@ describe('Omada Integration', () => {
   describe('Security', () => {
     it('should get threat list (may be empty)', async () => {
       // The threat list API may return 400 if IDS/IPS is not enabled or configured
-      // This test catches the error and passes if no threats are available
+      // This test catches the error and passes if no threats are available.
+      // NB: archived/page/pageSize/startTime/endTime are REQUIRED — controller
+      // v5 tolerated their absence, OC200 v6 rejects nulls ("archived should
+      // not be null", live finding 2026-07-11). The MCP tool schema already
+      // requires them; this test used to cheat with `{}`.
       try {
-        const result = await client.getThreatList({});
+        const now = Math.floor(Date.now() / 1000);
+        const result = await client.getThreatList({
+          archived: false,
+          page: 1,
+          pageSize: 10,
+          startTime: now - 7 * 24 * 3600,
+          endTime: now,
+        });
         // If we get here, the API worked - check structure
         expect(result).toHaveProperty('data');
         expect(Array.isArray(result.data)).toBe(true);
