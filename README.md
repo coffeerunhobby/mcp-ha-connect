@@ -2,7 +2,7 @@
 
 A production-ready Model Context Protocol (MCP) server for Home Assistant integration with AI assistants like Claude and LM Studio.
 
-[![npm version](https://badge.fury.io/js/%40coffeerunhobby%2Fmcp-ha-connect.svg)](https://www.npmjs.com/package/@coffeerunhobby/mcp-ha-connect)
+[![npm version](https://img.shields.io/npm/v/%40coffeerunhobby%2Fmcp-ha-connect)](https://www.npmjs.com/package/@coffeerunhobby/mcp-ha-connect)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/coffeerunhobby/mcp-ha-connect/pkgs/container/mcp-ha-connect)
 [![Discord](https://img.shields.io/badge/Discord-join%20chat-5865F2?logo=discord&logoColor=white)](https://discord.gg/zeQ6aWVFgS)
 
