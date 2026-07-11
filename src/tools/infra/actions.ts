@@ -17,6 +17,13 @@ export interface RestAction {
     bearerToken?: string;
     /** Per-action timeout; some actions (watchtower update = image pulls) run long. */
     timeoutMs?: number;
+    /**
+     * Minimum interval between firings of THIS action (rate limit). Defaults to
+     * 60s when unset; 0 disables. Caps the blast radius of a prompt-injected
+     * model looping a legitimate action (deploy storms / endpoint DoS) — the
+     * name-only lookup already stops forged actions; this stops repeated real ones.
+     */
+    cooldownMs?: number;
 }
 
 /**
@@ -33,6 +40,8 @@ const actionSchema = z.object({
     url: z.string().url({ message: 'each action needs a valid http(s) url' }),
     bearerToken: z.string().min(1).optional(),
     timeoutMs: z.number().int().min(1000).max(300_000).optional(),
+    // 0 = explicitly disabled; capped at 24h so a config typo can't brick an action.
+    cooldownMs: z.number().int().min(0).max(86_400_000).optional(),
 });
 
 /**

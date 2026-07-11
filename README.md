@@ -283,7 +283,7 @@ chat-eligible in code can be activated per category with read/write granularity:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MCP_CHAT_TOOLS` | unset (= legacy 8 HA tools) | Category slice, e.g. `ha-core:rw,ha-history:r,omada-read:r`. Categories: `ha-core`, `ha-history`, `ha-automations`, `omada-read`, `omada-write`. Config can only narrow what the code marks chat-eligible; ADMIN tools (`invokeAction`) can never appear on this face. |
-| `MCP_REST_ACTIONS` | unset (= tool not registered) | JSON map of pre-registered REST actions for the `invokeAction` MCP tool (ADMIN; MCP face only), e.g. `{"deploy":{"url":"http://host:8425/v1/update","bearerToken":"..."}}` |
+| `MCP_REST_ACTIONS` | unset (= tool not registered) | JSON map of pre-registered REST actions for the `invokeAction` MCP tool (ADMIN; MCP face only), e.g. `{"deploy":{"url":"http://host:8425/v1/update","bearerToken":"...","cooldownMs":300000}}`. Each action is rate-limited: min interval between firings = `cooldownMs` (default 60000; `0` disables) — caps deploy-storm blast radius if a model loops a legitimate action |
 
 Activated chat tools appear in the generated `/openapi.json` as `POST /api/tools/<name>`
 and dispatch through the same handlers, validation, and RBAC as the MCP face.

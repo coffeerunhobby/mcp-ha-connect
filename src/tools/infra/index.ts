@@ -27,6 +27,26 @@ export { parseRestActions } from './actions.js';
 const DEFAULT_TIMEOUT_MS = 120_000;
 /** Cap on response bytes surfaced to the caller (anti context-flooding). */
 const MAX_RESPONSE_CHARS = 500;
+/** Default per-action cooldown (override per action via `cooldownMs`; 0 disables). */
+const DEFAULT_COOLDOWN_MS = 60_000;
+
+/**
+ * Last-fired timestamps per action name — the rate limiter's whole state.
+ *
+ * MODULE-level on purpose: the HTTP server registers tools per SESSION, so a
+ * closure-scoped map would give every new session a fresh cooldown (trivially
+ * bypassed by reconnecting). One process = one store. In-memory is correct for
+ * this single-process server; the check-and-claim below runs synchronously
+ * before any await, so two racing calls cannot both pass (no TOCTOU on the
+ * event loop). Resets on restart — acceptable: a restart itself takes longer
+ * than the default cooldown.
+ */
+const lastFired = new Map<string, number>();
+
+/** Test hook: clear the process-wide cooldown state between test cases. */
+export function resetActionCooldowns(): void {
+    lastFired.clear();
+}
 
 export function registerInfraTools(server: McpServer, actions: Record<string, RestAction>): number {
     const names = Object.keys(actions);
@@ -67,6 +87,23 @@ export function registerInfraTools(server: McpServer, actions: Record<string, Re
                 throw new Error(`Unknown action '${action}'. Available actions: ${names.join(', ')}`);
             }
             const spec = actions[action];
+
+            // Rate limit: check-and-CLAIM synchronously before the fetch, so the
+            // slot is consumed even when the call fails (no hammering a dying
+            // endpoint), and two racing calls can't both pass.
+            const cooldownMs = spec.cooldownMs ?? DEFAULT_COOLDOWN_MS;
+            if (cooldownMs > 0) {
+                const now = Date.now();
+                const elapsed = now - (lastFired.get(action) ?? Number.NEGATIVE_INFINITY);
+                if (elapsed < cooldownMs) {
+                    const retryInS = Math.ceil((cooldownMs - elapsed) / 1000);
+                    throw new Error(
+                        `Action '${action}' is cooling down — try again in ~${String(retryInS)}s. ` +
+                        'Repeated firing of infrastructure actions is rate-limited by design.'
+                    );
+                }
+                lastFired.set(action, now);
+            }
 
             logger.info('Invoking registered REST action', { action, method: spec.method, url: spec.url });
 

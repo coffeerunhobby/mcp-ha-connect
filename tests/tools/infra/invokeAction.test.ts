@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
-import { registerInfraTools, parseRestActions } from '../../../src/tools/infra/index.js';
+import { registerInfraTools, parseRestActions, resetActionCooldowns } from '../../../src/tools/infra/index.js';
 import { Permission } from '../../../src/tools/common.js';
 
 describe('parseRestActions', () => {
@@ -88,6 +88,9 @@ describe('invokeAction tool', () => {
 
     beforeEach(() => {
         fetchSpy = vi.spyOn(globalThis, 'fetch');
+        // The cooldown store is process-wide (module-level by design — sessions
+        // must share it); clear it so cases can't poison each other.
+        resetActionCooldowns();
     });
 
     afterEach(() => {
@@ -179,6 +182,86 @@ describe('invokeAction tool', () => {
         expect(result.isError).toBe(true);
         expect(result.content[0].text).toMatch(/HTTP 503/);
         expect(result.content[0].text.length).toBeLessThan(700); // 500-char cap + wrapper
+    });
+
+    it('rate-limits: a second firing within the cooldown is rejected without touching the network', async () => {
+        fetchSpy.mockResolvedValue(new Response('OK', { status: 200 }));
+        const server = createMockServer();
+        registerInfraTools(server, ACTIONS);
+        const { handler } = server.handlers.get('invokeAction')!;
+
+        const first = (await handler({ action: 'update-node-u2' }, adminExtra)) as { isError?: boolean };
+        expect(first.isError).toBeFalsy();
+
+        const second = (await handler({ action: 'update-node-u2' }, adminExtra)) as { isError?: boolean; content: Array<{ text: string }> };
+        expect(second.isError).toBe(true);
+        expect(second.content[0].text).toMatch(/cooling down/);
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('rate-limits per action: cooling one action does not block another', async () => {
+        fetchSpy.mockResolvedValue(new Response('OK', { status: 200 }));
+        const server = createMockServer();
+        registerInfraTools(server, ACTIONS);
+        const { handler } = server.handlers.get('invokeAction')!;
+
+        await handler({ action: 'update-node-u2' }, adminExtra);
+        const other = (await handler({ action: 'ping-webhook' }, adminExtra)) as { isError?: boolean };
+        expect(other.isError).toBeFalsy();
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('allows firing again once the cooldown has elapsed', async () => {
+        vi.useFakeTimers();
+        try {
+            fetchSpy.mockResolvedValue(new Response('OK', { status: 200 }));
+            const server = createMockServer();
+            registerInfraTools(server, ACTIONS);
+            const { handler } = server.handlers.get('invokeAction')!;
+
+            await handler({ action: 'update-node-u2' }, adminExtra);
+            vi.advanceTimersByTime(60_001); // default cooldown is 60s
+            const again = (await handler({ action: 'update-node-u2' }, adminExtra)) as { isError?: boolean };
+            expect(again.isError).toBeFalsy();
+            expect(fetchSpy).toHaveBeenCalledTimes(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('a FAILED firing still consumes the cooldown slot (no hammering a dying endpoint)', async () => {
+        fetchSpy.mockResolvedValue(new Response('boom', { status: 503 }));
+        const server = createMockServer();
+        registerInfraTools(server, ACTIONS);
+        const { handler } = server.handlers.get('invokeAction')!;
+
+        const first = (await handler({ action: 'update-node-u2' }, adminExtra)) as { isError?: boolean };
+        expect(first.isError).toBe(true); // HTTP 503 surfaced
+        const retry = (await handler({ action: 'update-node-u2' }, adminExtra)) as { isError?: boolean; content: Array<{ text: string }> };
+        expect(retry.isError).toBe(true);
+        expect(retry.content[0].text).toMatch(/cooling down/);
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('cooldownMs: 0 disables the rate limit for that action', async () => {
+        fetchSpy.mockResolvedValue(new Response('OK', { status: 200 }));
+        const noCooldown = parseRestActions(
+            '{"rapid":{"url":"http://192.168.0.9:1/x","cooldownMs":0}}'
+        );
+        const server = createMockServer();
+        registerInfraTools(server, noCooldown);
+        const { handler } = server.handlers.get('invokeAction')!;
+
+        await handler({ action: 'rapid' }, adminExtra);
+        const second = (await handler({ action: 'rapid' }, adminExtra)) as { isError?: boolean };
+        expect(second.isError).toBeFalsy();
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects invalid cooldownMs at config parse', () => {
+        expect(() => parseRestActions('{"a":{"url":"http://h:1/x","cooldownMs":-1}}')).toThrow(/Invalid MCP_REST_ACTIONS entry/);
+        expect(() => parseRestActions('{"a":{"url":"http://h:1/x","cooldownMs":999999999}}')).toThrow(/Invalid MCP_REST_ACTIONS entry/);
+        expect(parseRestActions('{"a":{"url":"http://h:1/x","cooldownMs":30000}}')['a'].cooldownMs).toBe(30000);
     });
 
     it('denies callers without the ADMIN permission bit', async () => {
