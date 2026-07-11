@@ -7,7 +7,7 @@ import type { Dispatcher } from 'undici';
 import type { RequestOptions } from '../types/index.js';
 import { AuthenticationError, ApiError } from '../types/index.js';
 import { logger } from '../utils/logger.js';
-import { createTlsDispatcher, type FetchInitWithDispatcher } from '../utils/tlsDispatcher.js';
+import { createTlsDispatcher, tlsAwareFetch, type FetchInitWithDispatcher } from '../utils/tlsDispatcher.js';
 
 export interface RequestHandlerConfig {
   baseUrl: string;
@@ -34,7 +34,9 @@ export class RequestHandler {
     // Relax TLS validation for THIS client only, via a per-instance undici
     // dispatcher. Node's global fetch ignores the legacy `agent` option, so the
     // previous https.Agent was silently a no-op for self-signed HA instances.
-    this.dispatcher = createTlsDispatcher(config.strictSsl);
+    // baseUrl is passed so plain-http targets never carry a dispatcher (the
+    // v1.5.5-incident config: http HA + HA_STRICT_SSL=false on a node:26 base).
+    this.dispatcher = createTlsDispatcher(config.strictSsl, config.baseUrl);
     if (this.dispatcher) {
       logger.warn('SSL certificate validation is disabled');
     }
@@ -83,7 +85,8 @@ export class RequestHandler {
         init.dispatcher = this.dispatcher;
       }
 
-      const response = await fetch(url.toString(), init);
+      // tlsAwareFetch: dispatcher requests use undici's own fetch (pairing rule).
+      const response = await tlsAwareFetch(url.toString(), init);
 
       if (!response.ok) {
         const errorText = await response.text();

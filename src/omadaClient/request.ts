@@ -1,7 +1,7 @@
 import type { Dispatcher } from 'undici';
 import type { OmadaApiResponse, PaginatedResult } from '../types/index.js';
 import { logger } from '../utils/logger.js';
-import { createTlsDispatcher, type FetchInitWithDispatcher } from '../utils/tlsDispatcher.js';
+import { createTlsDispatcher, tlsAwareFetch, type FetchInitWithDispatcher } from '../utils/tlsDispatcher.js';
 
 import type { AuthManager } from './auth.js';
 
@@ -36,7 +36,7 @@ export class RequestHandler {
     ) {
         this.baseUrl = config.baseUrl;
         this.timeout = config.timeout ?? 30000;
-        this.dispatcher = createTlsDispatcher(config.strictSsl);
+        this.dispatcher = createTlsDispatcher(config.strictSsl, config.baseUrl);
     }
 
     /**
@@ -116,7 +116,8 @@ export class RequestHandler {
                 init.dispatcher = this.dispatcher;
             }
 
-            const response = await fetch(url.toString(), init);
+            // tlsAwareFetch: dispatcher requests use undici's own fetch (pairing rule).
+            const response = await tlsAwareFetch(url.toString(), init);
 
             logger.info('Omada response', {
                 method,

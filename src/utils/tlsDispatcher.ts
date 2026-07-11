@@ -13,9 +13,17 @@
  * supported mechanism is a per-call `dispatcher`. We build one undici Agent per
  * client instance and pass it on every request, leaving the process-global TLS
  * policy untouched.
+ *
+ * THE PAIRING RULE (v1.7.0, root cause of the 2026-07-10 v1.5.5 incident):
+ * a dispatcher built from the npm `undici` package must ONLY be passed to
+ * `undici`'s own `fetch` — never to Node's BUILT-IN fetch. The built-in fetch
+ * is powered by whatever undici Node bundles, and its dispatch-handler
+ * interface drifts across majors: on Node 26 an npm-undici-6 Agent fails with
+ * "invalid onError method", surfacing as `fetch failed` on every request (the
+ * NAS crash-loop). `tlsAwareFetch` enforces the rule at one choke point.
  */
 
-import { Agent, type Dispatcher } from 'undici';
+import { Agent, fetch as undiciFetch, type Dispatcher } from 'undici';
 
 /**
  * `fetch` init augmented with undici's per-request dispatcher option, which is
@@ -31,10 +39,31 @@ export type FetchInitWithDispatcher = RequestInit & { dispatcher?: Dispatcher };
  *
  * @param strictSsl - When `false`, certificate validation is disabled for this
  *   client only. Any other value (including `undefined`) keeps validation on.
+ * @param baseUrl - The client's base URL. For plain-`http:` targets no
+ *   dispatcher is created even when `strictSsl` is false: TLS relaxation is
+ *   meaningless without TLS, and carrying a dispatcher there only risks the
+ *   version-mixing failure described above for zero benefit (this was exactly
+ *   the NAS production config that crashed v1.5.5 — http HA + strictSsl=false).
  */
-export function createTlsDispatcher(strictSsl: boolean | undefined): Dispatcher | undefined {
+export function createTlsDispatcher(strictSsl: boolean | undefined, baseUrl?: string): Dispatcher | undefined {
   if (strictSsl === false) {
+    if (baseUrl !== undefined && baseUrl.trim().toLowerCase().startsWith('http:')) {
+      return undefined;
+    }
     return new Agent({ connect: { rejectUnauthorized: false } });
   }
   return undefined;
+}
+
+/**
+ * Fetch enforcing the pairing rule: requests carrying a dispatcher go through
+ * undici's own `fetch` (Agent and fetch from the SAME library — compatible on
+ * every Node version); requests without one use Node's built-in fetch
+ * (unchanged behavior, and unit tests stubbing `global.fetch` keep working).
+ */
+export function tlsAwareFetch(url: string, init: FetchInitWithDispatcher): Promise<Response> {
+  if (init.dispatcher) {
+    return undiciFetch(url, init as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
+  }
+  return fetch(url, init);
 }

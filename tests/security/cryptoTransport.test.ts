@@ -15,9 +15,18 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { fetch as undiciFetch } from 'undici';
 import { RequestHandler } from '../../src/omadaClient/request.js';
 import { AuthManager } from '../../src/omadaClient/auth.js';
+import { createTlsDispatcher } from '../../src/utils/tlsDispatcher.js';
 import { generateClientId } from '../../src/server/eventSubscription.js';
+
+// Partial-mock undici: real Agent (createTlsDispatcher needs it), mocked fetch —
+// dispatcher-carrying requests must route here (THE PAIRING RULE, see below).
+vi.mock('undici', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('undici')>();
+  return { ...actual, fetch: vi.fn() };
+});
 
 const ENV_KEY = 'NODE_TLS_REJECT_UNAUTHORIZED';
 
@@ -34,6 +43,7 @@ describe('SEC-CRYPTO H2: per-client TLS scoping (no global env mutation)', () =>
   afterEach(() => {
     global.fetch = realFetch;
     vi.restoreAllMocks();
+    vi.mocked(undiciFetch).mockReset();
     delete process.env[ENV_KEY];
   });
 
@@ -41,11 +51,14 @@ describe('SEC-CRYPTO H2: per-client TLS scoping (no global env mutation)', () =>
     let envDuringFetch: string | undefined = 'SENTINEL';
     let dispatcherDuringFetch: unknown;
 
-    global.fetch = vi.fn(async (_url: unknown, init: unknown) => {
+    // Dispatcher requests route through UNDICI's fetch (pairing rule) — mock it.
+    vi.mocked(undiciFetch).mockImplementation((async (_url: unknown, init: unknown) => {
       envDuringFetch = process.env[ENV_KEY];
       dispatcherDuringFetch = (init as { dispatcher?: unknown }).dispatcher;
       return jsonResponse({ errorCode: 0, result: {} });
-    }) as unknown as typeof fetch;
+    }) as unknown as typeof undiciFetch);
+    const globalFetchSpy = vi.fn();
+    global.fetch = globalFetchSpy as unknown as typeof fetch;
 
     const auth = {
       getAccessToken: async () => 'access-token',
@@ -64,9 +77,14 @@ describe('SEC-CRYPTO H2: per-client TLS scoping (no global env mutation)', () =>
     expect(process.env[ENV_KEY]).toBeUndefined();
     // Insecure TLS must be carried by a per-call dispatcher instead.
     expect(dispatcherDuringFetch).toBeDefined();
+    // THE PAIRING RULE (v1.5.5 incident regression): a dispatcher built from
+    // the npm undici package must go to undici's OWN fetch — never Node's
+    // built-in fetch, whose bundled undici drifts across majors (Node 26:
+    // "invalid onError method" -> "fetch failed" crash-loop).
+    expect(globalFetchSpy).not.toHaveBeenCalled();
   });
 
-  it('Omada request with strictSsl=true sends no insecure dispatcher', async () => {
+  it('Omada request with strictSsl=true sends no insecure dispatcher (built-in fetch)', async () => {
     let dispatcherDuringFetch: unknown = 'SENTINEL';
 
     global.fetch = vi.fn(async (_url: unknown, init: unknown) => {
@@ -88,20 +106,24 @@ describe('SEC-CRYPTO H2: per-client TLS scoping (no global env mutation)', () =>
 
     expect(dispatcherDuringFetch).toBeUndefined();
     expect(process.env[ENV_KEY]).toBeUndefined();
+    // No dispatcher -> Node's built-in fetch, undici's stays untouched.
+    expect(vi.mocked(undiciFetch)).not.toHaveBeenCalled();
   });
 
   it('Omada auth with strictSsl=false never mutates global NODE_TLS_REJECT_UNAUTHORIZED', async () => {
     let envDuringFetch: string | undefined = 'SENTINEL';
     let dispatcherDuringFetch: unknown;
 
-    global.fetch = vi.fn(async (_url: unknown, init: unknown) => {
+    vi.mocked(undiciFetch).mockImplementation((async (_url: unknown, init: unknown) => {
       envDuringFetch = process.env[ENV_KEY];
       dispatcherDuringFetch = (init as { dispatcher?: unknown }).dispatcher;
       return jsonResponse({
         errorCode: 0,
         result: { accessToken: 'a', refreshToken: 'r', expiresIn: 3600 },
       });
-    }) as unknown as typeof fetch;
+    }) as unknown as typeof undiciFetch);
+    const globalFetchSpy = vi.fn();
+    global.fetch = globalFetchSpy as unknown as typeof fetch;
 
     const auth = new AuthManager({
       baseUrl: 'https://omada.example:8043',
@@ -117,6 +139,20 @@ describe('SEC-CRYPTO H2: per-client TLS scoping (no global env mutation)', () =>
     expect(envDuringFetch).toBeUndefined();
     expect(process.env[ENV_KEY]).toBeUndefined();
     expect(dispatcherDuringFetch).toBeDefined();
+    expect(globalFetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('plain-http base with strictSsl=false carries NO dispatcher (v1.5.5 NAS config)', async () => {
+    // The exact production config that crash-looped v1.5.5: http HA +
+    // HA_STRICT_SSL=false. TLS relaxation is meaningless without TLS, so no
+    // dispatcher is built at all -> built-in fetch -> immune to undici drift.
+    expect(createTlsDispatcher(false, 'http://192.168.0.19:8123')).toBeUndefined();
+    expect(createTlsDispatcher(false, 'HTTP://UPPER.example')).toBeUndefined();
+    // https targets still get the relaxing dispatcher.
+    expect(createTlsDispatcher(false, 'https://omada.example')).toBeDefined();
+    // And with no baseUrl hint, behavior is unchanged (dispatcher created).
+    expect(createTlsDispatcher(false)).toBeDefined();
+    expect(createTlsDispatcher(true, 'https://omada.example')).toBeUndefined();
   });
 });
 

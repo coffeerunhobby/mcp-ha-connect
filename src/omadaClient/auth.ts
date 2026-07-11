@@ -1,7 +1,7 @@
 import type { Dispatcher } from 'undici';
 import type { OmadaApiResponse, TokenResult } from '../types/index.js';
 import { logger } from '../utils/logger.js';
-import { createTlsDispatcher, type FetchInitWithDispatcher } from '../utils/tlsDispatcher.js';
+import { createTlsDispatcher, tlsAwareFetch, type FetchInitWithDispatcher } from '../utils/tlsDispatcher.js';
 
 const TOKEN_EXPIRY_BUFFER_SECONDS = 30;
 
@@ -38,7 +38,7 @@ export class AuthManager {
         this.clientSecret = config.clientSecret;
         this.omadacId = config.omadacId;
         this.timeout = config.timeout ?? 30000;
-        this.dispatcher = createTlsDispatcher(config.strictSsl);
+        this.dispatcher = createTlsDispatcher(config.strictSsl, config.baseUrl);
     }
 
     /**
@@ -119,7 +119,8 @@ export class AuthManager {
                 init.dispatcher = this.dispatcher;
             }
 
-            const response = await fetch(url.toString(), init);
+            // tlsAwareFetch: dispatcher requests use undici's own fetch (pairing rule).
+            const response = await tlsAwareFetch(url.toString(), init);
 
             if (!response.ok) {
                 const errorText = await response.text();
