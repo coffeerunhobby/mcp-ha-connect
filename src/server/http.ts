@@ -112,7 +112,11 @@ export function parseBody(req: IncomingMessage, maxBytes: number = MAX_BODY_BYTE
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
       } catch (error) {
-        reject(new Error(`Invalid JSON: ${(error as Error).message}`));
+        // A malformed body is a client mistake, not a server fault: tag it 400 so
+        // the request handler surfaces "400 Bad Request" instead of a generic 500.
+        const err: HttpError = new Error(`Invalid JSON: ${(error as Error).message}`);
+        err.statusCode = 400;
+        reject(err);
       }
     });
 
@@ -469,6 +473,16 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       if (errorStatusCode(error) === 413) {
         if (!res.headersSent) {
           sendJson(res, 413, { error: 'Payload Too Large', message: 'Request body exceeds the size limit' });
+        }
+        return;
+      }
+
+      // A malformed request body is the client's fault, not ours: return 400 with the
+      // parse detail (which is safe — it describes the client's own JSON, not our
+      // internals) rather than masking it as a 500 Internal Server Error.
+      if (errorStatusCode(error) === 400) {
+        if (!res.headersSent) {
+          sendJson(res, 400, { error: 'Bad Request', message: (error as Error).message });
         }
         return;
       }

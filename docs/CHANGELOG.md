@@ -1,3 +1,24 @@
+### 1.7.2
+**Fix — a malformed request body now returns 400 Bad Request, not 500.** A client that
+sends invalid JSON (e.g. bash-style `\"` escaping from a Windows shell that the shell
+doesn't strip) was met with `500 Internal Server Error`, masking a client mistake as a
+server fault. `parseBody` now tags a JSON parse failure `400` and the request handler
+surfaces `400 Bad Request` with the parse detail (safe — it describes the client's own
+body, not our internals). Oversize bodies still return `413`; genuine faults still `500`.
+
+**Security — cleared every high/moderate advisory in the production dependency tree.**
+Five transitive/direct packages bumped to already-in-range patched releases — no
+`overrides`, no hard-dep downgrades, `package.json` unchanged (npm audit `--omit=dev`
+now reports 0 vulnerabilities):
+- `ip-address` 10.2.0 → 10.5.0 (SSRF / trust-boundary bypass; via express-rate-limit, unused by us)
+- `fast-uri` 3.1.3 → 3.1.6 (via ajv)
+- `@hono/node-server` 1.19.14 → 1.19.17 (Windows path traversal in serve-static)
+- `hono` 4.12.29 → 4.13.3 (algorithmic-complexity DoS in language middleware)
+- `undici` 6.27.0 → 6.28.0 (our direct dep)
+
+Remaining `npm audit` findings are dev-only tooling (esbuild/vitest/tsx) that never ship
+in the runtime image.
+
 ### 1.5.4
 **Improvement — actionable error hints so agents self-correct instead of stalling.**
 Not-found / invalid-input errors now carry a next-step pointer toward the tool that

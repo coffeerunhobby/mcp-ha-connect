@@ -129,5 +129,14 @@ describe('SEC-DOS — Unrestricted Resource Consumption', () => {
       await expect(parseBody(req, 1024)).rejects.toMatchObject({ statusCode: 413 });
       expect(req.destroy).toHaveBeenCalled();
     });
+
+    it('rejects a malformed JSON body with a client-side 400, not a 500', async () => {
+      // A body the client mis-escaped (e.g. bash-style `\"` from a Windows shell)
+      // arrives as invalid JSON. It is the client's fault, so parseBody tags it 400
+      // and the request handler surfaces "400 Bad Request" instead of a generic 500.
+      const req = streamingReq([Buffer.from('{\\"jsonrpc\\":\\"2.0\\"}')]);
+
+      await expect(parseBody(req)).rejects.toMatchObject({ statusCode: 400 });
+    });
   });
 });
