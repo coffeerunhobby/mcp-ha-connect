@@ -1,255 +1,76 @@
 ### 1.7.2
-**Fix — a malformed request body now returns 400 Bad Request, not 500.** A client that
-sends invalid JSON (e.g. bash-style `\"` escaping from a Windows shell that the shell
-doesn't strip) was met with `500 Internal Server Error`, masking a client mistake as a
-server fault. `parseBody` now tags a JSON parse failure `400` and the request handler
-surfaces `400 Bad Request` with the parse detail (safe — it describes the client's own
-body, not our internals). Oversize bodies still return `413`; genuine faults still `500`.
+- Fix: a malformed JSON request body now returns `400 Bad Request` (was `500`) — `parseBody` tags the parse failure and the handler returns the parse detail; oversize bodies still `413`, genuine faults still `500`.
+- Security: cleared every high/moderate advisory in the production tree via already-in-range bumps (no `overrides`, no hard-dep downgrades, `package.json` unchanged; `npm audit --omit=dev` now 0): `ip-address` 10.2.0→10.5.0 (SSRF), `fast-uri` 3.1.3→3.1.6, `@hono/node-server` 1.19.14→1.19.17 (serve-static path traversal), `hono` 4.12.29→4.13.3 (middleware DoS), `undici` 6.27.0→6.28.0.
+- Remaining `npm audit` findings are dev-only tooling (esbuild/vitest/tsx) that never ships.
 
-**Security — cleared every high/moderate advisory in the production dependency tree.**
-Five transitive/direct packages bumped to already-in-range patched releases — no
-`overrides`, no hard-dep downgrades, `package.json` unchanged (npm audit `--omit=dev`
-now reports 0 vulnerabilities):
-- `ip-address` 10.2.0 → 10.5.0 (SSRF / trust-boundary bypass; via express-rate-limit, unused by us)
-- `fast-uri` 3.1.3 → 3.1.6 (via ajv)
-- `@hono/node-server` 1.19.14 → 1.19.17 (Windows path traversal in serve-static)
-- `hono` 4.12.29 → 4.13.3 (algorithmic-complexity DoS in language middleware)
-- `undici` 6.27.0 → 6.28.0 (our direct dep)
+### 1.7.1
+- Per-action cooldown on `invokeAction`: a minimum interval between firings (default 60s, 0 disables) so an injected model can't loop a *legitimate* remote-hands action into a deploy storm / endpoint DoS. Check-and-claim runs before the fetch; a failed call still consumes the slot.
+- Fix: undici pairing — dispatcher requests now use undici's own `fetch`. An npm-undici-6 `Agent` passed to Node's built-in fetch broke on Node 26 ("invalid onError method" → "fetch failed"); the real root cause of the v1.5.5 crash-loop.
+- README npm badge → shields.io (badge.fury.io served a stale cached version).
 
-Remaining `npm audit` findings are dev-only tooling (esbuild/vitest/tsx) that never ship
-in the runtime image.
+### 1.7.0
+- Unified chat-face registry: one source generates the OpenAPI spec and the `MCP_CHAT_TOOLS` slice; Omada tools made chat-eligible.
+- Fix two stale OC200-v6 integration tests (totalTraffic rename, required threat-list params).
+
+### 1.6.0
+- Remote-hands actions: `invokeAction` fires pre-registered REST actions (`MCP_REST_ACTIONS`) — deploy triggers / webhooks, each individually gated (name-only lookup, no arbitrary URLs).
+- package.json: add repository / homepage / bugs metadata.
+
+### 1.5.6
+- Runtime base → `node:24-alpine` LTS (node:26 broke the old-kernel NAS's first fetch); npm stripped from the runtime image.
+- CI: boot-test the built image (mock HA + `/health`) so a release is never the image's first run; auto-create the GitHub Release on `v*` tags; tokenless npm publish via OIDC trusted publishing; also test on Node 26 (the image runtime).
+
+### 1.5.5
+- CVE patch: refresh dependencies, `node:26` base (node:25 EOL), `apk upgrade`, drop unused `--experimental-quic`.
+- Fix: regenerate the lockfile on Linux — a Windows-generated lock omitted `@emnapi/*` optional deps, failing `npm ci` in the Docker/CI build.
 
 ### 1.5.4
-**Improvement — actionable error hints so agents self-correct instead of stalling.**
-Not-found / invalid-input errors now carry a next-step pointer toward the tool that
-resolves them, cutting the retry loops and wrong guesses that waste round-trips:
-- `getState`, `entityAction`, and the `hass://entities/{id}` resources now return a
-  `hint` field on a missing/malformed `entity_id`, pointing at `searchEntities` (and the
-  required `domain.name` format).
-- Omada `resolveSiteId` with no site configured now hints to `omada_browse` at `/` to
-  discover available sites and their IDs.
-- Omada SSID getters with a missing `wlanId`/`ssidId` had stale tool references
-  (`getWlanGroupList`/`getSsidList`) corrected to the real graph-mode paths
-  (`omada_read /wifi/groups`, `omada_read /wifi/ssids`).
-
-Purely additive — no API, schema, or behavior changes; only the human/agent-readable
-error text gains guidance.
+- Actionable error hints so agents self-correct: `getState` / `entityAction` / `hass://entities/{id}` return a `hint` toward `searchEntities` on a missing/malformed `entity_id`; Omada `resolveSiteId` with no site hints to `omada_browse /`; corrected stale Omada SSID getter refs to graph paths (`omada_read /wifi/groups`, `/wifi/ssids`). Additive — error text only, no API/behavior change.
 
 ### 1.5.3
-**Fix — allow the `x-session-id` request header in CORS so Open WebUI tool calls work.**
-Open WebUI sends an `x-session-id` header on every OpenAPI tool call. The REST bridge's
-CORS preflight only advertised `Access-Control-Allow-Headers: Content-Type, Authorization`,
-so the browser's preflight check failed on the unlisted header and blocked the request
-before it was sent — surfacing (yet again) as *"NetworkError when attempting to fetch
-resource."* `Access-Control-Allow-Headers` now includes `x-session-id`. This was the final
-piece: combined with v1.5.1 (https scheme) and v1.5.2 (CORS on 401/429), Open WebUI tool
-calls against the `/api/*` bridge now complete.
+- Fix: add `x-session-id` to `Access-Control-Allow-Headers` so Open WebUI's OpenAPI tool calls pass CORS preflight (the browser was blocking every call on the unlisted header → "NetworkError"). Final piece with v1.5.1 (https scheme) + v1.5.2 (CORS on 401/429) to make `/api/*` calls complete.
 
 ### 1.5.2
-**Fix — CORS headers on `/api/*` and `/openapi.json` rejections (401 / 429) so auth
-failures stop masquerading as "NetworkError".**
-The REST-bridge CORS headers were applied only *inside* the route handlers, which run
-**after** the auth and rate-limit middleware. So a `401 Unauthorized` (bad/missing token)
-or a `429` (rate limited) on a browser-facing endpoint went back with **no**
-`Access-Control-Allow-Origin` header. A browser that receives a cross-origin response
-without that header discards it and reports the generic *"NetworkError when attempting to
-fetch resource"* — completely hiding the real `401`. This made an Open WebUI auth
-misconfiguration look identical to a network/tunnel failure.
-
-CORS headers for the browser-facing REST surface (`/openapi.json`, `/api/*`, the SSE
-events path) are now applied **before** rate limiting and authentication, so every
-rejection carries `Access-Control-Allow-Origin` and the browser surfaces the true status.
-The path test is extracted into the `isRestApiCorsPath()` helper (shared by the preflight
-and the new early-CORS step); `addRestApiCors()` is unchanged. No behavior change for a
-successful (200) request — it already carried CORS.
+- Fix: apply REST-bridge CORS (`/openapi.json`, `/api/*`, SSE path) **before** auth / rate-limit, so a `401` / `429` still carries `Access-Control-Allow-Origin`. A browser discards a header-less cross-origin response and reports "NetworkError", hiding the real `401` — making an auth misconfig look like a tunnel failure. Path test extracted to `isRestApiCorsPath()`; 200s unchanged.
 
 ### 1.5.1
-**Fix — `/openapi.json` now advertises the correct scheme behind a TLS-terminating proxy.**
-The OpenAPI document's `servers[0].url` was built with a hardcoded `http://`. Behind the
-Cloudflare tunnel (which terminates TLS and forwards to the origin over plain HTTP), the
-spec therefore advertised an `http://` server URL even though the public endpoint is
-`https://`. An OpenAPI tool client loaded on an **https** page (e.g. Open WebUI) then
-refused to call any tool, because the browser blocks `http://` subresource fetches from an
-https origin as **mixed content** — surfacing as *"NetworkError when attempting to fetch
-resource."*
-
-The handler now honors the `X-Forwarded-Proto` header (set by Cloudflare / reverse
-proxies) when constructing the advertised base URL, so a TLS-terminated deployment
-advertises `https://`. The new `resolveForwardedProto()` helper validates the header
-against an allowlist — anything other than a literal `https` falls back to `http`, and
-comma-separated proxy chains take the first hop — so a spoofed value can't inject an
-arbitrary scheme into the spec. No behavior change for plain-HTTP deployments.
+- Fix: `/openapi.json` honors `X-Forwarded-Proto` so `servers[0].url` advertises `https` behind the TLS-terminating Cloudflare tunnel (was hardcoded `http://`, blocked as mixed content on an https page → "NetworkError"). New `resolveForwardedProto()` validates against an allowlist (spoof-safe; first hop of a comma chain). No change for plain-HTTP.
 
 ### 1.5.0
-**Feature — Omada resource graph: Tier 4 read coverage (VPN · profiles · schedules · backup · audit).**
-Extends graph mode with the *home-relevant* slice of the previously zero-coverage Omada
-categories — still at the same two-tool surface (`omada_browse` + `omada_read`), zero
-tool-schema cost. Every node is grounded in the reference TP-Link Omada API client's actual
-paths and required params, backed by the existing `OmadaClient.readResource()` primitive (no
-new client code):
-
-- *VPN status* (`/vpn`) — `/vpn/site-to-site` (list, or a single tunnel via `id`),
-  `/vpn/client-to-site/servers`, `/vpn/client-to-site/clients`, `/vpn/wireguard`, and the
-  paginated `/vpn/ipsec-stats`.
-- *Profiles* (`/profiles`) — `/profiles/ppsk` (per-device Wi-Fi keys; **requires** `params.type`:
-  0 = without RADIUS, 1 = with RADIUS) and `/profiles/time-range`.
-- *Schedules* (`/schedules`) — `/schedules/poe`, `/schedules/port`, `/schedules/upgrade`.
-  (Reboot schedules are site-template-scoped enterprise config and are intentionally omitted.)
-- *Backup status* (`/backup`) — `/backup/files` and `/backup/result`.
-- *Audit logs* (`/audit`) — **ADMIN-gated** (like `/security`): `/audit/site` (site-scoped) and
-  `/audit/global` (controller-wide, not site-scoped). Both paginated, with optional epoch-ms
-  `startTime`/`endTime` + `searchKey` filters via the new `auditFilters` helper.
-
-This is the first subtree beyond `/security` to require ADMIN, further exercising per-path RBAC.
-Suite grew by the corresponding namespace wiring + `auditFilters` tests.
+- Feature — Omada resource graph Tier 4 reads (still just `omada_browse` + `omada_read`, zero tool-schema cost), grounded in the reference API client, over the existing `OmadaClient.readResource()`:
+  - VPN (`/vpn`): `/site-to-site` (list or single via `id`), `/client-to-site/servers`, `/client-to-site/clients`, `/wireguard`, paginated `/ipsec-stats`.
+  - Profiles (`/profiles`): `/ppsk` (**requires** `params.type` 0/1) and `/time-range`.
+  - Schedules (`/schedules`): `/poe`, `/port`, `/upgrade`.
+  - Backup (`/backup`): `/files`, `/result`.
+  - Audit (`/audit`) — **ADMIN-gated**: `/site` and `/global`, paginated with optional epoch-ms `startTime`/`endTime` + `searchKey` (new `auditFilters` helper).
+  - First ADMIN subtree beyond `/security`, further exercising per-path RBAC.
 
 ### 1.4.0
-**Feature — Omada resource graph expanded to broad read coverage (no tool-schema cost).**
-Because `graph` mode keeps the tool surface at two tools (`omada_browse` + `omada_read`)
-regardless of how many resources the manifest declares, the namespace was widened from ~33
-to **54 readable nodes** with zero increase in the tool-schema budget — the "breadth without
-bloat" payoff of progressive disclosure. Every new node is grounded in the controller's own
-OpenAPI spec (required params verified) and the reference TP-Link Omada API client, then
-backed by the existing generic `OmadaClient.readResource()` primitive (no new client code):
-
-- *Completed the typed-read parity set* — `/devices/search` (global device search) and
-  `/network/load-balance` (multi-WAN status) close the last gaps so every typed Omada read
-  getter now has a graph node.
-- *Tier 2 (network insight)* — `/devices/cable-test` (`/ports`, `/results`, `/logs`; requires
-  `switchMac`), `/network/port-forwarding/rules` (the full NAT rule list, vs. status only),
-  `/network/dhcp-leases` (active leases), and dashboard analytics
-  `/dashboard/client-distribution`, `/dashboard/traffic-distribution`,
-  `/dashboard/traffic-activities` (the latter two default to a last-24h epoch-seconds window).
-- *Tier 3 (curated home-relevant subset)* — selected from the controller's ~900-endpoint
-  long tail, skipping enterprise gear (fiber/OLT, site-templates, RADIUS/LDAP, enterprise
-  VPN): `/devices/poe`, `/devices/lldp`, `/network/dhcp-reservations`, `/network/static-routes`,
-  `/network/ip-mac-binding`, `/network/attack-defense`, `/network/acls/{gateway,switch,eap}`,
-  `/network/url-filters/{gateway,eap}`, `/network/mac-filters/{allow,deny}`, and
-  `/wifi/band-steering`. All read-only and QUERY-gated, consistent with `/network/firewall`.
-
-Paginated nodes forward a single `page`/`pageSize` to one GET (no page-walking). Suite grew
-by the corresponding namespace wiring tests.
+- Feature — Omada resource graph widened from ~33 to **54 readable nodes** at the same two-tool surface (`omada_browse` + `omada_read`), zero tool-schema cost; every node grounded in the controller OpenAPI spec + reference client, over `OmadaClient.readResource()`:
+  - Typed-read parity: `/devices/search`, `/network/load-balance` — every typed getter now has a graph node.
+  - Tier 2 (insight): `/devices/cable-test` (requires `switchMac`), `/network/port-forwarding/rules`, `/network/dhcp-leases`, dashboard `/client-distribution`, `/traffic-distribution`, `/traffic-activities`.
+  - Tier 3 (home subset, skipping enterprise gear): `/devices/poe`, `/lldp`, `/network/dhcp-reservations`, `/static-routes`, `/ip-mac-binding`, `/attack-defense`, `/acls/{gateway,switch,eap}`, `/url-filters/{gateway,eap}`, `/mac-filters/{allow,deny}`, `/wifi/band-steering` — all read-only, QUERY-gated.
+  - Paginated nodes forward one `page`/`pageSize` (no page-walking).
 
 ### 1.3.4
-**Feature — Omada resource-graph tool registration (`MCP_TOOL_REGISTRATION_MODE`).**
-Implements the previously-designed-but-unbuilt registration-mode switch as a *resource
-graph* for the Omada plugin. `MCP_TOOL_REGISTRATION_MODE=graph` registers two discovery
-tools — `omada_browse` (navigate a permission-filtered tree of resource **types**, never
-instances) and `omada_read` (generic, per-path-RBAC data fetch with single-page
-pagination) — plus the 5 typed write/action tools, in place of the ~21 individual read
-getters. `eager` (default) is unchanged. A single `OmadaClient.readResource()` primitive
-(path-template driven) backs newly-exposed endpoints (gateway WAN/health, AP speed-test,
-rogue-AP/WIDS, event/alert logs, dashboard CPU/memory, firmware info + controller-wide
-critical-firmware) with no per-endpoint client code. `graph` mode is now a **complete
-superset** of `eager` reads: the ADMIN-gated IDS/IPS threat-management log is exposed at
-`/security/threats`, with its mandatory epoch time-window enforced via required
-`params.startTime`/`params.endTime` (epoch seconds) validated before any controller call —
-the first node to require a higher permission bit (ADMIN) than QUERY, demonstrating the
-per-path RBAC. New manifest (`namespace.ts`) + tools (`graph.ts`); `getCallerPermissions()`
-extracted in `tools/common.ts` and reused for per-path checks. Suite grew by 47 unit tests
-(namespace + graph + config parsing).
-
-**Fix — `OMADA_SITE_ID` is validated against the live controller at startup.** The Omada
-controller's site list is now treated as the source of truth; `OMADA_SITE_ID` is only a
-selector against it. At boot (reusing the existing `listSites()` connection test) a
-configured `OMADA_SITE_ID` that is **not** present on the controller — e.g. a site id that
-drifted after a controller migration, the same way `OMADA_OMADAC_ID` does — now disables the
-**Omada plugin** with a clear, actionable error that names the bad value and lists the valid
-sites, instead of silently scoping every site-scoped read to a dead site and surfacing later
-as a confusing "user does not have permissions to access this site" error. The failure is
-scoped to the Omada plugin only — Home Assistant and Local AI keep working (graceful
-degradation preserved). Default-site auto-resolution for site-scoped reads is otherwise
-unchanged: callers still need not pass `siteId` when a valid default is configured. New pure
-`checkConfiguredSite()` helper + 4 unit tests.
-
-**Fix — graph reads that require query parameters now send them (events/alerts, dashboard
-CPU/memory, rogue-AP/WIDS, pending devices).** Seven graph nodes were authored from endpoint
-paths alone and never sent the query parameters the controller requires, so every call
-returned a bare framework `400 Bad Request` (rejected before reaching the Omada handler — no
-`errorCode`/`msg` envelope). Verified against the live controller's own OpenAPI spec and
-fixed:
-- `/events` and `/events/alerts` now send the mandatory `filters.timeStart`/`filters.timeEnd`
-  window (epoch **milliseconds**). The window is optional to the caller and **defaults to the
-  last 7 days**, so a bare `omada_read('/events')` works; override via `params.startTime` /
-  `params.endTime`, with optional `params.module` (and `params.resolved` for alerts).
-- `/dashboard/cpu` and `/dashboard/memory` now send the mandatory `start`/`end` window
-  (epoch **seconds**), defaulting to the **last 24 h**; override via `params.startTime` /
-  `params.endTime`.
-- `/wifi/rogue`, `/wifi/wids`, and `/devices/pending` are now declared `paginated` so they
-  forward `page`/`pageSize` (all three are paginated list endpoints). `/wifi/wids` is
-  documented as Omada **Pro-only** — on a standard controller it returns a clear "Pro only"
-  message rather than data.
-Two pure, unit-tested window helpers (`resolveLogWindowMs`, `resolveUsageWindowSec`) back the
-defaults. Also surfaces the controller's own `errorCode`/`msg` in `RequestHandler`'s thrown
-HTTP-error message (when present) so a rejected request explains itself instead of collapsing
-to `"400 "` — internal hostnames/headers are still kept out of the message. Suite grew by 10
-unit tests (window helpers + fixed-node wiring).
+- Feature — Omada resource-graph tool registration (`MCP_TOOL_REGISTRATION_MODE=graph`): registers `omada_browse` (permission-filtered tree of resource **types**) + `omada_read` (per-path-RBAC fetch, single-page pagination) + the 5 typed write/action tools, replacing ~21 read getters; `eager` (default) unchanged. One `OmadaClient.readResource()` primitive backs the newly-exposed endpoints. `graph` is now a complete superset of `eager` reads, incl. the ADMIN-gated IDS/IPS log at `/security/threats` (required epoch `startTime`/`endTime`) — first node above QUERY. New `namespace.ts`/`graph.ts`, `getCallerPermissions()` extracted; +47 tests.
+- Fix — `OMADA_SITE_ID` validated against the live controller at startup: an id not present on the controller (drift after migration, like `OMADA_OMADAC_ID`) now disables the Omada plugin with an error naming the bad value + valid sites, instead of silently scoping reads to a dead site (later "user does not have permissions to access this site"). HA/AI keep working; valid default still auto-resolves. New `checkConfiguredSite()` + 4 tests.
+- Fix — graph reads that require query params now send them: `/events` + `/events/alerts` send `filters.timeStart`/`timeEnd` (epoch ms, default last 7d, `params.module`/`resolved` optional); `/dashboard/cpu` + `/memory` send `start`/`end` (epoch s, default last 24h); `/wifi/rogue`, `/wifi/wids` (Pro-only), `/devices/pending` marked paginated. Surfaces the controller's `errorCode`/`msg` in thrown HTTP errors (was a bare `400`). Window helpers `resolveLogWindowMs`/`resolveUsageWindowSec`; +10 tests.
 
 ### 1.3.1
-**Patch — RBAC role-name case-insensitivity.** Follow-up to the v1.3.0 fail-closed
-permission change. `getUserPermissions` now resolves both the per-user `role` and the
-`defaultRole` fall-back case-insensitively: a lowercase `"operator"` / `"admin"` in
-`MCP_PERMISSIONS_CONFIG` (a common real-world spelling) maps to the correct mask instead
-of silently collapsing to an empty (no-permission) mask. Unknown role names still fail
-closed to `NONE`. Regression tests added under `tests/permissions/`.
+- Patch — RBAC role-name case-insensitivity (follow-up to v1.3.0 fail-closed change): `getUserPermissions` resolves per-user `role` and `defaultRole` case-insensitively, so lowercase `"operator"`/`"admin"` in `MCP_PERMISSIONS_CONFIG` map correctly instead of collapsing to an empty mask; unknown roles still fail closed to `NONE`. Tests under `tests/permissions/`.
 
 ### 1.3.0
-**Security hardening release.** A full OWASP-aligned audit (API Top 10 2023 + Top 10 2021)
-drove fixes across access control, authentication, injection, transport, configuration,
-resource limits, logging, design, and dependencies. Every fix ships with regression tests
-under `tests/security/` (organized by OWASP category). The server's external behavior is
-unchanged for correctly-configured deployments; the changes close bypasses and tighten
-defaults. Suite grew to 908 unit tests; `npm audit --omit=dev` is clean.
-
-- **Access control (SEC-AC)**
-  - REST `/api/*` routes are now gated by the same RBAC permission bits as their MCP-tool
-    twins — a valid token no longer implies full Home Assistant control. Insufficient
-    permissions return `403`.
-  - SSE `/subscribe_events` now requires the `QUERY` permission; the dead `?token=` query
-    param was removed and SSE CORS is constrained to the configured allowlist.
-- **Authentication (SEC-AUTHN)**
-  - New optional `MCP_AUTH_REQUIRE_EXP` rejects tokens lacking an `exp` claim (defaults
-    **off** for backward compatibility; emits a one-time startup warning when a no-exp token
-    is accepted).
-  - Optional `MCP_AUTH_ISSUER` / `MCP_AUTH_AUDIENCE` validation plus `nbf` and clock-skew checks.
-  - The JWT signing secret must be ≥32 chars when `MCP_AUTH_METHOD=bearer` — startup fails fast otherwise.
-- **Injection / SSRF (SEC-INJ / SEC-SSRF)**
-  - Every interpolated Home Assistant API path segment is now `encodeURIComponent`-encoded and
-    schema-validated (entity/domain/service patterns), closing path-traversal and
-    endpoint-redirection against the HA base URL.
-- **Cryptographic & transport (SEC-CRYPTO)**
-  - Removed the process-global `NODE_TLS_REJECT_UNAUTHORIZED=0` race; self-signed trust is now
-    a per-client `undici` dispatcher used only when `strictSsl=false`. SSE client IDs use
-    `randomUUID()` instead of `Math.random()`.
-- **Configuration (SEC-CONFIG)**
-  - `MCP_AUTH_METHOD=none` now throws at startup on a non-loopback bind (loopback dev still works);
-    loud warning whenever `none` is active.
-  - Opt-in DNS-rebinding Host validation via a new `MCP_HTTP_ALLOWED_HOSTS` env: leave it unset
-    (default) and Host validation stays off so the server works everywhere; set it to the exact
-    host(s) clients use to reach the server (its LAN IP:port and/or public domain) to enforce a
-    `403` on any other `Host` header. Origin/CORS handling is unchanged. Removed the
-    `ALLOWED_ORIGINS=*` wildcard from the shipped compose file. Container runs as non-root
-    (`USER node`). Standard security headers
-    (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`) on every response.
-- **Resource consumption (SEC-DOS)**
-  - Rate-limit keying is spoof-proof: client forwarding headers (`CF-Connecting-IP` /
-    `X-Forwarded-For` / `X-Real-IP`) are honored only when the immediate peer is a configured
-    `MCP_RATE_LIMIT_TRUSTED_PROXIES` entry; otherwise the socket address is used, so forged
-    headers can neither evade the limit nor exhaust memory.
-  - Request bodies are capped at 1 MB (`413` on overflow, socket destroyed immediately) and the
-    HTTP server enforces `headersTimeout`/`requestTimeout`/`keepAliveTimeout` against slow-loris
-    (intake-only — long-lived SSE streams are unaffected).
-- **Logging & disclosure (SEC-LOG)**
-  - Client-facing `500`/SSE errors return a generic message; full detail is logged server-side only.
-  - `/health` now returns `{ "status": "healthy" }` only — version, auth method, AI provider/URL,
-    and client counts are no longer disclosed to unauthenticated callers.
-- **Insecure design (SEC-DESIGN)**
-  - Tool authorization fails **closed**: a missing permission mask denies (was `0xFF` allow-all).
-    stdio (Claude Desktop) opts into local full-trust explicitly; HTTP always carries an explicit mask.
-- **Dependencies (SEC-DEPS)**
-  - Bumped `@modelcontextprotocol/sdk` → `^1.29.0` and `ws` → `^8.21.0`, clearing 8 production
-    advisories (5 high) in the transitive tree. A CI gate test asserts zero high/critical from
-    `npm audit --omit=dev`.
+- **Security hardening release** — OWASP-aligned audit (API Top 10 2023 + Top 10 2021), every fix with regression tests under `tests/security/`; external behavior unchanged for correct configs. Suite → 908 tests; `npm audit --omit=dev` clean.
+  - Access control: REST `/api/*` gated by the same RBAC bits as their MCP twins (`403` on insufficient perms); SSE `/subscribe_events` requires `QUERY`, dead `?token=` removed, SSE CORS constrained to the allowlist.
+  - Authentication: opt-in `MCP_AUTH_REQUIRE_EXP` (reject no-`exp` tokens, default off + startup warning); optional `MCP_AUTH_ISSUER`/`AUDIENCE` + `nbf`/clock-skew; signing secret must be ≥32 chars for `bearer` (fail-fast).
+  - Injection/SSRF: every interpolated HA path segment `encodeURIComponent`-encoded and schema-validated.
+  - Crypto/transport: removed process-global `NODE_TLS_REJECT_UNAUTHORIZED=0` (per-client `undici` dispatcher only when `strictSsl=false`); SSE IDs via `randomUUID()`.
+  - Configuration: `MCP_AUTH_METHOD=none` throws on non-loopback bind; opt-in DNS-rebinding Host validation via `MCP_HTTP_ALLOWED_HOSTS` (unset = off); removed `ALLOWED_ORIGINS=*` from compose; container runs non-root (`USER node`); static security headers on every response.
+  - Resource limits: rate-limit keying trusts forwarding headers only from `MCP_RATE_LIMIT_TRUSTED_PROXIES` peers (else socket addr); 1 MB body cap (`413` + socket destroy); slow-loris headers/request/keep-alive timeouts.
+  - Logging: client-facing `500`/SSE errors generic (detail server-side only); `/health` returns only `{"status":"healthy"}`.
+  - Design: tool authz fails **closed** (missing mask denies, was `0xFF`); stdio opts into local full-trust explicitly.
+  - Dependencies: bumped `@modelcontextprotocol/sdk`→`^1.29.0`, `ws`→`^8.21.0` (cleared 8 prod advisories, 5 high); CI gate asserts zero high/critical.
 
 ### 1.2.0
 - **Omada Client Block/Unblock**: Block or unblock a network client by MAC address
