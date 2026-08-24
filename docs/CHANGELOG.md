@@ -1,3 +1,11 @@
+### 1.7.3
+- **Fix — stateless `GET /mcp` now returns `405 Method Not Allowed` instead of hanging forever.** In stateless mode every request gets a fresh transport, so the SDK's standalone SSE GET opened a stream that never emitted a byte and never ended. That eternal zero-byte response pinned the Cloudflare→origin keep-alive socket, and HTTP/1.1 serial semantics stalled every request queued behind it — mcp-remote's own `WWW-Authenticate` probe GET poisoned the socket its `initialize` POST was then queued on, surfacing as intermittent "Request timed out" (and occasional CF 502) for Claude Desktop / Cowork sessions. Also fixes the resource leak (each hung GET pinned a socket + a full McpServer instance). Stateful mode is unchanged. +4 regression tests (`isStatelessMcpGet`).
+- Removed `src/wrapper.ts` — a dead legacy HTTP wrapper (unauthenticated, spawn-per-request) that nothing referenced but still compiled into the shipped image. Verified unused: n8n calls the native `/mcp` endpoint; the live server already 404'd the wrapper's `POST /` route.
+- `openapi.json`: dropped the stale `POST /` "raw JSON-RPC passthrough" advertisement (the endpoint 404s; n8n uses `/mcp`).
+- Removed the unused `customRequestSchema` export (never registered as a tool).
+- `parsePermissionsConfig` now logs a warning when `MCP_PERMISSIONS_CONFIG` is invalid JSON instead of silently resolving every caller to NONE (still fail-closed).
+- Track `AGENTS.md` (agent instructions for the repo), updated to the current release process (CI OIDC npm publish, WSL Docker build) and current facts (REST bridge is RBAC-gated).
+
 ### 1.7.2
 - Fix: a malformed JSON request body now returns `400 Bad Request` (was `500`) — `parseBody` tags the parse failure and the handler returns the parse detail; oversize bodies still `413`, genuine faults still `500`.
 - Security: cleared every high/moderate advisory in the production tree via already-in-range bumps (no `overrides`, no hard-dep downgrades, `package.json` unchanged; `npm audit --omit=dev` now 0): `ip-address` 10.2.0→10.5.0 (SSRF), `fast-uri` 3.1.3→3.1.6, `@hono/node-server` 1.19.14→1.19.17 (serve-static path traversal), `hono` 4.12.29→4.13.3 (middleware DoS), `undici` 6.27.0→6.28.0.

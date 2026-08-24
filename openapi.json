@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Home Assistant MCP Wrapper",
-    "version": "1.7.2",
-    "description": "REST endpoints that wrap MCP tools for Home Assistant integration. Raw JSON-RPC passthrough available at POST / for n8n compatibility."
+    "version": "1.7.3",
+    "description": "REST endpoints that wrap MCP tools for Home Assistant integration."
   },
   "servers": [
     { "url": "http://mcpserver.10.0.0.18.nip.io:3000", "description": "MCP Server" },
@@ -1245,24 +1245,6 @@
           }
         }
       }
-    },
-
-    "/": {
-      "post": {
-        "operationId": "mcp_tools_call_raw",
-        "summary": "Raw JSON-RPC passthrough (for n8n compatibility)",
-        "tags": ["Raw"],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object" } } }
-        },
-        "responses": {
-          "200": {
-            "description": "JSON-RPC response",
-            "content": { "application/json": { "schema": { "type": "object" } } }
-          }
-        }
-      }
     }
   },
   "tags": [
@@ -1272,7 +1254,6 @@
     { "name": "Device Control", "description": "Specialized device control tools" },
     { "name": "Automation", "description": "Automation management tools" },
     { "name": "AI", "description": "AI-powered analysis tools" },
-    { "name": "Calendar", "description": "Calendar and event tools" },
-    { "name": "Raw", "description": "Raw JSON-RPC passthrough" }
+    { "name": "Calendar", "description": "Calendar and event tools" }
   ]
 }

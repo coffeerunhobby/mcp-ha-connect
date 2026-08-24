@@ -12,6 +12,7 @@ import {
   getOpenApiSpec,
   addRestApiCors,
   isRestApiCorsPath,
+  isStatelessMcpGet,
 } from '../../src/server/http.js';
 
 // Mock dependencies
@@ -529,6 +530,32 @@ describe('HTTP Server', () => {
 
       expect(status).toBe(401);
       expect(set['Access-Control-Allow-Origin']).toBe('https://owui.example.com');
+    });
+  });
+
+  describe('stateless SSE GET rejection (isStatelessMcpGet)', () => {
+    // REGRESSION: in stateless mode a GET /mcp opened the SDK's standalone SSE
+    // stream on a fresh per-request transport that never emits and never ends —
+    // an eternal zero-byte response that pinned the Cloudflare→origin keep-alive
+    // socket and stalled every request queued behind it (mcp-remote's probe GET
+    // hung its own subsequent initialize POST → "Request timed out"). The
+    // dispatcher must refuse the GET with 405 before any transport work.
+    it('rejects GET in stateless mode', () => {
+      expect(isStatelessMcpGet(false, 'GET')).toBe(true);
+    });
+
+    it('allows GET in stateful mode (real server→client SSE stream exists)', () => {
+      expect(isStatelessMcpGet(true, 'GET')).toBe(false);
+    });
+
+    it('never rejects POST or DELETE in either mode', () => {
+      expect(isStatelessMcpGet(false, 'POST')).toBe(false);
+      expect(isStatelessMcpGet(false, 'DELETE')).toBe(false);
+      expect(isStatelessMcpGet(true, 'POST')).toBe(false);
+    });
+
+    it('does not reject an undefined method (let the transport answer it)', () => {
+      expect(isStatelessMcpGet(false, undefined)).toBe(false);
     });
   });
 });

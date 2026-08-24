@@ -346,15 +346,6 @@ export const stackIdSchema = siteInputSchema.extend({
   stackId: z.string().min(1, 'stackId is required').describe('Switch stack identifier'),
 });
 
-// Custom request schema for advanced API calls
-export const customRequestSchema = z.object({
-  method: z.string().default('GET').describe('HTTP method'),
-  url: z.string().min(1, 'A controller API path is required').describe('API endpoint path'),
-  params: z.record(z.string(), z.unknown()).optional().describe('Query parameters'),
-  data: z.unknown().optional().describe('Request body data'),
-  siteId: z.string().min(1).optional().describe('Site ID'),
-});
-
 // =============================================================================
 // Home Assistant pagination schemas
 // =============================================================================

@@ -231,6 +231,20 @@ export async function handleRestApi(
 }
 
 /**
+ * Stateless mode has no server→client push stream: every request gets a fresh
+ * transport, so the SDK's standalone SSE GET would open a stream that never
+ * emits a byte and never ends. That eternal silent response pins the
+ * (Cloudflare→origin) keep-alive socket, and HTTP/1.1 serial semantics then
+ * stall every later request queued on that socket — mcp-remote's own probe
+ * GET poisoned the connection its initialize POST was later queued on,
+ * surfacing as "Request timed out". Per the MCP spec, a server that does not
+ * offer a GET event stream MUST return 405 Method Not Allowed.
+ */
+export function isStatelessMcpGet(stateful: boolean, method: string | undefined): boolean {
+  return !stateful && method === 'GET';
+}
+
+/**
  * Resolve the public URL scheme, honoring `X-Forwarded-Proto` (set by Cloudflare /
  * reverse proxies that TLS-terminate upstream). The header is validated against an
  * allowlist so a spoofed value can't inject an arbitrary scheme; anything other than
@@ -453,6 +467,17 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
 
       // Streamable HTTP Transport (MCP endpoint)
       if (urlPath === mcpPath) {
+        // See isStatelessMcpGet: an SSE GET in stateless mode would hang forever
+        // and poison the keep-alive socket for every request queued behind it.
+        if (isStatelessMcpGet(config.stateful, req.method)) {
+          res.setHeader('Allow', 'POST, DELETE');
+          sendJson(res, 405, {
+            error: 'Method Not Allowed',
+            message: 'This server runs in stateless mode: no standalone SSE stream. Send JSON-RPC via POST.',
+          });
+          return;
+        }
+
         const sessionId = req.headers['mcp-session-id'] as string | undefined;
         const existingState = sessionId ? sessions.get(sessionId) : undefined;
 

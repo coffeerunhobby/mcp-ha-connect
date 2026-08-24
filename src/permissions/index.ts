@@ -2,6 +2,8 @@
  * Permission System - Role-based access control with binary masks
  */
 
+import { logger } from '../utils/logger.js';
+
 /** Permission flags (powers of 2 for bitwise operations, sorted by criticality) */
 export const Permission = {
   ADMIN: 1,      // System operations (restart, updates) - highest criticality
@@ -112,7 +114,12 @@ export function parsePermissionsConfig(json: string | undefined): PermissionsCon
       users: Array.isArray(parsed.users) ? parsed.users : [],
       defaultRole: parsed.defaultRole ?? 'NONE',
     };
-  } catch {
+  } catch (error) {
+    // Fail closed (empty config → every caller resolves to NONE), but make the
+    // misconfiguration loud: a silent all-NONE is otherwise very hard to diagnose.
+    logger.warn('MCP_PERMISSIONS_CONFIG is not valid JSON — ignoring it; all callers resolve to NONE (fail-closed)', {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return { users: [], defaultRole: 'NONE' };
   }
 }
