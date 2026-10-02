@@ -4,7 +4,7 @@
 - **Warning — permissive `defaultRole`.** With bearer auth, the server logs a startup warning when `MCP_PERMISSIONS_CONFIG` `defaultRole` grants anything, since it applies to every valid token with an unmapped `sub`. README now recommends `defaultRole: NONE` plus one `users` entry per client (and fixes the `ADMIN` role row, which wrongly said "all except AI").
 - **Fix — `generate:jwt` prints the token once.** stdout carries only the bare token; details go to stderr, so `TOKEN=$(npm run -s generate:jwt -- ...)` captures exactly one token.
 - Added `.codex/review-rules.md` (the repo's hard rules for pre-release code review).
-- +18 tests: permission-filtered `tools/list` end to end over an MCP client, the entity guard for all eight tools, `defaultRoleWarning`.
+- +23 tests: permission-filtered `tools/list` over an MCP client and over the real HTTP path (bearer auth → stream transport, incl. interleaved callers), the entity guard for all eight tools, `defaultRoleWarning`, and the `generate:jwt` stdout contract (subprocess).
 
 ### 1.7.4
 - **Security — cleared every advisory in the dependency tree** (`npm audit` and `npm audit --omit=dev` both report 0). Runtime range declarations are unchanged; all fixes are in-range lockfile bumps:
