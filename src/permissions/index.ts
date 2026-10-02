@@ -81,6 +81,24 @@ export function getUserPermissions(sub: string | undefined, config: PermissionsC
 }
 
 /**
+ * Warning text when `defaultRole` grants anything, or `undefined` when it is NONE.
+ *
+ * `defaultRole` applies to every validly signed token whose `sub` is not listed in
+ * `users` — so a non-NONE default silently gives unmapped clients real access. The
+ * recommended setup is `defaultRole: none` plus one explicit `users` entry per client.
+ */
+export function defaultRoleWarning(config: PermissionsConfig): string | undefined {
+  const mask = resolveRoleName(config.defaultRole);
+  if (mask === Role.NONE) {
+    return undefined;
+  }
+  return (
+    `MCP_PERMISSIONS_CONFIG defaultRole is "${config.defaultRole}": any valid token with an unmapped sub ` +
+    `gets [${getPermissionNames(mask).join(', ')}]. Recommended: defaultRole "none" and one users[] entry per client.`
+  );
+}
+
+/**
  * Check if a permission mask includes required permission
  */
 export function hasPermission(userMask: number, required: number): boolean {

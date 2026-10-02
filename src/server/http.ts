@@ -14,6 +14,7 @@ import { handleStreamRequest, type StreamTransportState, type StreamTransportOpt
 import { handleEventSubscription } from './eventSubscription.js';
 import { RateLimiter } from './rateLimiter.js';
 import { createAuthMiddleware } from './auth.js';
+import { defaultRoleWarning } from '../permissions/index.js';
 import { sanitizeError } from '../utils/sanitizeError.js';
 import {
   LEGACY_BINDINGS,
@@ -331,6 +332,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         trustedProxies: config.rateLimitTrustedProxies,
       })
     : null;
+
+  // Loudly flag a permissive defaultRole: it silently grants every unmapped token.
+  if (config.authMethod === 'bearer') {
+    const warning = defaultRoleWarning(config.permissions);
+    if (warning) {
+      logger.warn(warning);
+    }
+  }
 
   // Initialize auth middleware
   const authMiddleware = createAuthMiddleware({

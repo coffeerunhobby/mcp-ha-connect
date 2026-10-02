@@ -5,6 +5,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HaClient } from '../../haClient/index.js';
 import { controlClimateSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
+import { entityNotFoundResult } from './entityGuard.js';
 import type { z } from 'zod';
 
 type ControlClimateArgs = z.infer<typeof controlClimateSchema>;
@@ -17,6 +18,8 @@ export function registerControlClimateTool(server: McpServer, client: HaClient):
       inputSchema: controlClimateSchema.shape,
     },
     wrapToolHandler('controlClimate', async (args: ControlClimateArgs) => {
+      const missing = await entityNotFoundResult(client, args.entity_id);
+      if (missing) return missing;
       const results: unknown[] = [];
 
       if (args.hvac_mode !== undefined) {

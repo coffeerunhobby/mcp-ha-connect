@@ -5,6 +5,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HaClient } from '../../haClient/index.js';
 import { entityIdSchema, runScriptSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
+import { entityNotFoundResult } from './entityGuard.js';
 import type { z } from 'zod';
 
 type EntityIdArgs = z.infer<typeof entityIdSchema>;
@@ -18,6 +19,8 @@ export function registerActivateSceneTool(server: McpServer, client: HaClient): 
       inputSchema: entityIdSchema.shape,
     },
     wrapToolHandler('activateScene', async ({ entity_id }: EntityIdArgs) => {
+      const missing = await entityNotFoundResult(client, entity_id);
+      if (missing) return missing;
       const result = await client.callService({
         domain: 'scene',
         service: 'turn_on',
@@ -36,6 +39,8 @@ export function registerRunScriptTool(server: McpServer, client: HaClient): void
       inputSchema: runScriptSchema.shape,
     },
     wrapToolHandler('runScript', async ({ entity_id, variables }: RunScriptArgs) => {
+      const missing = await entityNotFoundResult(client, entity_id);
+      if (missing) return missing;
       const result = await client.callService({
         domain: 'script',
         service: 'turn_on',

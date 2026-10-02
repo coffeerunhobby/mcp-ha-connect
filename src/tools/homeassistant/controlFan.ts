@@ -5,6 +5,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HaClient } from '../../haClient/index.js';
 import { controlFanSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
+import { entityNotFoundResult } from './entityGuard.js';
 import type { z } from 'zod';
 
 type ControlFanArgs = z.infer<typeof controlFanSchema>;
@@ -17,6 +18,8 @@ export function registerControlFanTool(server: McpServer, client: HaClient): voi
       inputSchema: controlFanSchema.shape,
     },
     wrapToolHandler('controlFan', async (args: ControlFanArgs) => {
+      const missing = await entityNotFoundResult(client, args.entity_id);
+      if (missing) return missing;
       let service: string = args.action;
       const serviceData: Record<string, unknown> = {};
 

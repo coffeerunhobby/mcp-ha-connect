@@ -5,6 +5,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HaClient } from '../../haClient/index.js';
 import { controlLightSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
+import { entityNotFoundResult } from './entityGuard.js';
 import type { z } from 'zod';
 
 type ControlLightArgs = z.infer<typeof controlLightSchema>;
@@ -17,6 +18,8 @@ export function registerControlLightTool(server: McpServer, client: HaClient): v
       inputSchema: controlLightSchema.shape,
     },
     wrapToolHandler('controlLight', async (args: ControlLightArgs) => {
+      const missing = await entityNotFoundResult(client, args.entity_id);
+      if (missing) return missing;
       const serviceData: Record<string, unknown> = {};
       if (args.brightness_pct !== undefined) serviceData.brightness_pct = args.brightness_pct;
       if (args.color_temp_kelvin !== undefined) serviceData.color_temp_kelvin = args.color_temp_kelvin;

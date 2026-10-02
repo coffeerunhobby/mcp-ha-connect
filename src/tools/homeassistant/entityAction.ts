@@ -5,6 +5,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HaClient } from '../../haClient/index.js';
 import { entityActionSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
+import { entityNotFoundResult } from './entityGuard.js';
 import type { z } from 'zod';
 
 type EntityActionArgs = z.infer<typeof entityActionSchema>;
@@ -21,6 +22,8 @@ export function registerEntityActionTool(server: McpServer, client: HaClient): v
       if (!domain) {
         return toToolResult({ error: 'Invalid entity_id format', hint: 'entity_id must be in domain.name format such as light.living_room — use the searchEntities tool to discover valid entity IDs' }, true);
       }
+      const missing = await entityNotFoundResult(client, entity_id);
+      if (missing) return missing;
       const result = await client.callService({
         domain,
         service: action,

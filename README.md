@@ -344,7 +344,7 @@ The server uses role-based access control with binary permission masks:
 | `READONLY` | QUERY only |
 | `OPERATOR` | QUERY + CONTROL + NOTIFY |
 | `CONTRIBUTOR` | QUERY + CONTROL + NOTIFY + CONFIGURE |
-| `ADMIN` | All except AI |
+| `ADMIN` | All six permissions (QUERY, CONTROL, NOTIFY, CONFIGURE, AI, ADMIN) |
 | `SUPERUSER` | All permissions |
 
 **Configuration Example:**
@@ -364,6 +364,14 @@ Set via environment variable (escape quotes for shell):
 ```bash
 MCP_PERMISSIONS_CONFIG='{"users":[{"sub":"admin","role":"admin"}],"defaultRole":"NONE"}'
 ```
+
+**Recommended: `defaultRole: "NONE"` plus one `users` entry per client.** `defaultRole` applies to
+*every* validly signed token whose `sub` is not listed — a non-NONE default silently gives unmapped
+clients real access. The server logs a warning at startup when `defaultRole` grants anything. Map each
+client (Open WebUI, n8n, agents…) explicitly before switching an existing deployment to `NONE`.
+
+Clients only see the tools they may use: `tools/list` is filtered by the caller's permissions, so a
+`readonly` token is never offered control or admin tools (calls are still checked per tool).
 
 ### Optional - AI Provider
 

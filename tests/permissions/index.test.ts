@@ -10,6 +10,8 @@ import {
   hasPermission,
   getPermissionNames,
   parsePermissionsConfig,
+  defaultRoleWarning,
+  type RoleName,
 } from '../../src/permissions/index.js';
 
 describe('Permission', () => {
@@ -190,5 +192,26 @@ describe('parsePermissionsConfig', () => {
   it('should handle missing users array', () => {
     const config = parsePermissionsConfig('{}');
     expect(config.users).toEqual([]);
+  });
+});
+
+describe('defaultRoleWarning', () => {
+  it('is silent when defaultRole is NONE (any case) or unset', () => {
+    expect(defaultRoleWarning({ users: [], defaultRole: 'NONE' })).toBeUndefined();
+    expect(defaultRoleWarning({ users: [], defaultRole: 'none' as RoleName })).toBeUndefined();
+    expect(defaultRoleWarning({ users: [] })).toBeUndefined();
+  });
+
+  it('is silent for an unknown role name (it resolves to NONE, fail-closed)', () => {
+    expect(defaultRoleWarning({ users: [], defaultRole: 'typo' as RoleName })).toBeUndefined();
+  });
+
+  it('warns and names the granted permissions when unmapped tokens get access', () => {
+    const msg = defaultRoleWarning({ users: [], defaultRole: 'operator' as RoleName });
+    expect(msg).toBeDefined();
+    expect(msg).toContain('"operator"');
+    expect(msg).toContain('CONTROL');
+    expect(msg).toContain('QUERY');
+    expect(msg).not.toContain('ADMIN');
   });
 });

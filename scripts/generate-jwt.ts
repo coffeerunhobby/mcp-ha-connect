@@ -107,16 +107,15 @@ function main() {
 
   const token = createJwt(payload, secret);
 
-  console.log('\n=== JWT Token Generated ===\n');
-  console.log('Subject:', sub);
-  console.log('Issued at:', new Date(iat * 1000).toISOString());
-  console.log('Expires at:', new Date(expTime * 1000).toISOString());
-  console.log('Duration:', exp);
-  console.log('\n--- Token ---\n');
+  // Details go to stderr; stdout carries ONLY the bare token, exactly once, so
+  // `TOKEN=$(npm run -s generate:jwt -- ...)` captures one usable token.
+  console.error('\n=== JWT Token Generated ===\n');
+  console.error('Subject:', sub);
+  console.error('Issued at:', new Date(iat * 1000).toISOString());
+  console.error('Expires at:', new Date(expTime * 1000).toISOString());
+  console.error('Duration:', exp);
+  console.error('\nUsage: curl -H "Authorization: Bearer <token>" http://localhost:3000/mcp ...\n');
   console.log(token);
-  console.log('\n--- Usage ---\n');
-  console.log(`curl -H "Authorization: Bearer ${token}" http://localhost:3000/mcp ...`);
-  console.log('');
 }
 
 main();

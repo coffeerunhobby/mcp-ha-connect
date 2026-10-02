@@ -5,6 +5,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HaClient } from '../../haClient/index.js';
 import { controlMediaPlayerSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
+import { entityNotFoundResult } from './entityGuard.js';
 import type { z } from 'zod';
 
 type ControlMediaPlayerArgs = z.infer<typeof controlMediaPlayerSchema>;
@@ -17,6 +18,8 @@ export function registerControlMediaPlayerTool(server: McpServer, client: HaClie
       inputSchema: controlMediaPlayerSchema.shape,
     },
     wrapToolHandler('controlMediaPlayer', async (args: ControlMediaPlayerArgs) => {
+      const missing = await entityNotFoundResult(client, args.entity_id);
+      if (missing) return missing;
       const actionMap: Record<string, string> = {
         play: 'media_play',
         pause: 'media_pause',

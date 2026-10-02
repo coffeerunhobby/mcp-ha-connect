@@ -12,6 +12,7 @@ import type { LocalAIClient } from '../localAI/index.js';
 import type { OmadaClient } from '../omadaClient/index.js';
 import { logger } from '../utils/logger.js';
 import { createServer } from './common.js';
+import type { AuthenticatedRequest } from './auth.js';
 
 interface StreamTransportState {
   transport: StreamableHTTPServerTransport;
@@ -92,7 +93,7 @@ export function buildTransportSecurityOptions(config: EnvironmentConfig): Transp
  * Creates a Streamable HTTP transport
  * This implements the MCP protocol version 2025-03-26
  */
-export function createStreamTransport(options: StreamTransportOptions): StreamTransportState {
+export function createStreamTransport(options: StreamTransportOptions, callerPermissions?: number): StreamTransportState {
   const { haClient, omadaClient, aiClient, config } = options;
   const mcpServer = createServer({
     haClient,
@@ -100,6 +101,8 @@ export function createStreamTransport(options: StreamTransportOptions): StreamTr
     aiClient,
     restActions: config.restActions,
     toolRegistrationMode: config.toolRegistrationMode,
+    // Hide tools this caller can never use from tools/list (RBAC still enforced per call).
+    callerPermissions,
   });
 
   const enableStatefulSessions = config.stateful;
@@ -158,7 +161,9 @@ export async function handleStreamRequest(
   });
 
   // Reuse existing transport if provided, otherwise create new one
-  const state = existingTransport ?? createStreamTransport(options);
+  // The auth middleware attached the caller's mask; a new server lists only the tools it permits.
+  const callerPermissions = (req as AuthenticatedRequest).auth?.extra?.permissions as number | undefined;
+  const state = existingTransport ?? createStreamTransport(options, callerPermissions);
 
   if (!existingTransport) {
     await state.server.connect(state.transport);

@@ -74,6 +74,19 @@ export function safeSerialize(value: unknown): string {
 }
 
 /**
+ * Static permission bit each tool declares via `wrapToolHandler`, keyed by tool
+ * name. Lets the server hide tools a caller can never use from `tools/list`.
+ * Tools with no static bit (e.g. `omada_read`/`omada_browse`, which gate per
+ * resource path) are absent and therefore always listed.
+ */
+const toolPermissions = new Map<string, number>();
+
+/** The static permission a tool requires, or `undefined` when it declares none. */
+export function getToolRequiredPermission(name: string): number | undefined {
+  return toolPermissions.get(name);
+}
+
+/**
  * Wrap a tool handler with logging, error handling, and permission checking
  * Includes session ID and args in logs for debugging
  *
@@ -86,6 +99,9 @@ export function wrapToolHandler<T>(
   handler: (args: T, extra: ToolExtra) => Promise<CallToolResult>,
   requiredPermission?: number
 ): (args: T, extra: ToolExtra) => Promise<CallToolResult> {
+  if (requiredPermission !== undefined) {
+    toolPermissions.set(name, requiredPermission);
+  }
   return async (args: T, extra: ToolExtra): Promise<CallToolResult> => {
     const sessionId = extra.sessionId ?? 'unknown-session';
     // Extract permissions from MCP SDK authInfo.extra.permissions.

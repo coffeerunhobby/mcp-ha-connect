@@ -109,6 +109,9 @@ describe('HomeAssistant Tool Handlers', () => {
     vi.clearAllMocks();
     server = createMockServer();
     mockClient = createMockClient();
+    // Default: the targeted entity exists. Control tools now check existence first
+    // (entityGuard); tests that need "not found" override this explicitly.
+    mockClient.getState.mockImplementation(async (entityId: string) => ({ entity_id: entityId, state: 'on', attributes: {} }));
   });
 
   describe('getStates', () => {
@@ -823,4 +826,42 @@ describe('HomeAssistant Tool Handlers', () => {
       expect(parsed.away).toBe(1);
     });
   });
+
+  describe('entity existence guard (control tools must not report success for unknown entities)', () => {
+    const cases: Array<[string, (srv: any, c: any) => void, Record<string, unknown>]> = [
+      ['entityAction', (srv, c) => registerEntityActionTool(srv, c), { entity_id: 'light.does_not_exist', action: 'turn_on' }],
+      ['controlLight', (srv, c) => registerControlLightTool(srv, c), { entity_id: 'light.does_not_exist', action: 'turn_on' }],
+      ['controlClimate', (srv, c) => registerControlClimateTool(srv, c), { entity_id: 'climate.does_not_exist', temperature: 21 }],
+      ['controlFan', (srv, c) => registerControlFanTool(srv, c), { entity_id: 'fan.does_not_exist', action: 'turn_on' }],
+      ['controlCover', (srv, c) => registerControlCoverTool(srv, c), { entity_id: 'cover.does_not_exist', action: 'open' }],
+      ['controlMediaPlayer', (srv, c) => registerControlMediaPlayerTool(srv, c), { entity_id: 'media_player.does_not_exist', action: 'play' }],
+      ['activateScene', (srv, c) => registerActivateSceneTool(srv, c), { entity_id: 'scene.does_not_exist' }],
+      ['runScript', (srv, c) => registerRunScriptTool(srv, c), { entity_id: 'script.does_not_exist' }],
+    ];
+
+    for (const [name, register, args] of cases) {
+      it(`${name} returns isError 'Entity not found' and never calls the service`, async () => {
+        mockClient.getState.mockResolvedValue(null);
+        register(server as any, mockClient as any);
+
+        const result = await server.getHandler(name)!(args, mockExtra);
+
+        expect(mockClient.getState).toHaveBeenCalledWith(args.entity_id);
+        expect(mockClient.callService).not.toHaveBeenCalled();
+        expect((result as { isError?: boolean }).isError).toBe(true);
+        const parsed = parseResult(result) as { error: string; entity_id: string; hint: string };
+        expect(parsed.error).toBe('Entity not found');
+        expect(parsed.entity_id).toBe(args.entity_id);
+        expect(parsed.hint).toMatch(/No action was performed/);
+      });
+    }
+
+    it('entityAction keeps its specific format error for a malformed id (no lookup)', async () => {
+      registerEntityActionTool(server as any, mockClient as any);
+      const result = await server.getHandler('entityAction')!({ entity_id: '', action: 'turn_on' }, mockExtra);
+      expect((parseResult(result) as { error: string }).error).toBe('Invalid entity_id format');
+      expect(mockClient.getState).not.toHaveBeenCalled();
+    });
+  });
 });
+

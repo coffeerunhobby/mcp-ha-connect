@@ -5,6 +5,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HaClient } from '../../haClient/index.js';
 import { controlCoverSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
+import { entityNotFoundResult } from './entityGuard.js';
 import type { z } from 'zod';
 
 type ControlCoverArgs = z.infer<typeof controlCoverSchema>;
@@ -17,6 +18,8 @@ export function registerControlCoverTool(server: McpServer, client: HaClient): v
       inputSchema: controlCoverSchema.shape,
     },
     wrapToolHandler('controlCover', async (args: ControlCoverArgs) => {
+      const missing = await entityNotFoundResult(client, args.entity_id);
+      if (missing) return missing;
       const actionMap: Record<string, string> = {
         open: 'open_cover',
         close: 'close_cover',
