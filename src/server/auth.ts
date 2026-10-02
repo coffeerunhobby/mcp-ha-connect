@@ -5,7 +5,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { verifyJwt, type JwtPayload } from '../utils/jwt.js';
-import { getUserPermissions, Role, type PermissionsConfig } from '../permissions/index.js';
+import { defaultRoleWarning, getUserPermissions, Role, type PermissionsConfig } from '../permissions/index.js';
 import { logger } from '../utils/logger.js';
 
 export type AuthMethod = 'none' | 'bearer';
@@ -98,6 +98,16 @@ function validateJwt(
  */
 export function createAuthMiddleware(config: AuthConfig): (req: IncomingMessage, res: ServerResponse) => boolean {
   const { method, secret, permissions: permConfig, skipPaths = [], requireExp, issuer, audience } = config;
+
+  // Loudly flag a permissive defaultRole: it silently grants every valid token whose
+  // sub is unmapped. Lives here (not in server startup) because this middleware is
+  // what applies defaultRole, so the warning cannot be bypassed.
+  if (method === 'bearer' && permConfig) {
+    const warning = defaultRoleWarning(permConfig);
+    if (warning) {
+      logger.warn(warning);
+    }
+  }
 
   return (req: IncomingMessage, res: ServerResponse): boolean => {
     if (method === 'none') {

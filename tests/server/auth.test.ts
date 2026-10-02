@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createAuthMiddleware } from '../../src/server/auth.js';
 import { createJwt } from '../../src/utils/jwt.js';
+import { logger } from '../../src/utils/logger.js';
 
 vi.mock('../../src/utils/logger.js');
 
@@ -220,5 +221,29 @@ describe('Auth Middleware', () => {
 
       expect(result).toBe(true);
     });
+  });
+});
+
+describe('Auth Middleware - permissive defaultRole warning', () => {
+  beforeEach(() => {
+    vi.mocked(logger.warn).mockClear();
+  });
+
+  const warnedAboutDefaultRole = (): boolean =>
+    vi.mocked(logger.warn).mock.calls.some(([msg]) => String(msg).includes('defaultRole'));
+
+  it('warns at creation when bearer auth has a defaultRole that grants access', () => {
+    createAuthMiddleware({ method: 'bearer', secret: SECRET, permissions: { users: [], defaultRole: 'OPERATOR' } });
+    expect(warnedAboutDefaultRole()).toBe(true);
+  });
+
+  it('stays silent when defaultRole is NONE', () => {
+    createAuthMiddleware({ method: 'bearer', secret: SECRET, permissions: { users: [], defaultRole: 'NONE' } });
+    expect(warnedAboutDefaultRole()).toBe(false);
+  });
+
+  it('stays silent when auth is not bearer (defaultRole is never applied)', () => {
+    createAuthMiddleware({ method: 'none', permissions: { users: [], defaultRole: 'OPERATOR' } });
+    expect(warnedAboutDefaultRole()).toBe(false);
   });
 });
