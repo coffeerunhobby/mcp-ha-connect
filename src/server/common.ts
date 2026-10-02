@@ -62,6 +62,9 @@ export function createServer(options: CreateServerOptions): McpServer {
   const registeredTools = new Map<string, RegisteredTool>();
   const originalRegisterTool = server.registerTool;
   server.registerTool = ((...args: Parameters<McpServer['registerTool']>) => {
+    const config = args[1] as { inputSchema?: unknown; outputSchema?: unknown } | undefined;
+    memoizeJsonSchema(config?.inputSchema);
+    memoizeJsonSchema(config?.outputSchema);
     const tool = (originalRegisterTool as (...a: unknown[]) => RegisteredTool).apply(server, args);
     registeredTools.set(args[0], tool);
     return tool;
@@ -109,4 +112,55 @@ export function hideUnpermittedTools(tools: Map<string, RegisteredTool>, callerP
     }
   }
   return hidden;
+}
+
+/** Schemas whose JSON Schema conversion is already memoized (process lifetime). */
+const memoizedSchemas = new WeakSet<object>();
+
+type JsonSchemaConverter = (options?: unknown) => unknown;
+
+/** Whether `schema`'s JSON Schema conversion has been memoized (for tests/diagnostics). */
+export function isJsonSchemaMemoized(schema: unknown): boolean {
+  return schema !== null && typeof schema === 'object' && memoizedSchemas.has(schema);
+}
+
+/**
+ * Convert a tool schema to JSON Schema once per process instead of once per request.
+ *
+ * MCP SDK v2 converts every tool's schema to JSON Schema eagerly inside
+ * `registerTool`, through the schema's Standard Schema `~standard.jsonSchema`
+ * provider. The server is stateless and registers every tool on every request, so
+ * that conversion (zod's `toJSONSchema`) became about half of request setup time. Tool
+ * schemas are module-level constants, so the result never changes: this shadows the
+ * provider on the schema instance with a cached one (the SDK's documented hook for a
+ * custom provider). Each call returns a deep clone, so a caller that mutates the
+ * result can never corrupt the cache. Validation (`~standard.validate`) is untouched.
+ */
+export function memoizeJsonSchema(schema: unknown): void {
+  if (schema === null || typeof schema !== 'object' || memoizedSchemas.has(schema)) {
+    return;
+  }
+  memoizedSchemas.add(schema);
+  const std = (schema as { '~standard'?: { jsonSchema?: { input?: JsonSchemaConverter; output?: JsonSchemaConverter } } })[
+    '~standard'
+  ];
+  if (!std?.jsonSchema?.input || !std.jsonSchema.output) {
+    return; // Not a converter-carrying Standard Schema: leave it to the SDK as-is.
+  }
+  const memo = (convert: JsonSchemaConverter): JsonSchemaConverter => {
+    const cache = new Map<string, unknown>();
+    return (options) => {
+      const key = JSON.stringify(options ?? null);
+      if (!cache.has(key)) {
+        cache.set(key, convert(options));
+      }
+      return structuredClone(cache.get(key));
+    };
+  };
+  Object.defineProperty(schema, '~standard', {
+    value: { ...std, jsonSchema: { input: memo(std.jsonSchema.input), output: memo(std.jsonSchema.output) } },
+    configurable: true,
+    enumerable: false,
+    writable: false,
+  });
 }
