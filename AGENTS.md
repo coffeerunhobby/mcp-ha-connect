@@ -19,7 +19,7 @@ Home Assistant, TP-Link Omada, and Local AI integration.
 
 - **Runtime:** Node.js 20+ (dev machine uses nvm)
 - **Language:** TypeScript, compiled to `dist/` via `tsc`
-- **MCP SDK:** `@modelcontextprotocol/sdk`
+- **MCP SDK:** v2 split packages — `@modelcontextprotocol/server` + `@modelcontextprotocol/node` (Node HTTP transport); `@modelcontextprotocol/client` is dev-only (tests)
 - **Transport:** Streamable HTTP (port 3000, path `/mcp`)
 - **Auth:** JWT bearer tokens with RBAC permission system
 - **Plugins:** Home Assistant · TP-Link Omada SDN · Local AI (Ollama/OpenAI-compat)
@@ -323,17 +323,17 @@ treat it as security-sensitive. A full audit (2026-06-07) with file/line finding
 
 ### Dependencies — update, don't rewrite
 
-- Runtime deps are intentionally tiny: `@modelcontextprotocol/sdk`, `ws`, `zod`.
-  **Do not hand-roll replacements** for these (or for transitive libs like `hono`,
-  `ajv`, `path-to-regexp`). A homegrown version loses community review and adds more
+- Runtime deps are intentionally tiny: `@modelcontextprotocol/server`, `@modelcontextprotocol/node`,
+  `undici`, `ws`, `zod` (^4.2 — SDK v2 requires it). Since v2.0.0 (SDK v2) the whole production tree
+  is **8 packages** (was 95 with SDK v1, which dragged in Express/cors/cross-spawn/ajv).
+  **Do not hand-roll replacements** for these (or for transitive libs like `hono`). A homegrown version loses community review and adds more
   bugs than it removes. Zod and the MCP SDK earn their keep.
-- The alarming `npm audit` list (`hono`, `@hono/node-server`, `fast-uri`, `ajv`,
-  `path-to-regexp`, `qs`) is **entirely transitive under the SDK**:
-  `@modelcontextprotocol/sdk → @hono/node-server → hono`. **Bumping the SDK fixes most
-  of them.** `ws` is the one direct dep to bump on its own.
+- Transitive advisories now can only come from `hono`/`@hono/node-server` (via
+  `@modelcontextprotocol/node`) or `@modelcontextprotocol/core`. **Bumping the SDK packages
+  fixes most of them.** `ws` and `undici` are direct deps to bump on their own.
 - Triage with `npm audit --omit=dev` — dev-only vulns (vitest/esbuild/tsx) don't ship.
   The question is *reachability in production*, not the raw count.
-- Remediate on a branch: `npm install @modelcontextprotocol/sdk@latest ws@latest`, then
+- Remediate on a branch: `npm install @modelcontextprotocol/server@latest @modelcontextprotocol/node@latest ws@latest undici@latest`, then
   `npm test && npm run build && npm audit --omit=dev`. Commit `package-lock.json`;
   CI/Docker use `npm ci`, not `npm install`. Widen version ranges only intentionally.
 
