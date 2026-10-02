@@ -231,7 +231,7 @@ export const automationIdSchema = z.object({
 export const serviceCallSchema = z.object({
   domain: z.string().describe('Service domain (e.g., "light", "switch", "climate", "notify")'),
   service: z.string().describe('Service name (e.g., "turn_on", "turn_off", "set_temperature")'),
-  service_data: z.record(z.unknown()).optional().describe('Optional service data'),
+  service_data: z.record(z.string(), z.unknown()).optional().describe('Optional service data'),
   target: z.object({
     entity_id: z.union([z.string(), z.array(z.string())]).optional(),
     device_id: z.union([z.string(), z.array(z.string())]).optional(),
@@ -241,13 +241,13 @@ export const serviceCallSchema = z.object({
 
 // Analyze sensors schema
 export const analyzeSensorsSchema = z.object({
-  sensors: z.record(z.unknown()).describe('Sensor data to analyze. Object with entity_id keys and {state, unit, attributes} values.'),
+  sensors: z.record(z.string(), z.unknown()).describe('Sensor data to analyze. Object with entity_id keys and {state, unit, attributes} values.'),
 });
 
 // Trigger automation schema
 export const triggerAutomationSchema = z.object({
   entity_id: z.string().describe('The automation entity ID (e.g., "automation.turn_on_lights")'),
-  variables: z.record(z.unknown()).optional().describe('Optional variables to pass to the automation'),
+  variables: z.record(z.string(), z.unknown()).optional().describe('Optional variables to pass to the automation'),
 });
 
 // Create automation schema
@@ -307,7 +307,7 @@ export const controlFanSchema = z.object({
 // Run script schema
 export const runScriptSchema = z.object({
   entity_id: z.string().describe('The script entity ID (e.g., "script.morning_routine")'),
-  variables: z.record(z.unknown()).optional().describe('Optional variables to pass to the script'),
+  variables: z.record(z.string(), z.unknown()).optional().describe('Optional variables to pass to the script'),
 });
 
 // Notification action schema for actionable notifications
@@ -347,7 +347,7 @@ export const sendNotificationSchema = z.object({
   badge: z.number().optional().describe('App badge count (iOS)'),
   interruptionLevel: z.enum(['passive', 'active', 'time-sensitive', 'critical']).optional().describe('iOS interruption level'),
   // Raw data passthrough for advanced use
-  data: z.record(z.unknown()).optional().describe('Additional raw data to pass to notification service'),
+  data: z.record(z.string(), z.unknown()).optional().describe('Additional raw data to pass to notification service'),
 });
 
 // List notification targets schema (empty - no params needed)

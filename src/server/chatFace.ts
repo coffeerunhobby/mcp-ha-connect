@@ -390,47 +390,47 @@ export const LEGACY_BINDINGS: ChatBinding[] = [
  * regenerating the lockfile, a recurring cross-OS trap). Unknown types degrade
  * to `{}` (permissive) rather than throwing.
  */
-export function zodToOpenApiSchema(schema: z.ZodTypeAny): Record<string, unknown> {
-  const def = (schema as { _def: { typeName: string } })._def;
+export function zodToOpenApiSchema(schema: z.ZodType): Record<string, unknown> {
+  // zod 4 exposes the schema kind on `_zod.def.type` (zod 3 used `_def.typeName`).
+  const def = (schema as unknown as { _zod: { def: { type: string } } })._zod.def;
 
-  switch (def.typeName) {
-    case 'ZodOptional':
-    case 'ZodDefault': {
-      const inner = zodToOpenApiSchema(
-        (def as unknown as { innerType: z.ZodTypeAny }).innerType
-      );
-      if (def.typeName === 'ZodDefault') {
-        const dv = (def as unknown as { defaultValue: () => unknown }).defaultValue();
+  switch (def.type) {
+    case 'optional':
+    case 'default': {
+      const inner = zodToOpenApiSchema((def as unknown as { innerType: z.ZodType }).innerType);
+      if (def.type === 'default') {
+        // zod 4 stores the default as a value (zod 3 stored a getter function).
+        const dv = (def as unknown as { defaultValue: unknown }).defaultValue;
         return { ...inner, default: dv };
       }
       return inner;
     }
-    case 'ZodString':
+    case 'string':
       return { type: 'string', ...describeOf(schema) };
-    case 'ZodNumber':
+    case 'number':
       return { type: 'number', ...describeOf(schema) };
-    case 'ZodBoolean':
+    case 'boolean':
       return { type: 'boolean', ...describeOf(schema) };
-    case 'ZodEnum':
+    case 'enum':
       return {
         type: 'string',
-        enum: (def as unknown as { values: string[] }).values,
+        enum: (schema as unknown as { options: string[] }).options,
         ...describeOf(schema),
       };
-    case 'ZodArray':
+    case 'array':
       return {
         type: 'array',
-        items: zodToOpenApiSchema((def as unknown as { type: z.ZodTypeAny }).type),
+        items: zodToOpenApiSchema((def as unknown as { element: z.ZodType }).element),
         ...describeOf(schema),
       };
-    case 'ZodRecord':
+    case 'record':
       return { type: 'object', ...describeOf(schema) };
-    case 'ZodObject': {
+    case 'object': {
       const shape = (schema as z.ZodObject<z.ZodRawShape>).shape;
       const properties: Record<string, unknown> = {};
       const required: string[] = [];
       for (const [key, value] of Object.entries(shape)) {
-        properties[key] = zodToOpenApiSchema(value);
+        properties[key] = zodToOpenApiSchema(value as z.ZodType);
         if (!(value instanceof z.ZodOptional) && !(value instanceof z.ZodDefault)) {
           required.push(key);
         }
@@ -447,7 +447,7 @@ export function zodToOpenApiSchema(schema: z.ZodTypeAny): Record<string, unknown
   }
 }
 
-function describeOf(schema: z.ZodTypeAny): { description?: string } {
+function describeOf(schema: z.ZodType): { description?: string } {
   const description = (schema as { description?: string }).description;
   return description ? { description } : {};
 }

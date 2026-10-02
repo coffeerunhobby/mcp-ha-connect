@@ -6,9 +6,7 @@ import { parseChatTools, type ChatToolsSlice } from './server/chatSlice.js';
 import { logger } from './utils/logger.js';
 import type { AIProviderType } from './localAI/types.js';
 
-const createBooleanStringSchema = (
-  defaultValue: boolean
-): z.ZodEffects<z.ZodOptional<z.ZodUnion<[z.ZodLiteral<'true'>, z.ZodLiteral<'false'>]>>, boolean, 'true' | 'false' | undefined> =>
+const createBooleanStringSchema = (defaultValue: boolean) =>
   z
     .union([z.literal('true'), z.literal('false')])
     .optional()
@@ -114,25 +112,18 @@ const envSchema = z
       path: ['httpBindAddr'],
     }
   )
-  .refine(
-    (data) => {
-      if (data.httpAllowedOrigins) {
-        for (const origin of data.httpAllowedOrigins) {
-          if (!isValidOrigin(origin)) {
-            return false;
-          }
-        }
-      }
-      return true;
-    },
-    (data) => {
-      const invalidOrigin = data.httpAllowedOrigins?.find((origin) => !isValidOrigin(origin));
-      return {
+  // zod 4 removed refine()'s message-as-function form; superRefine reports the same
+  // message and path, naming the first invalid origin.
+  .superRefine((data, ctx) => {
+    const invalidOrigin = data.httpAllowedOrigins?.find((origin) => !isValidOrigin(origin));
+    if (invalidOrigin !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
         message: `MCP_HTTP_ALLOWED_ORIGINS contains invalid origin: ${invalidOrigin}`,
         path: ['httpAllowedOrigins'],
-      };
+      });
     }
-  )
+  })
   .refine(
     (data) => {
       if (data.authMethod === 'bearer' && !data.authSecret) {

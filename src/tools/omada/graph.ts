@@ -48,7 +48,7 @@ export const readSchema = z.object({
   siteId: z.string().min(1).optional().describe('Site ID (optional; uses the default site if not set).'),
   id: z.string().min(1).optional().describe('Look up a single member of a collection by id/MAC (where supported).'),
   params: z
-    .record(z.string())
+    .record(z.string(), z.string())
     .optional()
     .describe('Path parameters some resources require (see omada_browse "params"), e.g. {"gatewayMac":"AA-BB-CC-DD-EE-FF"}.'),
   page: z.number().int().min(1).optional().describe('Page number for paginated resources (e.g. "/events").'),

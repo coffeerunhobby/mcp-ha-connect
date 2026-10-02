@@ -42,7 +42,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "undici": "^6.26.0",
     "ws": "^8.21.0",
-    "zod": "^3.24.1"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@amiceli/vitest-cucumber": "^6.2.0",
