@@ -3,7 +3,7 @@
  * Returns paginated, lightweight entities by default to reduce response size.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { toLightweight } from '../../types/index.js';
 import { haPaginationSchema, toToolResult, wrapToolHandler, Permission, paginateArray } from '../common.js';
@@ -13,7 +13,7 @@ export function registerGetAllSensorsTool(server: McpServer, client: HaClient): 
     'getAllSensors',
     {
       description: 'Get all sensor states from Home Assistant (sensor.* and binary_sensor.* entities). Returns paginated lightweight entities by default (50 per page). Use includeAttributes=true for full entity data.',
-      inputSchema: haPaginationSchema.shape,
+      inputSchema: haPaginationSchema,
     },
     wrapToolHandler('getAllSensors', async (args) => {
       const { page, pageSize, includeAttributes } = args;

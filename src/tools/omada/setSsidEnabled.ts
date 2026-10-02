@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type { OmadaClient } from '../../omadaClient/index.js';
@@ -31,7 +31,7 @@ export function registerSetSsidEnabledTool(server: McpServer, client: OmadaClien
                 'Omada has no direct SSID switch, so disabling applies a 24/7 "radio off" WLAN schedule ' +
                 '(the SSID stops broadcasting entirely) and enabling removes it — fully reversible. ' +
                 'All clients on that SSID lose connectivity when disabled - confirm with the user before applying.',
-            inputSchema: setSsidEnabledSchema.shape,
+            inputSchema: setSsidEnabledSchema,
         },
         createSetSsidEnabledHandler(client)
     );

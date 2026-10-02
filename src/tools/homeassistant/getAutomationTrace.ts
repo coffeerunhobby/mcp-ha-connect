@@ -2,7 +2,7 @@
  * getAutomationTrace tool - Get automation execution history
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { entityIdSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 import type { z } from 'zod';
@@ -14,7 +14,7 @@ export function registerGetAutomationTraceTool(server: McpServer, client: HaClie
     'getAutomationTrace',
     {
       description: 'Get the execution trace (history) of an automation. Shows when it was triggered and what actions were executed.',
-      inputSchema: entityIdSchema.shape,
+      inputSchema: entityIdSchema,
     },
     wrapToolHandler('getAutomationTrace', async ({ entity_id }: EntityIdArgs) => {
       const trace = await client.getAutomationTrace(entity_id);

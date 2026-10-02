@@ -2,7 +2,7 @@
  * triggerAutomation tool - Manually trigger an automation
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { triggerAutomationSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 import type { z } from 'zod';
@@ -14,7 +14,7 @@ export function registerTriggerAutomationTool(server: McpServer, client: HaClien
     'triggerAutomation',
     {
       description: 'Manually trigger a Home Assistant automation. Can optionally pass variables to the automation.',
-      inputSchema: triggerAutomationSchema.shape,
+      inputSchema: triggerAutomationSchema,
     },
     wrapToolHandler('triggerAutomation', async ({ entity_id, variables }: TriggerAutomationArgs) => {
       const result = await client.triggerAutomation(entity_id, variables as Record<string, unknown> | undefined);

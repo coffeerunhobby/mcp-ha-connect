@@ -4,7 +4,7 @@
  */
 
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { toLightweight } from '../../types/index.js';
 import { toToolResult, wrapToolHandler, Permission, paginateArray } from '../common.js';
@@ -23,7 +23,7 @@ export function registerSearchEntitiesTool(server: McpServer, client: HaClient):
       description: `Search for entities by name or entity_id. Returns paginated lightweight entities by default (50 per page). Use includeAttributes=true for full entity data.
 
 Note: For queries about people, family members, or "who's home?", use the listPersons tool instead.`,
-      inputSchema: searchEntitiesSchema.shape,
+      inputSchema: searchEntitiesSchema,
     },
     wrapToolHandler('searchEntities', async (args) => {
       const { query, page, pageSize, includeAttributes } = args;

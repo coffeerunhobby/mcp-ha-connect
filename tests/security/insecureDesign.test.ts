@@ -20,14 +20,13 @@ import { Permission, Role, hasPermission } from '../../src/permissions/index.js'
 
 /** Build a ToolExtra; pass `undefined` to omit the permission mask entirely. */
 function extraWith(permissions?: number): ToolExtra {
+  // SDK v2 context shape: auth under http.authInfo; omitted entirely when absent.
   return {
     sessionId: 'test-session',
-    signal: new AbortController().signal,
-    requestId: 1,
-    authInfo:
-      permissions !== undefined
-        ? { token: 't', clientId: 'c', scopes: [], extra: { permissions } }
-        : undefined,
+    mcpReq: { id: 1, signal: new AbortController().signal },
+    ...(permissions !== undefined
+      ? { http: { authInfo: { token: 't', clientId: 'c', scopes: [], extra: { permissions } } } }
+      : {}),
   } as unknown as ToolExtra;
 }
 

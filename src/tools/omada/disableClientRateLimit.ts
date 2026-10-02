@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { OmadaClient } from '../../omadaClient/index.js';
 import { toToolResult, wrapToolHandler, Permission } from '../common.js';
@@ -13,7 +13,7 @@ export function registerDisableClientRateLimitTool(server: McpServer, client: Om
         'omada_disableClientRateLimit',
         {
             description: 'Remove bandwidth limits from a client',
-            inputSchema: inputSchema.shape,
+            inputSchema: inputSchema,
         },
         wrapToolHandler('omada_disableClientRateLimit', async ({ clientMac, siteId }) =>
             toToolResult(await client.disableClientRateLimit(clientMac, siteId)),

@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type { OmadaClient } from '../../omadaClient/index.js';
@@ -13,7 +13,7 @@ export function registerSearchDevicesTool(server: McpServer, client: OmadaClient
         'omada_searchDevices',
         {
             description: 'Search for devices globally across all sites',
-            inputSchema: searchDevicesSchema.shape,
+            inputSchema: searchDevicesSchema,
         },
         wrapToolHandler('omada_searchDevices', async ({ searchKey }) => toToolResult(await client.searchDevices(searchKey)), Permission.QUERY)
     );

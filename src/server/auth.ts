@@ -3,7 +3,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+import type { AuthInfo } from '@modelcontextprotocol/server';
 import { verifyJwt, type JwtPayload } from '../utils/jwt.js';
 import { defaultRoleWarning, getUserPermissions, Role, type PermissionsConfig } from '../permissions/index.js';
 import { logger } from '../utils/logger.js';

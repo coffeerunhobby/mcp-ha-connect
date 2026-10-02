@@ -5,7 +5,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 import type { EnvironmentConfig } from '../config.js';
 import type { HaClient } from '../haClient/index.js';
 import type { LocalAIClient } from '../localAI/index.js';
@@ -15,7 +15,7 @@ import { createServer } from './common.js';
 import type { AuthenticatedRequest } from './auth.js';
 
 interface StreamTransportState {
-  transport: StreamableHTTPServerTransport;
+  transport: NodeStreamableHTTPServerTransport;
   server: ReturnType<typeof createServer>;
 }
 
@@ -114,7 +114,7 @@ export function createStreamTransport(options: StreamTransportOptions, callerPer
 
   const security = buildTransportSecurityOptions(config);
 
-  const transport = new StreamableHTTPServerTransport({
+  const transport = new NodeStreamableHTTPServerTransport({
     sessionIdGenerator,
     allowedOrigins: security.allowedOrigins,
     allowedHosts: security.allowedHosts,

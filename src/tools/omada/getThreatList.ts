@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type { OmadaClient } from '../../omadaClient/index.js';
@@ -21,7 +21,7 @@ export function registerGetThreatListTool(server: McpServer, client: OmadaClient
         'omada_getThreatList',
         {
             description: 'Get security threat management list',
-            inputSchema: getThreatListSchema.shape,
+            inputSchema: getThreatListSchema,
         },
         wrapToolHandler('omada_getThreatList', async (args) => {
             const options = {

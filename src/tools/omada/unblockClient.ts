@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type { OmadaClient } from '../../omadaClient/index.js';
@@ -16,7 +16,7 @@ export function registerUnblockClientTool(server: McpServer, client: OmadaClient
             description:
                 'Unblock a previously blocked client by MAC address, restoring its network access. ' +
                 'Use omada_listClients first to find the exact MAC.',
-            inputSchema: inputSchema.shape,
+            inputSchema: inputSchema,
         },
         wrapToolHandler('omada_unblockClient', async ({ clientMac, siteId }) =>
             toToolResult(await client.unblockClient(clientMac, siteId)),

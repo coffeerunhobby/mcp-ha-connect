@@ -15,7 +15,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 
 /**
  * Advisory IDs (GHSA / npm) we knowingly accept because there is no fixed
@@ -130,12 +130,12 @@ describe('SEC-DEPS — Vulnerable & Outdated Components (M9)', () => {
 
   describe('per-request transport invariant (post-upgrade)', () => {
     it('SDK still exposes a constructable StreamableHTTPServerTransport', () => {
-      expect(typeof StreamableHTTPServerTransport).toBe('function');
+      expect(typeof NodeStreamableHTTPServerTransport).toBe('function');
     });
 
     it('constructs an independent transport per call (stateless mode)', () => {
-      const make = (): StreamableHTTPServerTransport =>
-        new StreamableHTTPServerTransport({
+      const make = (): NodeStreamableHTTPServerTransport =>
+        new NodeStreamableHTTPServerTransport({
           sessionIdGenerator: undefined, // stateless: one transport per request
           enableDnsRebindingProtection: true,
           allowedHosts: ['localhost:3000'],
@@ -144,8 +144,8 @@ describe('SEC-DEPS — Vulnerable & Outdated Components (M9)', () => {
 
       const a = make();
       const b = make();
-      expect(a).toBeInstanceOf(StreamableHTTPServerTransport);
-      expect(b).toBeInstanceOf(StreamableHTTPServerTransport);
+      expect(a).toBeInstanceOf(NodeStreamableHTTPServerTransport);
+      expect(b).toBeInstanceOf(NodeStreamableHTTPServerTransport);
       expect(a).not.toBe(b); // distinct instances — no shared session state
     });
   });

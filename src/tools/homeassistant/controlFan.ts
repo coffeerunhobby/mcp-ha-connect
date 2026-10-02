@@ -2,7 +2,7 @@
  * controlFan tool - Control fans
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { controlFanSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 import { entityNotFoundResult } from './entityGuard.js';
@@ -15,7 +15,7 @@ export function registerControlFanTool(server: McpServer, client: HaClient): voi
     'controlFan',
     {
       description: 'Control a fan with speed, oscillation, and direction settings.',
-      inputSchema: controlFanSchema.shape,
+      inputSchema: controlFanSchema,
     },
     wrapToolHandler('controlFan', async (args: ControlFanArgs) => {
       const missing = await entityNotFoundResult(client, args.entity_id);

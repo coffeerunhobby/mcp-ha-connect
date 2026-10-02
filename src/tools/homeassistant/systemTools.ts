@@ -2,7 +2,7 @@
  * System tools - Restart, logs, updates
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { emptySchema, systemLogSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 import type { z } from 'zod';
@@ -14,7 +14,7 @@ export function registerRestartHomeAssistantTool(server: McpServer, client: HaCl
     'restartHomeAssistant',
     {
       description: 'Restart the Home Assistant server. Use with caution.',
-      inputSchema: emptySchema.shape,
+      inputSchema: emptySchema,
     },
     wrapToolHandler('restartHomeAssistant', async () => {
       await client.restartServer();
@@ -28,7 +28,7 @@ export function registerGetSystemLogTool(server: McpServer, client: HaClient): v
     'getSystemLog',
     {
       description: 'Get system log entries from the Home Assistant logbook. Shows recent events and state changes. Default: last 24h, 100 entries.',
-      inputSchema: systemLogSchema.shape,
+      inputSchema: systemLogSchema,
     },
     wrapToolHandler('getSystemLog', async ({ hours = 24, entity_id, limit = 100 }: SystemLogArgs) => {
       const log = await client.getSystemLog({ hours, entity_id, limit });
@@ -42,7 +42,7 @@ export function registerCheckUpdatesTool(server: McpServer, client: HaClient): v
     'checkUpdates',
     {
       description: 'Check for available updates for Home Assistant Core, Supervisor, and OS. Requires Home Assistant OS or Supervised installation.',
-      inputSchema: emptySchema.shape,
+      inputSchema: emptySchema,
     },
     wrapToolHandler('checkUpdates', async () => {
       const updates = await client.getAvailableUpdates();

@@ -2,7 +2,7 @@
  * entityAction tool - Simple entity actions (turn_on, turn_off, toggle)
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { entityActionSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 import { entityNotFoundResult } from './entityGuard.js';
@@ -15,7 +15,7 @@ export function registerEntityActionTool(server: McpServer, client: HaClient): v
     'entityAction',
     {
       description: 'Perform a simple action on an entity (turn_on, turn_off, toggle). Automatically detects the domain.',
-      inputSchema: entityActionSchema.shape,
+      inputSchema: entityActionSchema,
     },
     wrapToolHandler('entityAction', async ({ entity_id, action }: EntityActionArgs) => {
       const domain = entity_id.split('.')[0];

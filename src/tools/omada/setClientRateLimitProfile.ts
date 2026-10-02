@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type { OmadaClient } from '../../omadaClient/index.js';
@@ -15,7 +15,7 @@ export function registerSetClientRateLimitProfileTool(server: McpServer, client:
         'omada_setClientRateLimitProfile',
         {
             description: 'Apply a rate limit profile to a client',
-            inputSchema: inputSchema.shape,
+            inputSchema: inputSchema,
         },
         wrapToolHandler('omada_setClientRateLimitProfile', async ({ clientMac, profileId, siteId }) =>
             toToolResult(await client.setClientRateLimitProfile(clientMac, profileId, siteId)),

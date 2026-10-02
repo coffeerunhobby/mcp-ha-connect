@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type { OmadaClient } from '../../omadaClient/index.js';
@@ -14,7 +14,7 @@ export function registerGetSsidListTool(server: McpServer, client: OmadaClient):
         'omada_getSsidList',
         {
             description: 'Get SSID list for a WLAN group',
-            inputSchema: ssidListSchema.shape,
+            inputSchema: ssidListSchema,
         },
         wrapToolHandler('omada_getSsidList', async ({ wlanId, siteId }) => toToolResult(await client.getSsidList(wlanId, siteId)), Permission.QUERY)
     );

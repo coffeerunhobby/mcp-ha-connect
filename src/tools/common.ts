@@ -3,8 +3,7 @@
  * Shared helpers for all MCP tools
  */
 
-import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
-import type { CallToolResult, ServerNotification, ServerRequest } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { logger } from '../utils/logger.js';
 import { Permission, hasPermission, getPermissionNames } from '../permissions/index.js';
@@ -34,7 +33,7 @@ export function setLocalFullTrust(enabled: boolean): void {
  * Extra context passed to tool handlers
  * Permissions are extracted from authInfo.extra.permissions (MCP SDK standard)
  */
-export type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
+export type ToolExtra = ServerContext;
 
 /**
  * Resolve the caller's permission mask from the MCP SDK auth context.
@@ -48,7 +47,7 @@ export type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
  * semantics as `wrapToolHandler`, instead of re-reading `authInfo` ad hoc.
  */
 export function getCallerPermissions(extra: ToolExtra): number {
-  return (extra.authInfo?.extra?.permissions as number | undefined) ?? (localFullTrust ? 0xFF : 0);
+  return (extra.http?.authInfo?.extra?.permissions as number | undefined) ?? (localFullTrust ? 0xFF : 0);
 }
 
 /**

@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type { OmadaClient } from '../../omadaClient/index.js';
@@ -15,7 +15,7 @@ export function registerListClientsActivityTool(server: McpServer, client: Omada
         'omada_listClientsActivity',
         {
             description: 'Get client activity statistics over time',
-            inputSchema: clientActivityInputSchema.shape,
+            inputSchema: clientActivityInputSchema,
         },
         wrapToolHandler('omada_listClientsActivity', async ({ siteId, start, end }) =>
             toToolResult(await client.listClientsActivity({ siteId, start, end })),

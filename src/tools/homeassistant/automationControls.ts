@@ -2,7 +2,7 @@
  * Automation control tools - Enable, disable, toggle, reload automations
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { entityIdSchema, emptySchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 import type { z } from 'zod';
@@ -14,7 +14,7 @@ export function registerEnableAutomationTool(server: McpServer, client: HaClient
     'enableAutomation',
     {
       description: 'Enable a disabled Home Assistant automation.',
-      inputSchema: entityIdSchema.shape,
+      inputSchema: entityIdSchema,
     },
     wrapToolHandler('enableAutomation', async ({ entity_id }: EntityIdArgs) => {
       const result = await client.enableAutomation(entity_id);
@@ -28,7 +28,7 @@ export function registerDisableAutomationTool(server: McpServer, client: HaClien
     'disableAutomation',
     {
       description: 'Disable a Home Assistant automation.',
-      inputSchema: entityIdSchema.shape,
+      inputSchema: entityIdSchema,
     },
     wrapToolHandler('disableAutomation', async ({ entity_id }: EntityIdArgs) => {
       const result = await client.disableAutomation(entity_id);
@@ -42,7 +42,7 @@ export function registerToggleAutomationTool(server: McpServer, client: HaClient
     'toggleAutomation',
     {
       description: 'Toggle a Home Assistant automation (enable if disabled, disable if enabled).',
-      inputSchema: entityIdSchema.shape,
+      inputSchema: entityIdSchema,
     },
     wrapToolHandler('toggleAutomation', async ({ entity_id }: EntityIdArgs) => {
       const result = await client.toggleAutomation(entity_id);
@@ -56,7 +56,7 @@ export function registerReloadAutomationsTool(server: McpServer, client: HaClien
     'reloadAutomations',
     {
       description: 'Reload all automations from the Home Assistant configuration. Useful after editing automation YAML files.',
-      inputSchema: emptySchema.shape,
+      inputSchema: emptySchema,
     },
     wrapToolHandler('reloadAutomations', async () => {
       await client.reloadAutomations();

@@ -15,7 +15,7 @@
  *    bit. Unknown / container / under-privileged paths fail closed.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { OmadaClient } from '../../omadaClient/index.js';
 import { hasPermission, getPermissionNames } from '../../permissions/index.js';
@@ -166,7 +166,7 @@ export function registerOmadaGraphTools(server: McpServer, client: OmadaClient):
         'Discover the Omada network resource graph. Returns the children and metadata at a path (resource TYPES, not ' +
         'instances — no MAC enumeration), so navigate from "/" downward, then call omada_read at a readable node to fetch ' +
         'data. This replaces dozens of individual getters with one discoverable namespace.',
-      inputSchema: browseSchema.shape,
+      inputSchema: browseSchema,
     },
     createBrowseHandler(client)
   );
@@ -178,7 +178,7 @@ export function registerOmadaGraphTools(server: McpServer, client: OmadaClient):
         'Read data from an Omada resource path discovered via omada_browse. Handles single resources (e.g. "/gateway/wan"), ' +
         'collections (e.g. "/clients", optionally id=<MAC> for one member), and paginated logs (e.g. "/events" with ' +
         'page/pageSize). Authorization is enforced per-path.',
-      inputSchema: readSchema.shape,
+      inputSchema: readSchema,
     },
     createReadHandler(client)
   );

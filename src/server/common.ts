@@ -3,7 +3,8 @@
  * Shared across all transport types (stdio, SSE, stream)
  */
 
-import { McpServer, type RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '@modelcontextprotocol/server';
+import type { RegisteredTool } from '@modelcontextprotocol/server';
 import type { HaClient } from '../haClient/index.js';
 import type { LocalAIClient } from '../localAI/index.js';
 import type { OmadaClient } from '../omadaClient/index.js';

@@ -7,7 +7,7 @@
  * LLM client would believe a typo'd light was switched on.
  */
 
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolResult } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { toToolResult } from '../common.js';
 

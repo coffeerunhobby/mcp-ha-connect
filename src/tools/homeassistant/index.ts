@@ -2,7 +2,7 @@
  * Home Assistant tools index - registers all HA MCP tools
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { logger } from '../../utils/logger.js';
 

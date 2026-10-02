@@ -2,7 +2,7 @@
  * Scene and Script tools - Activate scenes and run scripts
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { entityIdSchema, runScriptSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 import { entityNotFoundResult } from './entityGuard.js';
@@ -16,7 +16,7 @@ export function registerActivateSceneTool(server: McpServer, client: HaClient): 
     'activateScene',
     {
       description: 'Activate a Home Assistant scene.',
-      inputSchema: entityIdSchema.shape,
+      inputSchema: entityIdSchema,
     },
     wrapToolHandler('activateScene', async ({ entity_id }: EntityIdArgs) => {
       const missing = await entityNotFoundResult(client, entity_id);
@@ -36,7 +36,7 @@ export function registerRunScriptTool(server: McpServer, client: HaClient): void
     'runScript',
     {
       description: 'Run a Home Assistant script with optional variables.',
-      inputSchema: runScriptSchema.shape,
+      inputSchema: runScriptSchema,
     },
     wrapToolHandler('runScript', async ({ entity_id, variables }: RunScriptArgs) => {
       const missing = await entityNotFoundResult(client, entity_id);

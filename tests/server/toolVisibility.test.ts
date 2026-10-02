@@ -7,8 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { createServer } from '../../src/server/common.js';
 import { Role, Permission } from '../../src/permissions/index.js';
 import { getToolRequiredPermission } from '../../src/tools/common.js';

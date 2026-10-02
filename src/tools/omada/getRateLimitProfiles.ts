@@ -1,5 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { OmadaClient } from '../../omadaClient/index.js';
 import { siteInputSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 
@@ -8,7 +7,7 @@ export function registerGetRateLimitProfilesTool(server: McpServer, client: Omad
         'omada_getRateLimitProfiles',
         {
             description: 'Get available rate limit profiles for a site',
-            inputSchema: siteInputSchema.shape,
+            inputSchema: siteInputSchema,
         },
         wrapToolHandler('omada_getRateLimitProfiles', async ({ siteId }) => toToolResult(await client.getRateLimitProfiles(siteId)), Permission.QUERY)
     );

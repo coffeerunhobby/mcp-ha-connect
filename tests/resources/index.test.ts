@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../src/haClient/index.js';
 import { registerAllResources } from '../../src/resources/index.js';
 
@@ -11,7 +11,7 @@ import { registerAllResources } from '../../src/resources/index.js';
 function createMockServer() {
   const resources = new Map<string, { config: unknown; handler: (...args: unknown[]) => unknown }>();
   return {
-    resource: vi.fn((name: string, uriOrTemplate: unknown, config: unknown, handler: (...args: unknown[]) => unknown) => {
+    registerResource: vi.fn((name: string, uriOrTemplate: unknown, config: unknown, handler: (...args: unknown[]) => unknown) => {
       resources.set(name, { config, handler });
     }),
     resources,
@@ -41,7 +41,7 @@ describe('MCP Resources', () => {
   describe('Registration', () => {
     it('should register all 5 resources', () => {
       registerAllResources(server, client);
-      expect(server.resource).toHaveBeenCalledTimes(5);
+      expect(server.registerResource).toHaveBeenCalledTimes(5);
     });
 
     it('should register All Entities resource', () => {

@@ -4,7 +4,7 @@
  */
 
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { toLightweight } from '../../types/index.js';
 import { toToolResult, wrapToolHandler, Permission, paginateArray } from '../common.js';
@@ -21,7 +21,7 @@ export function registerGetEntitiesByDomainTool(server: McpServer, client: HaCli
     'getEntitiesByDomain',
     {
       description: 'Get all entities for a specific domain (e.g., all lights, all sensors). Returns paginated lightweight entities by default (50 per page). Use includeAttributes=true for full entity data.',
-      inputSchema: getEntitiesByDomainSchema.shape,
+      inputSchema: getEntitiesByDomainSchema,
     },
     wrapToolHandler('getEntitiesByDomain', async (args) => {
       const { domain, page, pageSize, includeAttributes } = args;

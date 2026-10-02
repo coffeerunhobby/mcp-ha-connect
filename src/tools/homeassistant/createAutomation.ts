@@ -2,7 +2,7 @@
  * createAutomation tool - Create a new automation
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import type { AutomationTrigger, AutomationCondition, AutomationAction } from '../../types/index.js';
 import { createAutomationSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
@@ -15,7 +15,7 @@ export function registerCreateAutomationTool(server: McpServer, client: HaClient
     'createAutomation',
     {
       description: 'Create a new Home Assistant automation. Requires specifying triggers, conditions (optional), and actions.',
-      inputSchema: createAutomationSchema.shape,
+      inputSchema: createAutomationSchema,
     },
     wrapToolHandler('createAutomation', async (args: CreateAutomationArgs) => {
       if (!args.alias || !args.trigger || !args.action) {

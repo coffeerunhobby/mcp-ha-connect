@@ -1,5 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { OmadaClient } from '../../omadaClient/index.js';
 import { siteInputSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 
@@ -8,7 +7,7 @@ export function registerGetLanProfileListTool(server: McpServer, client: OmadaCl
         'omada_getLanProfileList',
         {
             description: 'Get LAN profile configuration list',
-            inputSchema: siteInputSchema.shape,
+            inputSchema: siteInputSchema,
         },
         wrapToolHandler('omada_getLanProfileList', async ({ siteId }) => toToolResult(await client.getLanProfileList(siteId)), Permission.QUERY)
     );

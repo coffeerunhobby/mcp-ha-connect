@@ -2,7 +2,7 @@
  * Calendar tools - List calendars and get calendar events
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { listCalendarsSchema, getCalendarEventsSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 import type { z } from 'zod';
@@ -14,7 +14,7 @@ export function registerListCalendarsTool(server: McpServer, client: HaClient): 
     'listCalendars',
     {
       description: 'List all calendar entities in Home Assistant. Returns calendar names and their current state.',
-      inputSchema: listCalendarsSchema.shape,
+      inputSchema: listCalendarsSchema,
     },
     wrapToolHandler('listCalendars', async () => {
       const calendars = await client.getCalendars();
@@ -38,7 +38,7 @@ Examples:
 - Next 7 days: { days: 7 }
 - Date range: { start_date: "2026-01-01", end_date: "2026-01-31" }
 - Specific calendar + date range: { entity_id: "calendar.work", start_date: "2026-02-01", days: 14 }`,
-      inputSchema: getCalendarEventsSchema.shape,
+      inputSchema: getCalendarEventsSchema,
     },
     wrapToolHandler('getCalendarEvents', async (args: GetCalendarEventsArgs) => {
       // Parse dates

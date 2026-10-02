@@ -2,7 +2,7 @@
  * analyzeSensors tool - AI-powered sensor analysis
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { LocalAIClient, SensorData } from '../../localAI/index.js';
 import { analyzeSensorsSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 import type { z } from 'zod';
@@ -14,7 +14,7 @@ export function registerAnalyzeSensorsTool(server: McpServer, aiClient?: LocalAI
     'analyzeSensors',
     {
       description: 'Analyze sensor data using AI (Ollama) to detect issues and provide recommendations.',
-      inputSchema: analyzeSensorsSchema.shape,
+      inputSchema: analyzeSensorsSchema,
     },
     wrapToolHandler('analyzeSensors', async ({ sensors }: AnalyzeSensorsArgs) => {
       if (!aiClient) {

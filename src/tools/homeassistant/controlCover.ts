@@ -2,7 +2,7 @@
  * controlCover tool - Control covers/blinds
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { controlCoverSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 import { entityNotFoundResult } from './entityGuard.js';
@@ -15,7 +15,7 @@ export function registerControlCoverTool(server: McpServer, client: HaClient): v
     'controlCover',
     {
       description: 'Control a cover/blind with position and tilt settings.',
-      inputSchema: controlCoverSchema.shape,
+      inputSchema: controlCoverSchema,
     },
     wrapToolHandler('controlCover', async (args: ControlCoverArgs) => {
       const missing = await entityNotFoundResult(client, args.entity_id);

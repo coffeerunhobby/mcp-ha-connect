@@ -36,8 +36,7 @@ import { logger } from '../utils/logger.js';
 import { sanitizeError } from '../utils/sanitizeError.js';
 import { VERSION } from '../version.js';
 import type { ToolExtra } from '../tools/common.js';
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-
+import type { CallToolResult } from '@modelcontextprotocol/server';
 import { createBrowseHandler, createReadHandler, browseSchema, readSchema } from '../tools/omada/graph.js';
 import { createSetSsidEnabledHandler, setSsidEnabledSchema } from '../tools/omada/setSsidEnabled.js';
 import { createGetDomainSummaryHandler } from '../tools/homeassistant/getDomainSummary.js';
@@ -459,9 +458,12 @@ function describeOf(schema: z.ZodType): { description?: string } {
 
 /** Minimal synthetic ToolExtra for REST-originated tool calls. */
 function restToolExtra(permissions: number): ToolExtra {
+  // SDK v2 context shape: auth lives under `http.authInfo` (v1 had it top-level).
+  // getCallerPermissions reads exactly this path, so a wrong shape here would make
+  // every REST call fail closed (denied).
   return {
     sessionId: 'chat-rest',
-    authInfo: { extra: { permissions } },
+    http: { authInfo: { token: '', clientId: 'chat-rest', scopes: [], extra: { permissions } } },
   } as unknown as ToolExtra;
 }
 

@@ -26,18 +26,16 @@ describe('toToolResult', () => {
 });
 
 describe('wrapToolHandler permission checks', () => {
-  // Helper to create ToolExtra with permissions in authInfo.extra (MCP SDK format)
-  const createExtra = (permissions?: number): ToolExtra => ({
-    sessionId: 'test-session',
-    signal: new AbortController().signal,
-    requestId: 1,
-    authInfo: permissions !== undefined ? {
-      token: 'test-token',
-      clientId: 'test-client',
-      scopes: [],
-      extra: { permissions },
-    } : undefined,
-  });
+  // Helper to create ToolExtra with permissions in http.authInfo.extra (MCP SDK v2 context
+  // shape). No permissions => no `http` at all, as on a request without auth info.
+  const createExtra = (permissions?: number): ToolExtra =>
+    ({
+      sessionId: 'test-session',
+      mcpReq: { id: 1, signal: new AbortController().signal },
+      ...(permissions !== undefined
+        ? { http: { authInfo: { token: 'test-token', clientId: 'test-client', scopes: [], extra: { permissions } } } }
+        : {}),
+    }) as unknown as ToolExtra;
 
   it('should allow access when user has required permission', async () => {
     const handler = vi.fn().mockResolvedValue(toToolResult('success'));

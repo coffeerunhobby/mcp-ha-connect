@@ -3,7 +3,7 @@
  * Supports HA Mobile App notifications with actions, images, sounds, and more
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { sendNotificationSchema, listNotificationTargetsSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 import type { z } from 'zod';
@@ -83,7 +83,7 @@ Examples:
 - Simple: { message: "Hello!", target: "mobile_app_phone" }
 - With actions: { message: "Doorbell", target: "mobile_app_phone", actions: [{ action: "OPEN", title: "Open Door" }] }
 - With image: { message: "Camera alert", target: "mobile_app_phone", image: "/api/camera_proxy/camera.front" }`,
-      inputSchema: sendNotificationSchema.shape,
+      inputSchema: sendNotificationSchema,
     },
     wrapToolHandler('sendNotification', async (args: SendNotificationArgs) => {
       const serviceData: Record<string, unknown> = { message: args.message };
@@ -121,7 +121,7 @@ export function registerListNotificationTargetsTool(server: McpServer, client: H
     'listNotificationTargets',
     {
       description: 'List available notification targets (mobile apps and other notify services). Use this to discover which devices can receive notifications.',
-      inputSchema: listNotificationTargetsSchema.shape,
+      inputSchema: listNotificationTargetsSchema,
     },
     wrapToolHandler('listNotificationTargets', async () => {
       // Get all entities and find mobile_app device trackers to infer notify services

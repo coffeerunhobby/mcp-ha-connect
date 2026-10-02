@@ -2,7 +2,7 @@
  * listPersons tool - List all person entities (household members)
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { emptySchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 
@@ -20,7 +20,7 @@ Use this tool when the user asks:
 - "List family members"
 - "Is anyone home?"
 - "Where is Dad/Mom/etc?"`,
-      inputSchema: emptySchema.shape,
+      inputSchema: emptySchema,
     },
     wrapToolHandler('listPersons', async () => {
       const entities = await client.getEntitiesByDomain('person');

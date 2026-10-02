@@ -3,9 +3,8 @@
  * Provides URI-based access to Home Assistant entities
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { Variables } from '@modelcontextprotocol/sdk/shared/uriTemplate.js';
+import { ResourceTemplate } from '@modelcontextprotocol/server';
+import type { McpServer, Variables } from '@modelcontextprotocol/server';
 import type { HaClient } from '../haClient/index.js';
 import { logger } from '../utils/logger.js';
 
@@ -16,7 +15,7 @@ export function registerAllResources(server: McpServer, client: HaClient): void 
   logger.debug('Registering MCP resources');
 
   // Static resource: List all entities grouped by domain
-  server.resource(
+  server.registerResource(
     'All Entities',
     'hass://entities',
     {
@@ -57,7 +56,7 @@ export function registerAllResources(server: McpServer, client: HaClient): void 
   );
 
   // Template resource: Get specific entity state
-  server.resource(
+  server.registerResource(
     'Entity State',
     new ResourceTemplate('hass://entities/{entity_id}', { list: undefined }),
     {
@@ -98,7 +97,7 @@ export function registerAllResources(server: McpServer, client: HaClient): void 
   );
 
   // Template resource: Get detailed entity info
-  server.resource(
+  server.registerResource(
     'Entity Detailed',
     new ResourceTemplate('hass://entities/{entity_id}/detailed', { list: undefined }),
     {
@@ -141,7 +140,7 @@ export function registerAllResources(server: McpServer, client: HaClient): void 
   );
 
   // Template resource: Get entities by domain
-  server.resource(
+  server.registerResource(
     'Domain Entities',
     new ResourceTemplate('hass://entities/domain/{domain}', { list: undefined }),
     {
@@ -173,7 +172,7 @@ export function registerAllResources(server: McpServer, client: HaClient): void 
   );
 
   // Template resource: Search entities
-  server.resource(
+  server.registerResource(
     'Search Entities',
     new ResourceTemplate('hass://search/{query}/{limit}', { list: undefined }),
     {

@@ -1,5 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { OmadaClient } from '../../omadaClient/index.js';
 import { clientIdSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 
@@ -8,7 +7,7 @@ export function registerGetClientTool(server: McpServer, client: OmadaClient): v
         'omada_getClient',
         {
             description: 'Get detailed information about a specific connected client',
-            inputSchema: clientIdSchema.shape,
+            inputSchema: clientIdSchema,
         },
         wrapToolHandler('omada_getClient', async ({ clientId, siteId }) => toToolResult(await client.getClient(clientId, siteId)), Permission.QUERY)
     );

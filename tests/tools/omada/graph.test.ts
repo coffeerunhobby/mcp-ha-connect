@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { OmadaClient } from '../../../src/omadaClient/index.js';
 import { registerOmadaGraphTools } from '../../../src/tools/omada/graph.js';
 import { registerOmadaTools } from '../../../src/tools/omada/index.js';
@@ -55,11 +55,11 @@ function createMockClient() {
 }
 
 // Caller with all permissions.
-const adminExtra = { sessionId: 'test', authInfo: { extra: { permissions: 0xff } } };
+const adminExtra = { sessionId: 'test', http: { authInfo: { extra: { permissions: 0xff } } } };
 // Caller with only QUERY (read-only).
-const readonlyExtra = { sessionId: 'test', authInfo: { extra: { permissions: Permission.QUERY } } };
+const readonlyExtra = { sessionId: 'test', http: { authInfo: { extra: { permissions: Permission.QUERY } } } };
 // Caller with NO permissions.
-const noPermsExtra = { sessionId: 'test', authInfo: { extra: { permissions: 0 } } };
+const noPermsExtra = { sessionId: 'test', http: { authInfo: { extra: { permissions: 0 } } } };
 
 function parseResult(result: { content: { text: string }[]; isError?: boolean }): {
   isError?: boolean;

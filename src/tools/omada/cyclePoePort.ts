@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type { OmadaClient } from '../../omadaClient/index.js';
@@ -20,7 +20,7 @@ export function registerCyclePoePortTool(server: McpServer, client: OmadaClient)
                 'ports; the switch itself and other ports are unaffected. Use omada_listDevices to find the switch MAC ' +
                 'and identify which port powers which device first. The powered device goes down for the cycle - ' +
                 'confirm with the user before applying.',
-            inputSchema: inputSchema.shape,
+            inputSchema: inputSchema,
         },
         wrapToolHandler('omada_cyclePoePort', async ({ switchMac, ports, siteId }) => {
             await client.cyclePoePorts(switchMac, ports, siteId);

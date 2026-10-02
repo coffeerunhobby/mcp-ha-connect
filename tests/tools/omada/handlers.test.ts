@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { OmadaClient } from '../../../src/omadaClient/index.js';
 
 // Import all registration functions
@@ -80,11 +80,7 @@ function createMockClient() {
 // Mock extra with all permissions
 const mockExtra = {
   sessionId: 'test-session',
-  authInfo: {
-    extra: {
-      permissions: 0xff, // All permissions
-    },
-  },
+  http: { authInfo: { extra: { permissions: 0xff } } }, // All permissions
 };
 
 // Parse JSON result from tool output
@@ -826,14 +822,9 @@ describe('Omada Tool Handlers - Network Tools', () => {
 describe('Omada Tool Handlers - Permission Enforcement', () => {
   let server: ReturnType<typeof createMockServer>;
   let client: ReturnType<typeof createMockClient>;
-
   const readonlyExtra = {
     sessionId: 'test-session',
-    authInfo: {
-      extra: {
-        permissions: 0x08, // QUERY only
-      },
-    },
+    http: { authInfo: { extra: { permissions: 0x08 } } }, // QUERY only
   };
 
   beforeEach(() => {

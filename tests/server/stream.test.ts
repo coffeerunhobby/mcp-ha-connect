@@ -7,7 +7,6 @@ import type { HaClient } from '../../src/haClient/index.js';
 import type { EnvironmentConfig } from '../../src/config.js';
 
 // Mock dependencies
-vi.mock('@modelcontextprotocol/sdk/server/streamable.js');
 vi.mock('../../src/server/common.js');
 vi.mock('../../src/utils/logger.js');
 

@@ -2,7 +2,7 @@
  * Omada tools index - registers all Omada MCP tools
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { OmadaClient } from '../../omadaClient/index.js';
 import { logger } from '../../utils/logger.js';
 

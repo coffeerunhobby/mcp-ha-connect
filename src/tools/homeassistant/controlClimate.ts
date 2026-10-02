@@ -2,7 +2,7 @@
  * controlClimate tool - Control climate/thermostat devices
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { controlClimateSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 import { entityNotFoundResult } from './entityGuard.js';
@@ -15,7 +15,7 @@ export function registerControlClimateTool(server: McpServer, client: HaClient):
     'controlClimate',
     {
       description: 'Control a climate/thermostat device with temperature and mode settings.',
-      inputSchema: controlClimateSchema.shape,
+      inputSchema: controlClimateSchema,
     },
     wrapToolHandler('controlClimate', async (args: ControlClimateArgs) => {
       const missing = await entityNotFoundResult(client, args.entity_id);

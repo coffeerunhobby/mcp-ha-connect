@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type { OmadaClient } from '../../omadaClient/index.js';
@@ -20,7 +20,7 @@ export function registerListDevicesStatsTool(server: McpServer, client: OmadaCli
         'omada_listDevicesStats',
         {
             description: 'Get statistics for global adopted devices with filtering',
-            inputSchema: listDevicesStatsSchema.shape,
+            inputSchema: listDevicesStatsSchema,
         },
         wrapToolHandler('omada_listDevicesStats', async (args) =>
             toToolResult(

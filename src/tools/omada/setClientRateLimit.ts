@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type { OmadaClient } from '../../omadaClient/index.js';
@@ -16,7 +16,7 @@ export function registerSetClientRateLimitTool(server: McpServer, client: OmadaC
         'omada_setClientRateLimit',
         {
             description: 'Set custom bandwidth limits for a client (download/upload in Kbps)',
-            inputSchema: inputSchema.shape,
+            inputSchema: inputSchema,
         },
         wrapToolHandler('omada_setClientRateLimit', async ({ clientMac, downLimit, upLimit, siteId }) =>
             toToolResult(await client.setClientRateLimit(clientMac, downLimit, upLimit, siteId)),

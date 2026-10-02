@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { LocalAIClient } from '../../../src/localAI/index.js';
 import { registerAnalyzeSensorsTool } from '../../../src/tools/ai/analyzeSensors.js';
 
@@ -28,21 +28,13 @@ function createMockAIClient() {
 // Mock extra with AI permission
 const mockExtra = {
   sessionId: 'test-session',
-  authInfo: {
-    extra: {
-      permissions: 0xff, // All permissions including AI
-    },
-  },
+  http: { authInfo: { extra: { permissions: 0xff } } }, // All permissions including AI
 };
 
 // Mock extra without AI permission
 const noAiPermExtra = {
   sessionId: 'test-session',
-  authInfo: {
-    extra: {
-      permissions: 0x08, // QUERY only
-    },
-  },
+  http: { authInfo: { extra: { permissions: 0x08 } } }, // QUERY only
 };
 
 // Parse JSON result from tool output

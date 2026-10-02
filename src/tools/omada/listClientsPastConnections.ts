@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type { OmadaClient } from '../../omadaClient/index.js';
@@ -23,7 +23,7 @@ export function registerListClientsPastConnectionsTool(server: McpServer, client
         'omada_listClientsPastConnections',
         {
             description: 'Get historical client connection data',
-            inputSchema: clientsPastConnectionsInputSchema.shape,
+            inputSchema: clientsPastConnectionsInputSchema,
         },
         wrapToolHandler('omada_listClientsPastConnections', async (args) =>
             toToolResult(

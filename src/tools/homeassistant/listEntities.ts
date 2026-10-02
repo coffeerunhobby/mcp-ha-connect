@@ -4,7 +4,7 @@
  */
 
 import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { toLightweight } from '../../types/index.js';
 import { toToolResult, wrapToolHandler, Permission } from '../common.js';
@@ -24,7 +24,7 @@ export function registerListEntitiesTool(server: McpServer, client: HaClient): v
     'listEntities',
     {
       description: 'List entities with optional filtering by domain, state, or search query. Returns lightweight entities by default (limit 50). Use includeAttributes=true for full entity data.',
-      inputSchema: listEntitiesSchema.shape,
+      inputSchema: listEntitiesSchema,
     },
     wrapToolHandler('listEntities', async (args: ListEntitiesArgs) => {
       const { includeAttributes, ...filterArgs } = args;

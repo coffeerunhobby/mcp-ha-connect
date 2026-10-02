@@ -1,5 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { OmadaClient } from '../../omadaClient/index.js';
 import { siteInputSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 
@@ -8,7 +7,7 @@ export function registerGetFirewallSettingTool(server: McpServer, client: OmadaC
         'omada_getFirewallSetting',
         {
             description: 'Get firewall configuration for a site',
-            inputSchema: siteInputSchema.shape,
+            inputSchema: siteInputSchema,
         },
         wrapToolHandler('omada_getFirewallSetting', async ({ siteId }) => toToolResult(await client.getFirewallSetting(siteId)), Permission.QUERY)
     );

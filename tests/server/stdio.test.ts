@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock dependencies
 vi.mock('../../src/server/common.js');
-vi.mock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
+vi.mock('@modelcontextprotocol/server/stdio', () => ({
   StdioServerTransport: class MockStdioServerTransport {},
 }));
 vi.mock('../../src/utils/logger.js');
@@ -36,7 +36,7 @@ describe('startStdioServer', () => {
 
   it('should create and start stdio server', async () => {
     const { createServer } = await import('../../src/server/common.js');
-    const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
+    const { StdioServerTransport } = await import('@modelcontextprotocol/server/stdio');
 
     const mockServer = {
       connect: vi.fn().mockResolvedValue(undefined),

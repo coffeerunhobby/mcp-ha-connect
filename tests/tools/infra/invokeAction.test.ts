@@ -9,8 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-
+import type { McpServer } from '@modelcontextprotocol/server';
 import { registerInfraTools, parseRestActions, resetActionCooldowns } from '../../../src/tools/infra/index.js';
 import { Permission } from '../../../src/tools/common.js';
 
@@ -66,10 +65,9 @@ function createMockServer() {
         handlers,
     } as unknown as McpServer & { handlers: Map<string, { config: unknown; handler: (...args: unknown[]) => unknown }> };
 }
-
 const adminExtra = {
     sessionId: 'test-session',
-    authInfo: { extra: { permissions: 0xff } },
+    http: { authInfo: { extra: { permissions: 0xff } } },
 };
 
 const ACTIONS = parseRestActions(
@@ -267,11 +265,10 @@ describe('invokeAction tool', () => {
     it('denies callers without the ADMIN permission bit', async () => {
         const server = createMockServer();
         registerInfraTools(server, ACTIONS);
-
         const operatorExtra = {
             sessionId: 'test-session',
             // OPERATOR mask = QUERY|CONTROL|NOTIFY — no ADMIN bit
-            authInfo: { extra: { permissions: Permission.QUERY | Permission.CONTROL | Permission.NOTIFY } },
+            http: { authInfo: { extra: { permissions: Permission.QUERY | Permission.CONTROL | Permission.NOTIFY } } },
         };
 
         const { handler } = server.handlers.get('invokeAction')!;

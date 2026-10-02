@@ -12,7 +12,7 @@
  *    truncated before they re-enter the context window.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import { toToolResult, wrapToolHandler, Permission } from '../common.js';
@@ -77,7 +77,7 @@ export function registerInfraTools(server: McpServer, actions: Record<string, Re
                 '(method, URL, and credentials come from server config — only the name is chosen here). ' +
                 `Available actions: ${catalogue}. ` +
                 'Actions have real-world effects (deploys, restarts, webhooks) - confirm with the user before applying.',
-            inputSchema: inputSchema.shape,
+            inputSchema: inputSchema,
         },
         wrapToolHandler('invokeAction', async ({ action }) => {
             // Own-property, exact-match lookup. The registry has a null prototype,

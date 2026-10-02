@@ -8,8 +8,7 @@
  */
 
 import { bench, describe, vi } from 'vitest';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { createServer } from '../../src/server/common.js';
 import { createJwt, verifyJwt } from '../../src/utils/jwt.js';
 import { controlLightSchema, sendNotificationSchema } from '../../src/tools/common.js';

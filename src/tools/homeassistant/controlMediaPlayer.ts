@@ -2,7 +2,7 @@
  * controlMediaPlayer tool - Control media players
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { controlMediaPlayerSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 import { entityNotFoundResult } from './entityGuard.js';
@@ -15,7 +15,7 @@ export function registerControlMediaPlayerTool(server: McpServer, client: HaClie
     'controlMediaPlayer',
     {
       description: 'Control a media player with playback, volume, and media selection.',
-      inputSchema: controlMediaPlayerSchema.shape,
+      inputSchema: controlMediaPlayerSchema,
     },
     wrapToolHandler('controlMediaPlayer', async (args: ControlMediaPlayerArgs) => {
       const missing = await entityNotFoundResult(client, args.entity_id);

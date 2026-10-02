@@ -1,4 +1,4 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import type { OmadaClient } from '../../omadaClient/index.js';
@@ -16,7 +16,7 @@ export function registerGetPortForwardingStatusTool(server: McpServer, client: O
         'omada_getPortForwardingStatus',
         {
             description: 'Get port forwarding rules (User or UPnP)',
-            inputSchema: portForwardingSchema.shape,
+            inputSchema: portForwardingSchema,
         },
         wrapToolHandler('omada_getPortForwardingStatus', async ({ type, siteId, page = 1, pageSize = 10 }) =>
             toToolResult(await client.getPortForwardingStatus(type, siteId, page, pageSize)),

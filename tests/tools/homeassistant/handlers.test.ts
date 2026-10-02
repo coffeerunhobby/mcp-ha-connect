@@ -94,11 +94,7 @@ function createMockServer() {
 // Mock extra object required by wrapToolHandler
 const mockExtra = {
   sessionId: 'test-session',
-  authInfo: {
-    extra: {
-      permissions: 0xFF, // All permissions
-    },
-  },
+  http: { authInfo: { extra: { permissions: 0xFF } } }, // All permissions
 };
 
 describe('HomeAssistant Tool Handlers', () => {

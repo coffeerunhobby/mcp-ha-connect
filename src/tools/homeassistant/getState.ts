@@ -2,7 +2,7 @@
  * getState tool - Get state of a specific entity
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { entityIdSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 
@@ -11,7 +11,7 @@ export function registerGetStateTool(server: McpServer, client: HaClient): void 
     'getState',
     {
       description: 'Get the state of a specific entity by entity_id.',
-      inputSchema: entityIdSchema.shape,
+      inputSchema: entityIdSchema,
     },
     wrapToolHandler('getState', async ({ entity_id }: { entity_id: string }) => {
       const state = await client.getState(entity_id);

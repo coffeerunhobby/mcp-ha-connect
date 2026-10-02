@@ -2,7 +2,7 @@
  * listAutomations tool - List all automations
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { automationFilterSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 import type { z } from 'zod';
@@ -28,7 +28,7 @@ export function registerListAutomationsTool(server: McpServer, client: HaClient)
     'listAutomations',
     {
       description: 'List all Home Assistant automations with their status and last triggered time.',
-      inputSchema: automationFilterSchema.shape,
+      inputSchema: automationFilterSchema,
     },
     createListAutomationsHandler(client)
   );

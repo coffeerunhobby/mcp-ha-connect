@@ -2,7 +2,7 @@
  * AI tools index - registers all AI-powered MCP tools
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { LocalAIClient } from '../../localAI/index.js';
 import { logger } from '../../utils/logger.js';
 

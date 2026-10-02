@@ -2,7 +2,7 @@
  * controlLight tool - Control lights with advanced options
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { HaClient } from '../../haClient/index.js';
 import { controlLightSchema, toToolResult, wrapToolHandler, Permission } from '../common.js';
 import { entityNotFoundResult } from './entityGuard.js';
@@ -15,7 +15,7 @@ export function registerControlLightTool(server: McpServer, client: HaClient): v
     'controlLight',
     {
       description: 'Control a light with advanced options like brightness, color, and color temperature.',
-      inputSchema: controlLightSchema.shape,
+      inputSchema: controlLightSchema,
     },
     wrapToolHandler('controlLight', async (args: ControlLightArgs) => {
       const missing = await entityNotFoundResult(client, args.entity_id);
