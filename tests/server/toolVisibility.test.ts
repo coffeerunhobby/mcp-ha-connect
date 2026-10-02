@@ -12,6 +12,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createServer } from '../../src/server/common.js';
 import { Role, Permission } from '../../src/permissions/index.js';
 import { getToolRequiredPermission } from '../../src/tools/common.js';
+import { canReadAnyResource } from '../../src/tools/omada/graph.js';
 
 // Registration never calls the HA client; a stub is enough to register HA tools.
 const haClient = {} as never;
@@ -90,5 +91,40 @@ describe('tools/list visibility by caller permissions', () => {
       await client.close();
       await server.close();
     }
+  });
+});
+
+describe('omada_read visibility (per-path RBAC tool)', () => {
+  // Graph mode registers omada_browse + omada_read; registration never calls the client.
+  async function listOmadaTools(callerPermissions: number): Promise<string[]> {
+    const server = createServer({ omadaClient: {} as never, toolRegistrationMode: 'graph', callerPermissions });
+    const client = new Client({ name: 'visibility-test', version: '0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const { tools } = await client.listTools();
+      return tools.map((t) => t.name).filter((n) => n.startsWith('omada_'));
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  }
+
+  it('is hidden from a caller who can read no Omada resource (NONE)', async () => {
+    expect(await listOmadaTools(Role.NONE)).not.toContain('omada_read');
+  });
+
+  it('is listed for a caller who can read some resources (QUERY)', async () => {
+    expect(await listOmadaTools(Permission.QUERY)).toContain('omada_read');
+  });
+
+  it('is listed for an ADMIN-only mask, which can still read the ADMIN-gated /security nodes', async () => {
+    expect(canReadAnyResource(Permission.ADMIN)).toBe(true);
+    expect(await listOmadaTools(Permission.ADMIN)).toContain('omada_read');
+  });
+
+  it('is hidden for a mask that matches no node (e.g. NOTIFY only)', async () => {
+    expect(canReadAnyResource(Permission.NOTIFY)).toBe(false);
+    expect(await listOmadaTools(Permission.NOTIFY)).not.toContain('omada_read');
   });
 });

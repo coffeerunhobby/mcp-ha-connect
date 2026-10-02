@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Home Assistant MCP Wrapper",
-    "version": "1.7.5",
+    "version": "1.7.6",
     "description": "REST endpoints that wrap MCP tools for Home Assistant integration."
   },
   "servers": [

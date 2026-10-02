@@ -44,18 +44,11 @@ Home Assistant, TP-Link Omada, and Local AI integration.
 
 ## Secrets & Credentials
 
-All secrets live in the NAS `.env` file and as **Windows User environment variables**.
-Never store token values in source files, commit messages, or this file.
-
-| Variable | Purpose |
-|---|---|
-| `GHCR_TOKEN` | GitHub PAT with `write:packages` scope — for the Docker push (step 5) |
-
-### Retrieve for use
-
-```powershell
-$ghcrToken = [Environment]::GetEnvironmentVariable('GHCR_TOKEN', 'User')
-```
+Server secrets live in the NAS `.env` file. The one release secret — the GHCR push token
+(a GitHub classic PAT with `write:packages`, used for the Docker push in step 5) — lives only
+in the maintainer's password manager. Never store it as an environment variable, in a file, in
+a commit, in chat, or in this file; fetch it at push time and pipe it to `docker login
+--password-stdin`.
 
 ### npm publishing needs no token
 
@@ -121,9 +114,9 @@ WSL2 Ubuntu-24.04**. CI's `docker-smoke` job only *boot-tests* the image — it 
 **not** push to GHCR, so this push is the one genuinely manual release leg.
 
 ```powershell
-# GHCR login — token from Windows User env, piped over stdin so it is never echoed
-$t = [Environment]::GetEnvironmentVariable('GHCR_TOKEN', 'User')
-$t | wsl -d Ubuntu-24.04 -- bash -lc "docker login ghcr.io -u coffeerunhobby --password-stdin"
+# GHCR login — token fetched from the maintainer's password manager at push time and piped
+# over stdin (never a command-line arg or env var). WSL keeps the login for the push below.
+<token from password manager> | wsl -d Ubuntu-24.04 -- bash -lc "docker login ghcr.io -u coffeerunhobby --password-stdin"
 
 # Build (repo is /mnt/c/workspace/mcp inside WSL) + push both tags
 wsl -d Ubuntu-24.04 -- bash -lc "cd /mnt/c/workspace/mcp && docker build --no-cache -t ghcr.io/coffeerunhobby/mcp-ha-connect:X.Y.Z -t ghcr.io/coffeerunhobby/mcp-ha-connect:latest ."

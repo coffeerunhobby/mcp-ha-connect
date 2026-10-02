@@ -19,8 +19,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { OmadaClient } from '../../omadaClient/index.js';
 import { hasPermission, getPermissionNames } from '../../permissions/index.js';
-import { toToolResult, wrapToolHandler, getCallerPermissions, Permission, type ToolExtra } from '../common.js';
-import { childrenOf, getResourceNode, normalizePath, type ReadArgs, type ResourceNode } from './namespace.js';
+import { toToolResult, wrapToolHandler, getCallerPermissions, setToolVisibilityRule, Permission, type ToolExtra } from '../common.js';
+import { OMADA_RESOURCES, childrenOf, getResourceNode, normalizePath, type ReadArgs, type ResourceNode } from './namespace.js';
 
 /** Compact, model-friendly metadata for a node (used in browse output). */
 function nodeSummary(node: ResourceNode): Record<string, unknown> {
@@ -91,8 +91,18 @@ export function createBrowseHandler(client: OmadaClient) {
   );
 }
 
+/**
+ * `omada_read` is usable iff the caller holds the permission of at least one readable
+ * (fetchable) resource node; otherwise it is hidden from `tools/list`. Kept next to the
+ * handler so the rule cannot drift from the per-path check it summarises.
+ */
+export function canReadAnyResource(callerPermissions: number): boolean {
+  return OMADA_RESOURCES.some((node) => node.fetch !== undefined && hasPermission(callerPermissions, node.permission));
+}
+
 /** Shared `omada_read` handler — same dual-face reuse as createBrowseHandler. */
 export function createReadHandler(client: OmadaClient) {
+  setToolVisibilityRule('omada_read', canReadAnyResource);
   // No static permission: each path declares its own, enforced below (fail-closed).
   return wrapToolHandler(
     'omada_read',

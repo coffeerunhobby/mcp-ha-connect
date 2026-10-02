@@ -8,8 +8,7 @@ import type { HaClient } from '../haClient/index.js';
 import type { LocalAIClient } from '../localAI/index.js';
 import type { OmadaClient } from '../omadaClient/index.js';
 import { registerAllTools } from '../tools/index.js';
-import { getToolRequiredPermission } from '../tools/common.js';
-import { hasPermission } from '../permissions/index.js';
+import { isToolVisibleTo } from '../tools/common.js';
 import type { OmadaRegistrationMode } from '../tools/omada/index.js';
 import type { RestAction } from '../tools/infra/index.js';
 import { registerAllResources } from '../resources/index.js';
@@ -95,15 +94,15 @@ export function createServer(options: CreateServerOptions): McpServer {
 }
 
 /**
- * Disable every tool whose static permission the caller lacks. Disabled tools are
- * omitted from `tools/list`, so an LLM client only plans with tools it can use.
+ * Disable every tool the caller cannot use (it lacks the tool's static permission, or the
+ * tool's visibility rule — e.g. omada_read's per-path one — finds nothing usable). Disabled
+ * tools are omitted from `tools/list`, so an LLM client only plans with tools it can use.
  * Returns the number of tools hidden.
  */
 export function hideUnpermittedTools(tools: Map<string, RegisteredTool>, callerPermissions: number): number {
   let hidden = 0;
   for (const [name, tool] of tools) {
-    const required = getToolRequiredPermission(name);
-    if (required !== undefined && !hasPermission(callerPermissions, required)) {
+    if (!isToolVisibleTo(name, callerPermissions)) {
       tool.disable();
       hidden++;
     }

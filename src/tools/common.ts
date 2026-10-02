@@ -87,6 +87,32 @@ export function getToolRequiredPermission(name: string): number | undefined {
 }
 
 /**
+ * Visibility rules for tools that gate per call rather than with one static bit
+ * (e.g. `omada_read`, whose permission depends on the resource path). The rule
+ * answers "can this caller use the tool at all?".
+ */
+const toolVisibilityRules = new Map<string, (callerPermissions: number) => boolean>();
+
+/** Declare when a tool without a static permission should be listed to a caller. */
+export function setToolVisibilityRule(name: string, isUsable: (callerPermissions: number) => boolean): void {
+  toolVisibilityRules.set(name, isUsable);
+}
+
+/**
+ * Whether `tools/list` should offer `name` to a caller: false when the caller lacks
+ * the tool's static permission, or when its visibility rule says the caller can use
+ * none of it. Tools with neither stay visible (their handlers still enforce RBAC).
+ */
+export function isToolVisibleTo(name: string, callerPermissions: number): boolean {
+  const required = toolPermissions.get(name);
+  if (required !== undefined && !hasPermission(callerPermissions, required)) {
+    return false;
+  }
+  const rule = toolVisibilityRules.get(name);
+  return rule ? rule(callerPermissions) : true;
+}
+
+/**
  * Wrap a tool handler with logging, error handling, and permission checking
  * Includes session ID and args in logs for debugging
  *

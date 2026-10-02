@@ -1,6 +1,6 @@
 {
   "name": "@coffeerunhobby/mcp-ha-connect",
-  "version": "1.7.5",
+  "version": "1.7.6",
   "description": "Smart home MCP server for Home Assistant plus Local AI integration",
   "type": "module",
   "main": "dist/index.js",
