@@ -77,7 +77,7 @@ function getOmadaInstructions(): string {
     'RATE LIMITS: Use omada_getRateLimitProfiles before setting limits. omada_setClientRateLimitProfile applies predefined profiles; omada_setClientRateLimit sets custom Kbps values.',
 
     // Remote-hands actions (v1.6)
-    'ACTIONS: omada_cyclePoePort power-cycles PoE ports (remote-reboots APs/cameras; switch MAC via omada_listDevices). omada_setSsidEnabled toggles an SSID by name (guest WiFi on/off).',
+    'ACTIONS: omada_cyclePoePort power-cycles PoE ports (remote-reboots APs/cameras; switch MAC via omada_listDevices). omada_setSsidEnabled toggles an SSID by name (guest WiFi on/off). omada_setSiteNtpServers sets site NTP.',
 
     // Read-only preference
     'SAFETY: Prefer read-only Omada tools. Rate limits, PoE cycling, and SSID toggles affect real availability - confirm with user before applying.',

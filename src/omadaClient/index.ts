@@ -25,7 +25,7 @@ import { DeviceOperations } from './device.js';
 import { NetworkOperations, type SsidEnableResult } from './network.js';
 import { RequestHandler, type RequestOptions } from './request.js';
 import { SecurityOperations } from './security.js';
-import { SiteOperations } from './site.js';
+import { SiteOperations, type SiteNtpChangeResult } from './site.js';
 
 export interface OmadaClientOptions {
     baseUrl: string;
@@ -92,6 +92,17 @@ export class OmadaClient {
     // Site operations
     public async listSites(): Promise<OmadaSiteSummary[]> {
         return await this.siteOps.listSites();
+    }
+
+    public async getSiteNtpStatus(siteId?: string): Promise<unknown> {
+        return await this.siteOps.getSiteNtpStatus(siteId);
+    }
+
+    public async setSiteNtpServers(
+        servers: string[],
+        options: { enabled?: boolean; siteId?: string; dryRun?: boolean } = {}
+    ): Promise<SiteNtpChangeResult> {
+        return await this.siteOps.setSiteNtpServers(servers, options);
     }
 
     // Device operations

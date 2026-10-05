@@ -1,6 +1,144 @@
-import type { OmadaSiteSummary } from '../types/index.js';
+import type { OmadaApiResponse, OmadaSiteSummary } from '../types/index.js';
 
 import type { RequestHandler } from './request.js';
+
+/** Omada caps a site's NTP server list at 5 entries. */
+export const MAX_NTP_SERVERS = 5;
+
+/**
+ * The controller's own pattern for an NTP server address (`ntp server` schema in
+ * the Open API spec): 3-64 chars, dot-separated labels. It accepts hostnames and
+ * dotted IPv4 alike.
+ */
+const NTP_ADDRESS_PATTERN = /^(?=.{3,64}$)[a-zA-Z0-9][-a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-a-zA-Z0-9]{0,62})+$/;
+
+const IPV4_LIKE = /^[0-9.]+$/;
+
+/**
+ * Validate one NTP server address before it reaches the controller. Anything that
+ * looks numeric must be a real IPv4 address (the controller's pattern alone would
+ * accept `999.1.1.1`).
+ * @returns an error message, or null if the address is acceptable
+ */
+export function ntpAddressError(address: string): string | null {
+    if (!NTP_ADDRESS_PATTERN.test(address)) {
+        return `'${address}' is not a valid NTP server address (expected a hostname or IPv4 address)`;
+    }
+    if (IPV4_LIKE.test(address)) {
+        const octets = address.split('.');
+        if (octets.length !== 4 || octets.some((o) => o === '' || Number(o) > 255 || (o.length > 1 && o.startsWith('0')))) {
+            return `'${address}' is not a valid IPv4 address`;
+        }
+    }
+    return null;
+}
+
+/** Daylight-saving start/end point, identical in the site GET and PUT shapes. */
+export interface DstTime {
+    month: number;
+    serial: number;
+    day: number;
+    hour: number;
+    minute: number;
+}
+
+/** `GET /sites/{siteId}` result (OperationId: getSiteEntity). */
+export interface OmadaSiteInfo {
+    siteId?: string;
+    name?: string;
+    type?: number;
+    tagIds?: string[];
+    region: string;
+    timeZone: string;
+    scenario: string;
+    ntpEnable?: boolean;
+    ntpServers?: string[];
+    dst?: {
+        enable?: boolean;
+        mode?: number;
+        start?: DstTime;
+        end?: DstTime;
+        offset?: number;
+        // Read-only fields the PUT does not accept: status, startTime, endTime, nextStart, ...
+        [readOnly: string]: unknown;
+    };
+    longitude?: number;
+    latitude?: number;
+    address?: string;
+    supportES?: boolean;
+    supportL2?: boolean;
+}
+
+/** `PUT /sites/{siteId}` body (UpdateSiteEntity). */
+export interface SiteUpdateBody {
+    name?: string;
+    region: string;
+    timeZone: string;
+    scenario: string;
+    tagIds?: string[];
+    ntpEnable: boolean;
+    ntpServers: Array<{ address: string }>;
+    dst?: { enable?: boolean; mode?: number; start?: DstTime; end?: DstTime; offset?: number };
+    longitude?: number;
+    latitude?: number;
+    address?: string;
+    supportES?: boolean;
+    supportL2?: boolean;
+}
+
+export interface SiteNtpChangeResult {
+    siteId: string;
+    siteName?: string;
+    applied: boolean;
+    before: { ntpEnable?: boolean; ntpServers: string[] };
+    after: { ntpEnable: boolean; ntpServers: string[] };
+    /** The exact body sent (or, on a dry run, that would be sent) to PUT /sites/{siteId}. */
+    request: SiteUpdateBody;
+}
+
+/**
+ * Build the full-replacement `PUT /sites/{siteId}` body from the site's current
+ * settings, changing only the NTP fields.
+ *
+ * The PUT replaces the site's settings as a whole (region, timeZone and scenario
+ * are required), so every writable field is carried over from the GET. The GET
+ * and PUT shapes differ: NTP servers are plain strings on read but
+ * `{ address }` objects on write, and the read-only DST fields (status,
+ * timestamps) must be dropped.
+ */
+export function buildSiteUpdateBody(site: OmadaSiteInfo, ntpServers: string[], ntpEnable: boolean): SiteUpdateBody {
+    for (const field of ['region', 'timeZone', 'scenario'] as const) {
+        if (typeof site[field] !== 'string' || site[field] === '') {
+            throw new Error(`Site info is missing '${field}', which the controller requires to update the site; refusing to write`);
+        }
+    }
+
+    const body: SiteUpdateBody = {
+        region: site.region,
+        timeZone: site.timeZone,
+        scenario: site.scenario,
+        ntpEnable,
+        ntpServers: ntpServers.map((address) => ({ address })),
+    };
+    if (site.name !== undefined) body.name = site.name;
+    if (site.tagIds !== undefined) body.tagIds = site.tagIds;
+    if (site.longitude !== undefined) body.longitude = site.longitude;
+    if (site.latitude !== undefined) body.latitude = site.latitude;
+    if (site.address !== undefined) body.address = site.address;
+    if (site.supportES !== undefined) body.supportES = site.supportES;
+    if (site.supportL2 !== undefined) body.supportL2 = site.supportL2;
+    if (site.dst) {
+        const { enable, mode, start, end, offset } = site.dst;
+        const dst: NonNullable<SiteUpdateBody['dst']> = {};
+        if (enable !== undefined) dst.enable = enable;
+        if (mode !== undefined) dst.mode = mode;
+        if (start !== undefined) dst.start = start;
+        if (end !== undefined) dst.end = end;
+        if (offset !== undefined) dst.offset = offset;
+        body.dst = dst;
+    }
+    return body;
+}
 
 /**
  * Validate a configured default site (`OMADA_SITE_ID`) against the controller's
@@ -62,5 +200,82 @@ export class SiteOperations {
         }
 
         throw new Error('A site id must be provided either in the environment or as a parameter. Use omada_browse at path / to discover available sites and their IDs.');
+    }
+
+    /**
+     * Get a site's full settings.
+     * OperationId: getSiteEntity
+     */
+    public async getSiteInfo(siteId?: string): Promise<OmadaSiteInfo> {
+        const resolvedSiteId = this.resolveSiteId(siteId);
+        const response = await this.request.get<OmadaApiResponse<OmadaSiteInfo>>(
+            this.buildPath(`/sites/${encodeURIComponent(resolvedSiteId)}`)
+        );
+        return this.request.ensureSuccess(response);
+    }
+
+    /**
+     * Get a site's NTP server status and configuration.
+     * OperationId: getNtpStatus
+     */
+    public async getSiteNtpStatus(siteId?: string): Promise<unknown> {
+        const resolvedSiteId = this.resolveSiteId(siteId);
+        const response = await this.request.get<OmadaApiResponse<unknown>>(
+            this.buildPath(`/sites/${encodeURIComponent(resolvedSiteId)}/setting/ntp`)
+        );
+        return this.request.ensureSuccess(response);
+    }
+
+    /**
+     * Set a site's NTP servers (and NTP on/off) by read-modify-write of the site
+     * settings: Omada has no NTP-only write, NTP lives on `PUT /sites/{siteId}`.
+     * With `dryRun`, returns the exact body without writing.
+     * OperationId: modifySite
+     */
+    public async setSiteNtpServers(
+        servers: string[],
+        options: { enabled?: boolean; siteId?: string; dryRun?: boolean } = {}
+    ): Promise<SiteNtpChangeResult> {
+        const enabled = options.enabled ?? true;
+        if (enabled && servers.length === 0) {
+            throw new Error('At least one NTP server is required to enable NTP');
+        }
+        if (servers.length > MAX_NTP_SERVERS) {
+            throw new Error(`Omada allows at most ${MAX_NTP_SERVERS} NTP servers per site (got ${servers.length})`);
+        }
+        const errors = servers.map(ntpAddressError).filter((e): e is string => e !== null);
+        if (errors.length > 0) {
+            throw new Error(errors.join('; '));
+        }
+        if (new Set(servers).size !== servers.length) {
+            throw new Error('NTP server list contains duplicates');
+        }
+
+        const resolvedSiteId = this.resolveSiteId(options.siteId);
+        const site = await this.getSiteInfo(resolvedSiteId);
+        const body = buildSiteUpdateBody(site, servers, enabled);
+        const result: SiteNtpChangeResult = {
+            siteId: resolvedSiteId,
+            siteName: site.name,
+            applied: false,
+            before: { ntpEnable: site.ntpEnable, ntpServers: site.ntpServers ?? [] },
+            after: { ntpEnable: enabled, ntpServers: servers },
+            request: body,
+        };
+        if (options.dryRun) {
+            return result;
+        }
+
+        const response = await this.request.put<OmadaApiResponse<unknown>>(
+            this.buildPath(`/sites/${encodeURIComponent(resolvedSiteId)}`),
+            body
+        );
+        this.request.ensureSuccess(response);
+
+        // Report what the controller now holds, not what we asked for.
+        const updated = await this.getSiteInfo(resolvedSiteId);
+        result.applied = true;
+        result.after = { ntpEnable: updated.ntpEnable ?? enabled, ntpServers: updated.ntpServers ?? [] };
+        return result;
     }
 }

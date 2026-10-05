@@ -361,6 +361,14 @@ export const OMADA_RESOURCES: ResourceNode[] = [
     fetch: (c, a) => c.getInternetInfo(a.siteId),
   },
   {
+    path: '/network/ntp',
+    kind: 'leaf',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'NTP (network time) server configuration and status for the site.',
+    fetch: (c, a) => c.getSiteNtpStatus(a.siteId),
+  },
+  {
     path: '/network/lan-networks',
     kind: 'collection',
     permission: Q,

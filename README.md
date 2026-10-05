@@ -146,7 +146,7 @@ high-value questions an LLM can actually answer about your network:
 | `listCalendars` | List all calendar entities |
 | `getCalendarEvents` | Get events from one or all calendars |
 
-### Omada Network Tools (24)
+### Omada Network Tools (30)
 
 #### Site Tools
 
@@ -183,6 +183,15 @@ high-value questions an LLM can actually answer about your network:
 | `omada_setClientRateLimitProfile` | Apply a rate limit profile to a client |
 | `omada_disableClientRateLimit` | Remove bandwidth limits from a client |
 
+#### Client and Device Actions
+
+| Tool | Description |
+|------|-------------|
+| `omada_blockClient` | Block a client from the network |
+| `omada_unblockClient` | Unblock a previously blocked client |
+| `omada_cyclePoePort` | Power-cycle PoE switch ports (remote-reboots APs/cameras) |
+| `omada_setSsidEnabled` | Turn an SSID (e.g. guest WiFi) on or off by name |
+
 #### Security Tools
 
 | Tool | Description |
@@ -201,6 +210,8 @@ high-value questions an LLM can actually answer about your network:
 | `omada_getSsidList` | Get SSID list for a WLAN group |
 | `omada_getSsidDetail` | Get detailed SSID configuration |
 | `omada_getFirewallSetting` | Get firewall configuration for a site |
+| `omada_getSiteNtpStatus` | Get the site's NTP server configuration and status |
+| `omada_setSiteNtpServers` | Replace the site's NTP server list (needs `CONFIGURE`; `dryRun` previews the change) |
 
 ### AI Tools (1)
 

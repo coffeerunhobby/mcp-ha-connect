@@ -54,6 +54,13 @@ export class RequestHandler {
     }
 
     /**
+     * Make a PUT request to the Omada API.
+     */
+    public async put<T>(path: string, data?: unknown): Promise<T> {
+        return await this.request<T>({ method: 'PUT', url: path, data });
+    }
+
+    /**
      * Make a POST request to the Omada API.
      */
     public async post<T>(path: string, data?: unknown): Promise<T> {
