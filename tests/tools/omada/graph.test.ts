@@ -31,6 +31,7 @@ function createMockClient() {
     getClient: vi.fn(),
     listMostActiveClients: vi.fn(),
     getInternetInfo: vi.fn(),
+    getSiteNtpStatus: vi.fn(),
     getLanNetworkList: vi.fn(),
     getLanProfileList: vi.fn(),
     getWlanGroupList: vi.fn(),
@@ -291,6 +292,22 @@ describe('omada_read', () => {
     expect(isError).toBe(true);
     expect(data.error).toBe('Missing parameters');
     expect(data.missing).toEqual(['wlanId']);
+  });
+
+  it('reads /network/ntp via getSiteNtpStatus, forwarding an explicit siteId', async () => {
+    (client.getSiteNtpStatus as ReturnType<typeof vi.fn>).mockResolvedValue({ ntpEnable: true, ntpServers: ['82.76.255.14'] });
+    const { isError, data } = parseResult(await read({ path: '/network/ntp', siteId: 'site9' }, readonlyExtra));
+    expect(isError).toBeFalsy();
+    expect(data).toEqual({ ntpEnable: true, ntpServers: ['82.76.255.14'] });
+    expect(client.getSiteNtpStatus).toHaveBeenCalledWith('site9');
+    expect(client.getInternetInfo).not.toHaveBeenCalled();
+  });
+
+  it('denies /network/ntp without QUERY and never calls the controller', async () => {
+    const { isError, data } = parseResult(await read({ path: '/network/ntp' }, noPermsExtra));
+    expect(isError).toBe(true);
+    expect(data.error).toBe('Permission denied');
+    expect(client.getSiteNtpStatus).not.toHaveBeenCalled();
   });
 
   it('enforces per-path permission (fail closed) for under-privileged callers', async () => {

@@ -173,6 +173,9 @@ export function checkConfiguredSite(
  * Site-related operations for the Omada API.
  */
 export class SiteOperations {
+    /** Tail of the queued site-settings writes, per site (see withSiteLock). */
+    private readonly siteWriteQueues = new Map<string, Promise<void>>();
+
     constructor(
         private readonly request: RequestHandler,
         private readonly buildPath: (path: string) => string,
@@ -227,9 +230,40 @@ export class SiteOperations {
     }
 
     /**
+     * Run site-settings writes for one site one at a time, so two read-modify-write
+     * calls from this server never interleave (the second reads after the first
+     * has written).
+     */
+    private async withSiteLock<T>(siteId: string, fn: () => Promise<T>): Promise<T> {
+        const previous = this.siteWriteQueues.get(siteId) ?? Promise.resolve();
+        let release!: () => void;
+        const current = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const tail = previous.then(() => current);
+        this.siteWriteQueues.set(siteId, tail);
+        await previous;
+        try {
+            return await fn();
+        } finally {
+            release();
+            if (this.siteWriteQueues.get(siteId) === tail) {
+                this.siteWriteQueues.delete(siteId);
+            }
+        }
+    }
+
+    /**
      * Set a site's NTP servers (and NTP on/off) by read-modify-write of the site
      * settings: Omada has no NTP-only write, NTP lives on `PUT /sites/{siteId}`.
      * With `dryRun`, returns the exact body without writing.
+     *
+     * The controller offers no conditional update (no version field or If-Match),
+     * so a change made elsewhere between our read and our write would be undone.
+     * Writes are serialized per site within this server, and the site is re-read
+     * just before the PUT: if anything other than NTP changed since the first
+     * read, the write is refused. Only the moment between that re-read and the
+     * PUT remains unprotected.
      * OperationId: modifySite
      */
     public async setSiteNtpServers(
@@ -252,30 +286,44 @@ export class SiteOperations {
         }
 
         const resolvedSiteId = this.resolveSiteId(options.siteId);
-        const site = await this.getSiteInfo(resolvedSiteId);
-        const body = buildSiteUpdateBody(site, servers, enabled);
-        const result: SiteNtpChangeResult = {
-            siteId: resolvedSiteId,
+        if (options.dryRun) {
+            return this.planNtpChange(resolvedSiteId, await this.getSiteInfo(resolvedSiteId), servers, enabled);
+        }
+
+        return await this.withSiteLock(resolvedSiteId, async () => {
+            const site = await this.getSiteInfo(resolvedSiteId);
+            const result = this.planNtpChange(resolvedSiteId, site, servers, enabled);
+
+            // Re-read right before writing; refuse if a non-NTP setting moved.
+            const latest = await this.getSiteInfo(resolvedSiteId);
+            if (JSON.stringify(buildSiteUpdateBody(latest, servers, enabled)) !== JSON.stringify(result.request)) {
+                throw new Error(
+                    'Site settings changed while preparing the NTP update (another change is in progress); nothing was written. Try again.'
+                );
+            }
+
+            const response = await this.request.put<OmadaApiResponse<unknown>>(
+                this.buildPath(`/sites/${encodeURIComponent(resolvedSiteId)}`),
+                result.request
+            );
+            this.request.ensureSuccess(response);
+
+            // Report what the controller now holds, not what we asked for.
+            const updated = await this.getSiteInfo(resolvedSiteId);
+            result.applied = true;
+            result.after = { ntpEnable: updated.ntpEnable ?? enabled, ntpServers: updated.ntpServers ?? [] };
+            return result;
+        });
+    }
+
+    private planNtpChange(siteId: string, site: OmadaSiteInfo, servers: string[], enabled: boolean): SiteNtpChangeResult {
+        return {
+            siteId,
             siteName: site.name,
             applied: false,
             before: { ntpEnable: site.ntpEnable, ntpServers: site.ntpServers ?? [] },
             after: { ntpEnable: enabled, ntpServers: servers },
-            request: body,
+            request: buildSiteUpdateBody(site, servers, enabled),
         };
-        if (options.dryRun) {
-            return result;
-        }
-
-        const response = await this.request.put<OmadaApiResponse<unknown>>(
-            this.buildPath(`/sites/${encodeURIComponent(resolvedSiteId)}`),
-            body
-        );
-        this.request.ensureSuccess(response);
-
-        // Report what the controller now holds, not what we asked for.
-        const updated = await this.getSiteInfo(resolvedSiteId);
-        result.applied = true;
-        result.after = { ntpEnable: updated.ntpEnable ?? enabled, ntpServers: updated.ntpServers ?? [] };
-        return result;
     }
 }

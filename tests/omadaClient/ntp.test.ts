@@ -171,6 +171,7 @@ describe('SiteOperations NTP', () => {
     it('PUTs the full site body, then reports what the controller holds afterwards', async () => {
         request.get
             .mockResolvedValueOnce(ok(siteFixture()))
+            .mockResolvedValueOnce(ok(siteFixture()))
             .mockResolvedValueOnce(ok(siteFixture({ ntpEnable: true, ntpServers: APPROVED })));
         request.put.mockResolvedValue(ok());
 
@@ -181,7 +182,7 @@ describe('SiteOperations NTP', () => {
             '/openapi/v1/omadac1/sites/site-1',
             buildSiteUpdateBody(siteFixture(), APPROVED, true)
         );
-        expect(request.get).toHaveBeenCalledTimes(2);
+        expect(request.get).toHaveBeenCalledTimes(3);
         expect(result).toMatchObject({
             siteId: 'site-1',
             siteName: 'Tower',
@@ -193,6 +194,7 @@ describe('SiteOperations NTP', () => {
 
     it('reports the controller state, even when it differs from the request', async () => {
         request.get
+            .mockResolvedValueOnce(ok(siteFixture()))
             .mockResolvedValueOnce(ok(siteFixture()))
             .mockResolvedValueOnce(ok(siteFixture({ ntpEnable: true, ntpServers: ['82.76.255.14'] })));
         request.put.mockResolvedValue(ok());
@@ -235,7 +237,60 @@ describe('SiteOperations NTP', () => {
         request.put.mockResolvedValue({ errorCode: -1, msg: 'Permission denied' });
 
         await expect(ops.setSiteNtpServers(APPROVED)).rejects.toThrow('Permission denied');
-        expect(request.get).toHaveBeenCalledTimes(1);
+        expect(request.get).toHaveBeenCalledTimes(2);
+    });
+
+    it('refuses to write when a non-NTP setting changed between the read and the write', async () => {
+        request.get
+            .mockResolvedValueOnce(ok(siteFixture()))
+            .mockResolvedValueOnce(ok(siteFixture({ timeZone: 'Europe/London' })));
+
+        await expect(ops.setSiteNtpServers(APPROVED)).rejects.toThrow(/changed while preparing.*nothing was written/);
+        expect(request.put).not.toHaveBeenCalled();
+    });
+
+    it('ignores NTP-only differences between the two reads (NTP is what is being set)', async () => {
+        request.get
+            .mockResolvedValueOnce(ok(siteFixture()))
+            .mockResolvedValueOnce(ok(siteFixture({ ntpServers: ['someone.else.org'] })))
+            .mockResolvedValueOnce(ok(siteFixture({ ntpEnable: true, ntpServers: APPROVED })));
+        request.put.mockResolvedValue(ok());
+
+        await expect(ops.setSiteNtpServers(APPROVED)).resolves.toMatchObject({ applied: true });
+    });
+
+    it('serializes concurrent writes to the same site: the second reads only after the first wrote', async () => {
+        const events: string[] = [];
+        let state = siteFixture();
+        request.get.mockImplementation(async () => {
+            events.push('get');
+            await new Promise((r) => setTimeout(r, 5));
+            return ok(state);
+        });
+        request.put.mockImplementation(async (_path: string, body: { ntpServers: Array<{ address: string }> }) => {
+            events.push('put');
+            await new Promise((r) => setTimeout(r, 5));
+            state = { ...state, ntpEnable: true, ntpServers: body.ntpServers.map((s) => s.address) };
+            return ok();
+        });
+
+        const [first, second] = await Promise.all([
+            ops.setSiteNtpServers(['82.76.255.14']),
+            ops.setSiteNtpServers(['194.102.58.251']),
+        ]);
+
+        expect(events).toEqual(['get', 'get', 'put', 'get', 'get', 'get', 'put', 'get']);
+        expect(first.after.ntpServers).toEqual(['82.76.255.14']);
+        expect(second.before.ntpServers).toEqual(['82.76.255.14']);
+        expect(second.after.ntpServers).toEqual(['194.102.58.251']);
+    });
+
+    it('a failed write does not block the next one', async () => {
+        request.get.mockResolvedValue(ok(siteFixture()));
+        request.put.mockResolvedValueOnce({ errorCode: -1, msg: 'boom' }).mockResolvedValueOnce(ok());
+
+        await expect(ops.setSiteNtpServers(APPROVED)).rejects.toThrow('boom');
+        await expect(ops.setSiteNtpServers(APPROVED)).resolves.toMatchObject({ applied: true });
     });
 
     it('does not write when the site info lacks a required field', async () => {
