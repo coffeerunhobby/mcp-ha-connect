@@ -132,12 +132,27 @@ export function buildSiteUpdateBody(site: OmadaSiteInfo, ntpServers: string[], n
         const dst: NonNullable<SiteUpdateBody['dst']> = {};
         if (enable !== undefined) dst.enable = enable;
         if (mode !== undefined) dst.mode = mode;
-        if (start !== undefined) dst.start = start;
-        if (end !== undefined) dst.end = end;
+        // With DST off the controller returns start/end as `{}` but rejects them on
+        // write ("should not be null"), so only complete points are sent back.
+        if (isCompleteDstTime(start)) dst.start = start;
+        if (isCompleteDstTime(end)) dst.end = end;
         if (offset !== undefined) dst.offset = offset;
+        if (enable === true && (dst.start === undefined || dst.end === undefined)) {
+            throw new Error('Site has daylight saving enabled but an incomplete start/end; refusing to write');
+        }
         body.dst = dst;
     }
     return body;
+}
+
+const DST_TIME_FIELDS = ['month', 'serial', 'day', 'hour', 'minute'] as const;
+
+function isCompleteDstTime(value: unknown): value is DstTime {
+    if (typeof value !== 'object' || value === null) {
+        return false;
+    }
+    const point = value as Record<string, unknown>;
+    return DST_TIME_FIELDS.every((field) => typeof point[field] === 'number');
 }
 
 /**

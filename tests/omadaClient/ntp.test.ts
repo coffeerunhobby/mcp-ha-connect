@@ -126,6 +126,21 @@ describe('buildSiteUpdateBody', () => {
         expect(Object.keys(body.dst as object).sort()).toEqual(['enable', 'end', 'mode', 'offset', 'start']);
     });
 
+    it('drops the empty DST start/end the controller returns when DST is off (it rejects them on write)', () => {
+        // Shape seen live on Omada: DST off, start/end as empty objects.
+        const site = siteFixture({ dst: { enable: false, mode: 0, start: {} as never, end: {} as never } });
+
+        expect(buildSiteUpdateBody(site, APPROVED, true).dst).toEqual({ enable: false, mode: 0 });
+    });
+
+    it('refuses to write when DST is on but its start/end is incomplete', () => {
+        const site = siteFixture({
+            dst: { enable: true, mode: 2, start: { month: 3 } as never, end: { month: 10, serial: 5, day: 7, hour: 4, minute: 0 } },
+        });
+
+        expect(() => buildSiteUpdateBody(site, APPROVED, true)).toThrow(/daylight saving enabled but an incomplete start\/end/);
+    });
+
     it('omits optional fields the site does not have instead of sending undefined', () => {
         const site: OmadaSiteInfo = { region: 'RO', timeZone: 'Europe/Bucharest', scenario: 'Home' };
         const body = buildSiteUpdateBody(site, APPROVED, true);
