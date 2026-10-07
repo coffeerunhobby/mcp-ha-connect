@@ -160,7 +160,7 @@ Known limit: cancellations and answers are kept in memory. After a restart, some
 | `listCalendars` | List all calendar entities |
 | `getCalendarEvents` | Get events from one or all calendars |
 
-### Omada Network Tools (30)
+### Omada Network Tools (32)
 
 #### Site Tools
 
@@ -202,7 +202,9 @@ Known limit: cancellations and answers are kept in memory. After a restart, some
 | Tool | Description |
 |------|-------------|
 | `omada_blockClient` | Block a client from the network |
-| `omada_unblockClient` | Unblock a previously blocked client |
+| `omada_unblockClient` | Unblock a previously blocked client (explains when Omada's API can no longer reach an offline client) |
+| `omada_listBlockedClients` | List blocked clients, offline ones included |
+| `omada_deleteClient` | Delete a client's record (name, history, block) to clear a block unblock can't reach (needs `CONFIGURE`) |
 | `omada_cyclePoePort` | Power-cycle PoE switch ports (remote-reboots APs/cameras) |
 | `omada_setSsidEnabled` | Turn an SSID (e.g. guest WiFi) on or off by name |
 

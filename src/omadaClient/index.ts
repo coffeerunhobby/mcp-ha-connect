@@ -20,7 +20,7 @@ import type {
 } from '../types/index.js';
 
 import { AuthManager } from './auth.js';
-import { ClientOperations } from './client.js';
+import { ClientOperations, type KnownClient } from './client.js';
 import { DeviceOperations } from './device.js';
 import { NetworkOperations, type SsidEnableResult } from './network.js';
 import { RequestHandler, type RequestOptions } from './request.js';
@@ -171,6 +171,14 @@ export class OmadaClient {
 
     public async unblockClient(clientMac: string, siteId?: string): Promise<ClientBlockStatus> {
         return await this.clientOps.unblockClient(clientMac, siteId);
+    }
+
+    public async listBlockedClients(siteId?: string): Promise<KnownClient[]> {
+        return await this.clientOps.listBlockedClients(siteId);
+    }
+
+    public async deleteClient(clientMac: string, siteId?: string): Promise<{ mac: string; siteId: string; deleted: true }> {
+        return await this.clientOps.deleteClient(clientMac, siteId);
     }
 
     // Security operations

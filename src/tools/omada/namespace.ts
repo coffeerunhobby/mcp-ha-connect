@@ -292,6 +292,25 @@ export const OMADA_RESOURCES: ResourceNode[] = [
     fetch: (c, a) => c.listMostActiveClients(a.siteId),
   },
   {
+    path: '/clients/known',
+    kind: 'collection',
+    permission: Q,
+    paginated: true,
+    defaultPageSize: 50,
+    estimatedSize: 'medium',
+    description:
+      'Clients the controller remembers, online and offline, with their block state (paginated; use page/pageSize). ' +
+      'Blocked clients have block=true; the controller cannot filter by it, so check every page.',
+    fetch: (c, a) =>
+      c.readResource({
+        pathTemplate: '/sites/{siteId}/insight/clients',
+        siteId: a.siteId,
+        paginated: true,
+        page: a.page,
+        pageSize: a.pageSize,
+      }),
+  },
+  {
     path: '/clients/activity',
     kind: 'collection',
     permission: Q,

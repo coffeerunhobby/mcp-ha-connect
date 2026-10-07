@@ -7,6 +7,17 @@ import type { AuthManager } from './auth.js';
 
 const DEFAULT_PAGE_SIZE = 200;
 
+/** An error the Omada controller reported, with its structured errorCode when it gave one. */
+export class OmadaApiError extends Error {
+    constructor(
+        message: string,
+        readonly errorCode?: number
+    ) {
+        super(message);
+        this.name = 'OmadaApiError';
+    }
+}
+
 export interface RequestOptions {
     method?: string;
     url: string;
@@ -178,7 +189,7 @@ export class RequestHandler {
                 if (errorCode !== undefined && errorCode !== 0) {
                     parts.push(`(errorCode ${errorCode})`);
                 }
-                throw new Error(`Omada API request failed: ${parts.join(' ')}`);
+                throw new OmadaApiError(`Omada API request failed: ${parts.join(' ')}`, errorCode);
             }
 
             return responseData;
@@ -246,7 +257,7 @@ export class RequestHandler {
                 errorCode: response.errorCode,
                 message: response.msg,
             });
-            throw new Error(response.msg ?? 'Omada API request failed');
+            throw new OmadaApiError(response.msg ?? 'Omada API request failed', response.errorCode);
         }
 
         return (response.result ?? ({} as T)) as T;

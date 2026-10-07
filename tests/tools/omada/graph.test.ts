@@ -79,11 +79,11 @@ describe('Omada graph tools - registration', () => {
     expect(server.handlers.has('omada_read')).toBe(true);
   });
 
-  it('graph mode registers browse + read + 8 typed writes, and NO typed getters', () => {
+  it('graph mode registers browse + read + 9 typed writes, and NO typed getters', () => {
     const server = createMockServer();
     const client = createMockClient();
     const count = registerOmadaTools(server, client, 'graph');
-    expect(count).toBe(10);
+    expect(count).toBe(11);
     const names = [...server.handlers.keys()];
     expect(names).toContain('omada_browse');
     expect(names).toContain('omada_read');
@@ -93,10 +93,12 @@ describe('Omada graph tools - registration', () => {
     expect(names).toContain('omada_cyclePoePort');
     expect(names).toContain('omada_setSsidEnabled');
     expect(names).toContain('omada_setSiteNtpServers');
+    expect(names).toContain('omada_deleteClient');
     // Typed read getters must NOT be present in graph mode.
     expect(names).not.toContain('omada_listSites');
     expect(names).not.toContain('omada_getFirewallSetting');
     expect(names).not.toContain('omada_getSiteNtpStatus');
+    expect(names).not.toContain('omada_listBlockedClients');
   });
 
   it('eager mode (default) registers the typed getters, not the graph tools', () => {
@@ -308,6 +310,15 @@ describe('omada_read', () => {
     expect(isError).toBe(true);
     expect(data.error).toBe('Permission denied');
     expect(client.getSiteNtpStatus).not.toHaveBeenCalled();
+  });
+
+  it('reads /clients/known as one page of known clients (with block state)', async () => {
+    (client.readResource as ReturnType<typeof vi.fn>).mockResolvedValue({ totalRows: 1, data: [{ mac: 'AA', block: true }] });
+    await read({ path: '/clients/known', page: 3, pageSize: 20, siteId: 'site1' }, readonlyExtra);
+    expect(client.readResource).toHaveBeenCalledTimes(1);
+    expect(client.readResource).toHaveBeenCalledWith(
+      expect.objectContaining({ pathTemplate: '/sites/{siteId}/insight/clients', siteId: 'site1', paginated: true, page: 3, pageSize: 20 })
+    );
   });
 
   it('enforces per-path permission (fail closed) for under-privileged callers', async () => {

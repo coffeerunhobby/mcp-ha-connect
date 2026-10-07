@@ -7,6 +7,8 @@ import type { OmadaClient } from '../../omadaClient/index.js';
 import { logger } from '../../utils/logger.js';
 
 import { registerBlockClientTool } from './blockClient.js';
+import { registerDeleteClientTool } from './deleteClient.js';
+import { registerListBlockedClientsTool } from './listBlockedClients.js';
 import { registerCyclePoePortTool } from './cyclePoePort.js';
 import { registerOmadaGraphTools } from './graph.js';
 import { registerSetSiteNtpServersTool } from './setSiteNtpServers.js';
@@ -91,7 +93,9 @@ export function registerOmadaTools(
   // Client block tools
   registerBlockClientTool(server, client);
   registerUnblockClientTool(server, client);
-  toolCount += 2;
+  registerListBlockedClientsTool(server, client);
+  registerDeleteClientTool(server, client);
+  toolCount += 4;
 
   // Device action tools
   registerCyclePoePortTool(server, client);
@@ -138,10 +142,11 @@ function registerOmadaToolsGraph(server: McpServer, client: OmadaClient): number
   registerDisableClientRateLimitTool(server, client);
   registerBlockClientTool(server, client);
   registerUnblockClientTool(server, client);
+  registerDeleteClientTool(server, client);
   registerCyclePoePortTool(server, client);
   registerSetSsidEnabledTool(server, client);
   registerSetSiteNtpServersTool(server, client);
-  toolCount += 8;
+  toolCount += 9;
 
   logger.info('Omada tools registered', { mode: 'graph', toolCount });
   return toolCount;

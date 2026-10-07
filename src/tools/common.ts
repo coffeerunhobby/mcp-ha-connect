@@ -6,6 +6,7 @@
 import type { CallToolResult, ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { logger } from '../utils/logger.js';
+import { redactSecrets } from '../utils/redact.js';
 import { Permission, hasPermission, getPermissionNames } from '../permissions/index.js';
 
 // Re-export Permission for tool files
@@ -54,7 +55,10 @@ export function getCallerPermissions(extra: ToolExtra): number {
  * Convert any value to a CallToolResult
  */
 export function toToolResult(value: unknown, isError = false): CallToolResult {
-  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  // Every tool response passes here: secrets returned by Home Assistant or Omada
+  // (Wi-Fi password, RADIUS/VPN keys, access tokens) never reach the client.
+  const safe = redactSecrets(value);
+  const text = typeof safe === 'string' ? safe : JSON.stringify(safe, null, 2);
   return {
     content: text ? [{ type: 'text' as const, text }] : [],
     isError,

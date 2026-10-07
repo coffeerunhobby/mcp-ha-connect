@@ -13,7 +13,7 @@ import type {
     UpdateClientRateLimitRequest,
 } from '../types/index.js';
 
-import type { RequestHandler } from './request.js';
+import { OmadaApiError, type RequestHandler } from './request.js';
 import type { SiteOperations } from './site.js';
 
 /**
@@ -250,10 +250,88 @@ export class ClientOperations {
      */
     public async unblockClient(clientMac: string, siteId?: string): Promise<ClientBlockStatus> {
         const resolvedSiteId = this.site.resolveSiteId(siteId);
-        const response = await this.request.post<OmadaApiResponse<unknown>>(
-            this.buildPath(`/sites/${encodeURIComponent(resolvedSiteId)}/clients/${encodeURIComponent(clientMac)}/unblock`)
+        try {
+            const response = await this.request.post<OmadaApiResponse<unknown>>(
+                this.buildPath(`/sites/${encodeURIComponent(resolvedSiteId)}/clients/${encodeURIComponent(clientMac)}/unblock`)
+            );
+            this.request.ensureSuccess(response);
+            return { mac: clientMac, siteId: resolvedSiteId, blocked: false };
+        } catch (error) {
+            // The controller may report this with HTTP 200 or an HTTP error status.
+            if (!(error instanceof OmadaApiError) || error.errorCode !== CLIENT_DOES_NOT_EXIST) {
+                throw error;
+            }
+        }
+        // The unblock endpoint only knows clients the controller still treats as
+        // current; a blocked client cannot reconnect, so after a while it drops
+        // out and the API can no longer unblock it. Check the known-clients list.
+        const known = await this.findKnownClient(clientMac, resolvedSiteId);
+        // Only an explicit block=false proves the client is unblocked; a record
+        // without block state proves nothing.
+        if (known?.block === false) {
+            return { mac: clientMac, siteId: resolvedSiteId, blocked: false };
+        }
+        throw new Error(
+            known
+                ? `Omada's API cannot unblock ${clientMac}: the client is offline and the controller no longer treats it as current. ` +
+                  'Unblock it in the Omada web UI (Insights > Known Clients), or remove its record with omada_deleteClient.'
+                : `Omada has no record of ${clientMac}, but its access points may still refuse it (an orphaned block). ` +
+                  'Try omada_deleteClient, or let the device reconnect by cable so the controller sees it again, then unblock it.'
         );
-        this.request.ensureSuccess(response);
-        return { mac: clientMac, siteId: resolvedSiteId, blocked: false };
     }
+
+    /**
+     * Clients the controller remembers (online or not), with their block state.
+     * OperationId: getKnownClients (GET /insight/clients)
+     */
+    public async listKnownClients(siteId?: string): Promise<KnownClient[]> {
+        const resolvedSiteId = this.site.resolveSiteId(siteId);
+        return await this.request.fetchPaginated<KnownClient>(
+            this.buildPath(`/sites/${encodeURIComponent(resolvedSiteId)}/insight/clients`)
+        );
+    }
+
+    /** Known clients that are currently blocked. */
+    public async listBlockedClients(siteId?: string): Promise<KnownClient[]> {
+        return (await this.listKnownClients(siteId)).filter((client) => client.block === true);
+    }
+
+    /**
+     * Delete the controller's record of a client: its name, history and block
+     * state. Clears an orphaned block that the unblock endpoint can no longer reach.
+     * OperationId: deleteClient (DELETE /clients/{clientMac})
+     */
+    public async deleteClient(clientMac: string, siteId?: string): Promise<{ mac: string; siteId: string; deleted: true }> {
+        const resolvedSiteId = this.site.resolveSiteId(siteId);
+        const response = await this.request.request<OmadaApiResponse<unknown>>({
+            method: 'DELETE',
+            url: this.buildPath(`/sites/${encodeURIComponent(resolvedSiteId)}/clients/${encodeURIComponent(clientMac)}`),
+        });
+        this.request.ensureSuccess(response);
+        return { mac: clientMac, siteId: resolvedSiteId, deleted: true };
+    }
+
+    private async findKnownClient(clientMac: string, siteId: string): Promise<KnownClient | undefined> {
+        const wanted = normalizeMac(clientMac);
+        return (await this.listKnownClients(siteId)).find((client) => normalizeMac(client.mac) === wanted);
+    }
+}
+
+/** Omada error code: "This client does not exist." */
+export const CLIENT_DOES_NOT_EXIST = -41004;
+
+/** A known client (KnownClientVO), as GET /insight/clients returns it. */
+export interface KnownClient {
+    mac: string;
+    name?: string;
+    wireless?: boolean;
+    guest?: boolean;
+    lastSeen?: number;
+    block?: boolean;
+    [field: string]: unknown;
+}
+
+/** "4c:1d:96:8d:37:c7", "4C-1D-96-8D-37-C7" and "4c1d968d37c7" compare equal. */
+export function normalizeMac(mac: string): string {
+    return mac.replace(/[^0-9a-f]/gi, '').toUpperCase();
 }
