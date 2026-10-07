@@ -6,7 +6,7 @@ import type { OmadaClient } from '../../omadaClient/index.js';
 import { Permission, hasPermission } from '../../permissions/index.js';
 import { getCallerPermissions, siteInputSchema, toToolResult, wrapToolHandler, type ToolExtra } from '../common.js';
 
-const macSchema = z.string().min(1, 'clientMac (MAC address) is required').describe('Client MAC, e.g. 4C-1D-96-8D-37-C7');
+const macSchema = z.string().min(1, 'clientMac (MAC address) is required').describe('Client MAC, e.g. 02-1A-2B-3C-4D-5E');
 const groupSchema = z.string().min(1).describe('MAC group name or groupId (see omada_listMacGroups)');
 
 export const diagnoseClientSchema = z.object({ clientMac: macSchema, siteId: z.string().min(1).optional() });

@@ -426,7 +426,7 @@ Clients only see the tools they may use: `tools/list` is filtered by the caller'
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OMADA_PLUGIN_ENABLED` | `false` | Enable Omada plugin |
-| `OMADA_BASE_URL` | - | Omada controller URL (e.g., `https://192.168.0.1:8043`) |
+| `OMADA_BASE_URL` | - | Omada controller URL (e.g., `https://10.0.0.1:8043`) |
 | `OMADA_CLIENT_ID` | - | OAuth2 client ID from Omada controller |
 | `OMADA_CLIENT_SECRET` | - | OAuth2 client secret from Omada controller |
 | `OMADA_OMADAC_ID` | - | Omada controller ID |

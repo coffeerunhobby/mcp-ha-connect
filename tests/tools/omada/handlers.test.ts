@@ -290,8 +290,8 @@ describe('Omada Tool Handlers - Client Tools', () => {
 
     it('should return clients for a site', async () => {
       const mockClients = [
-        { mac: 'AA:BB:CC:DD:EE:FF', name: 'Phone1', ip: '192.168.0.100' },
-        { mac: 'AA:BB:CC:DD:EE:00', name: 'Laptop1', ip: '192.168.0.101' },
+        { mac: 'AA:BB:CC:DD:EE:FF', name: 'Phone1', ip: '10.0.0.100' },
+        { mac: 'AA:BB:CC:DD:EE:00', name: 'Laptop1', ip: '10.0.0.101' },
       ];
       (client.listClients as ReturnType<typeof vi.fn>).mockResolvedValue(mockClients);
 
@@ -319,7 +319,7 @@ describe('Omada Tool Handlers - Client Tools', () => {
       const mockClient = {
         mac: 'AA:BB:CC:DD:EE:FF',
         name: 'Phone1',
-        ip: '192.168.0.100',
+        ip: '10.0.0.100',
         ssid: 'MyWiFi',
       };
       (client.getClient as ReturnType<typeof vi.fn>).mockResolvedValue(mockClient);
@@ -653,7 +653,7 @@ describe('Omada Tool Handlers - Network Tools', () => {
     });
 
     it('should return port forwarding rules', async () => {
-      const mockRules = [{ name: 'SSH', externalPort: 22, internalPort: 22, ip: '192.168.0.10' }];
+      const mockRules = [{ name: 'SSH', externalPort: 22, internalPort: 22, ip: '10.0.0.10' }];
       (client.getPortForwardingStatus as ReturnType<typeof vi.fn>).mockResolvedValue(mockRules);
 
       registerGetPortForwardingStatusTool(server, client as OmadaClient);
@@ -678,7 +678,7 @@ describe('Omada Tool Handlers - Network Tools', () => {
     });
 
     it('should return LAN networks', async () => {
-      const mockNetworks = [{ name: 'Default', vlan: 1, subnet: '192.168.0.0/24' }];
+      const mockNetworks = [{ name: 'Default', vlan: 1, subnet: '10.0.0.0/24' }];
       (client.getLanNetworkList as ReturnType<typeof vi.fn>).mockResolvedValue(mockNetworks);
 
       registerGetLanNetworkListTool(server, client as OmadaClient);

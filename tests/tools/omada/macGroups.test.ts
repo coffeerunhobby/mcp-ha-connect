@@ -17,7 +17,7 @@ function createMockServer() {
   return { server: server as unknown as McpServer, handlers };
 }
 
-const MAC = '4C-1D-96-8D-37-C7';
+const MAC = '02-1A-2B-3C-4D-5E';
 const groups = [{ groupId: 'g1', name: 'KnownWiFi', type: 2, macAddressList: [{ name: 'tv', macAddress: 'AA-BB-CC-DD-EE-01' }] }];
 
 function createMockClient(policy = 1) {

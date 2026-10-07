@@ -146,7 +146,7 @@ describe('SEC-CRYPTO H2: per-client TLS scoping (no global env mutation)', () =>
     // The exact production config that crash-looped v1.5.5: http HA +
     // HA_STRICT_SSL=false. TLS relaxation is meaningless without TLS, so no
     // dispatcher is built at all -> built-in fetch -> immune to undici drift.
-    expect(createTlsDispatcher(false, 'http://192.168.0.19:8123')).toBeUndefined();
+    expect(createTlsDispatcher(false, 'http://10.0.0.19:8123')).toBeUndefined();
     expect(createTlsDispatcher(false, 'HTTP://UPPER.example')).toBeUndefined();
     // https targets still get the relaxing dispatcher.
     expect(createTlsDispatcher(false, 'https://omada.example')).toBeDefined();

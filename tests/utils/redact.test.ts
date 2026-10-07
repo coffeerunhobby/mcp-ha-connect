@@ -12,8 +12,8 @@ import type { OmadaClient } from '../../src/omadaClient/index.js';
 
 /** Shape of an Omada SSID detail (GET .../wlans/{wlanId}/ssids/{ssidId}). */
 const ssidDetail = {
-    ssidId: 'node-s55',
-    name: 'node-s55',
+    ssidId: 'home-wifi',
+    name: 'home-wifi',
     security: 3,
     hidePwd: true,
     pskSetting: { versionPsk: 2, encryptionPsk: 3, gikRekeyPskEnable: false, securityKey: 'HouseWifiPassw0rd!' },
@@ -28,12 +28,12 @@ describe('redactSecrets', () => {
         expect(out.pskSetting.versionPsk).toBe(2);
         expect(out.pskSetting.encryptionPsk).toBe(3);
         expect(out.hidePwd).toBe(true);
-        expect(out.name).toBe('node-s55');
+        expect(out.name).toBe('home-wifi');
         expect(JSON.stringify(out)).not.toContain('HouseWifiPassw0rd!');
     });
 
     it.each([
-        ['RADIUS profile', { authServer: [{ ip: '192.168.0.2', port: 1812, secret: 'radius-s3cret' }], accountingServerPwd: 'acct-pw', coaPassword: 'coa-pw', radiusPwd: 'rp' }],
+        ['RADIUS profile', { authServer: [{ ip: '10.0.0.2', port: 1812, secret: 'radius-s3cret' }], accountingServerPwd: 'acct-pw', coaPassword: 'coa-pw', radiusPwd: 'rp' }],
         ['PPSK profile', { name: 'kids', ppsk: [{ name: 'tablet', password: 'ppsk-key-1', vlanId: 20 }] }],
         ['VPN', { preSharedKey: 'ipsec-psk', presharedKey: 'wg-psk', privateKey: 'wg-private', publicKey: 'wg-public' }],
         ['SNMP', { snmpV1V2CEnable: true, communityString: 'snmp-community' }],
@@ -94,7 +94,7 @@ describe('tool responses are redacted', () => {
         registerOmadaGraphTools(server, client);
 
         const result = await handlers.get('omada_read')!(
-            { path: '/wifi/ssids', params: { wlanId: 'w1', ssidId: 'node-s55' } },
+            { path: '/wifi/ssids', params: { wlanId: 'w1', ssidId: 'home-wifi' } },
             { sessionId: 's', http: { authInfo: { extra: { permissions: 0xff } } } }
         );
 

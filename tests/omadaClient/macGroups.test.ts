@@ -17,7 +17,7 @@ const knownWifi = (): MacGroup => ({
     type: MAC_GROUP_TYPE,
     macAddressList: [
         { ruleId: 1, name: 'tv', macAddress: 'AA-BB-CC-DD-EE-01' },
-        { ruleId: 2, name: 'node-1271', macAddress: '4C-1D-96-8D-37-C7' },
+        { ruleId: 2, name: 'laptop-1', macAddress: '02-1A-2B-3C-4D-5E' },
     ],
 });
 
@@ -58,7 +58,7 @@ describe('MacGroupOperations', () => {
             type: 2,
             macAddressList: [
                 { name: 'tv', macAddress: 'AA-BB-CC-DD-EE-01' },
-                { name: 'node-1271', macAddress: '4C-1D-96-8D-37-C7' },
+                { name: 'laptop-1', macAddress: '02-1A-2B-3C-4D-5E' },
                 { name: 'phone', macAddress: 'AA-BB-CC-DD-EE-02' },
             ],
         });
@@ -67,14 +67,14 @@ describe('MacGroupOperations', () => {
     it('renames an existing entry instead of adding a duplicate', async () => {
         const { request, ops } = setup([[knownWifi()]]);
 
-        await expect(ops.setMacGroupEntry('g-known', '4c1d968d37c7', 'son laptop')).resolves.toMatchObject({ action: 'renamed', entries: { before: 2, after: 2 } });
-        expect(request.patch.mock.calls[0][1].macAddressList[1]).toEqual({ name: 'son laptop', macAddress: '4C-1D-96-8D-37-C7' });
+        await expect(ops.setMacGroupEntry('g-known', '021a2b3c4d5e', 'study laptop')).resolves.toMatchObject({ action: 'renamed', entries: { before: 2, after: 2 } });
+        expect(request.patch.mock.calls[0][1].macAddressList[1]).toEqual({ name: 'study laptop', macAddress: '02-1A-2B-3C-4D-5E' });
     });
 
     it('does not write when nothing changes', async () => {
         const { request, ops } = setup([[knownWifi()]]);
 
-        await expect(ops.setMacGroupEntry('KnownWiFi', '4C-1D-96-8D-37-C7', 'node-1271')).resolves.toMatchObject({ action: 'unchanged' });
+        await expect(ops.setMacGroupEntry('KnownWiFi', '02-1A-2B-3C-4D-5E', 'laptop-1')).resolves.toMatchObject({ action: 'unchanged' });
         await expect(setup([[knownWifi()]]).ops.removeMacGroupEntry('KnownWiFi', 'AA-BB-CC-DD-EE-99')).resolves.toMatchObject({ action: 'not-present' });
         expect(request.patch).not.toHaveBeenCalled();
     });
@@ -82,7 +82,7 @@ describe('MacGroupOperations', () => {
     it('removes an entry', async () => {
         const { request, ops } = setup([[knownWifi()]]);
 
-        await expect(ops.removeMacGroupEntry('KnownWiFi', '4C-1D-96-8D-37-C7')).resolves.toMatchObject({ action: 'removed', entries: { before: 2, after: 1 } });
+        await expect(ops.removeMacGroupEntry('KnownWiFi', '02-1A-2B-3C-4D-5E')).resolves.toMatchObject({ action: 'removed', entries: { before: 2, after: 1 } });
         expect(request.patch.mock.calls[0][1].macAddressList).toEqual([{ name: 'tv', macAddress: 'AA-BB-CC-DD-EE-01' }]);
     });
 
@@ -91,7 +91,7 @@ describe('MacGroupOperations', () => {
         changed.macAddressList!.push({ ruleId: 3, name: 'new', macAddress: 'AA-BB-CC-DD-EE-03' });
         const { request, ops } = setup([[knownWifi()], [knownWifi()], [changed]]);
 
-        await expect(ops.removeMacGroupEntry('KnownWiFi', '4C-1D-96-8D-37-C7')).rejects.toThrow(/changed while preparing.*nothing was written/);
+        await expect(ops.removeMacGroupEntry('KnownWiFi', '02-1A-2B-3C-4D-5E')).rejects.toThrow(/changed while preparing.*nothing was written/);
         expect(request.patch).not.toHaveBeenCalled();
     });
 
@@ -127,7 +127,7 @@ describe('MacGroupOperations', () => {
         ]);
 
         expect(results.map((r) => r.action)).toEqual(['removed', 'added']);
-        expect(state.macAddressList!.map((e) => e.macAddress)).toEqual(['4C-1D-96-8D-37-C7', 'AA-BB-CC-DD-EE-02']);
+        expect(state.macAddressList!.map((e) => e.macAddress)).toEqual(['02-1A-2B-3C-4D-5E', 'AA-BB-CC-DD-EE-02']);
     });
 
     it.each([
@@ -144,8 +144,8 @@ describe('MacGroupOperations', () => {
     it('refuses an incomplete MAC or empty name before any call', async () => {
         const { request, ops } = setup([]);
 
-        await expect(ops.setMacGroupEntry('KnownWiFi', '4C-1D-96', 'x')).rejects.toThrow(/not a complete MAC address/);
-        await expect(ops.setMacGroupEntry('KnownWiFi', '4C-1D-96-8D-37-C7', '   ')).rejects.toThrow(/1 to 128 characters/);
+        await expect(ops.setMacGroupEntry('KnownWiFi', '02-1A-2B', 'x')).rejects.toThrow(/not a complete MAC address/);
+        await expect(ops.setMacGroupEntry('KnownWiFi', '02-1A-2B-3C-4D-5E', '   ')).rejects.toThrow(/1 to 128 characters/);
         expect(request.get).not.toHaveBeenCalled();
     });
 });

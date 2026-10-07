@@ -101,11 +101,11 @@ describe('HTTP Server', () => {
     });
 
     it('should allow specific origins', () => {
-      const allowedOrigins = ['http://mcpserver.10.0.0.18.nip.io:3000', 'http://192.168.0.10:8080'];
+      const allowedOrigins = ['http://mcpserver.10.0.0.18.nip.io:3000', 'http://10.0.0.10:8080'];
       const corsConfig = { ...mockConfig, httpAllowedOrigins: allowedOrigins };
 
       expect(corsConfig.httpAllowedOrigins).toContain('http://mcpserver.10.0.0.18.nip.io:3000');
-      expect(corsConfig.httpAllowedOrigins).toContain('http://192.168.0.10:8080');
+      expect(corsConfig.httpAllowedOrigins).toContain('http://10.0.0.10:8080');
     });
 
     it('should allow all origins when list is empty (wildcard)', () => {

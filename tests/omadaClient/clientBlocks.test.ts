@@ -15,7 +15,7 @@ import { registerListBlockedClientsTool } from '../../src/tools/omada/listBlocke
 import { Permission } from '../../src/permissions/index.js';
 
 const buildPath = (p: string): string => `/openapi/v1/omadac1${p}`;
-const MAC = '4C-1D-96-8D-37-C7';
+const MAC = '02-1A-2B-3C-4D-5E';
 
 function setup(knownClients: unknown[] = []) {
     const request = {
@@ -36,8 +36,8 @@ const doesNotExist = { errorCode: CLIENT_DOES_NOT_EXIST, msg: 'This client does 
 
 describe('normalizeMac', () => {
     it('treats colon, dash and bare formats as the same MAC', () => {
-        expect(normalizeMac('4c:1d:96:8d:37:c7')).toBe(normalizeMac(MAC));
-        expect(normalizeMac('4c1d968d37c7')).toBe('4C1D968D37C7');
+        expect(normalizeMac('02:1a:2b:3c:4d:5e')).toBe(normalizeMac(MAC));
+        expect(normalizeMac('021a2b3c4d5e')).toBe('021A2B3C4D5E');
     });
 });
 
@@ -51,7 +51,7 @@ describe('ClientOperations.unblockClient', () => {
     });
 
     it('reports success when the client is known and no longer blocked (e.g. unblocked in the web UI)', async () => {
-        const { request, ops } = setup([{ mac: '4c:1d:96:8d:37:c7', name: 'node-1271', block: false }]);
+        const { request, ops } = setup([{ mac: '02:1a:2b:3c:4d:5e', name: 'laptop-1', block: false }]);
         request.post.mockResolvedValue(doesNotExist);
 
         await expect(ops.unblockClient(MAC)).resolves.toEqual({ mac: MAC, siteId: 'site-1', blocked: false });
@@ -59,14 +59,14 @@ describe('ClientOperations.unblockClient', () => {
     });
 
     it('explains the controller limitation when the known client is still blocked', async () => {
-        const { request, ops } = setup([{ mac: MAC, name: 'node-1271', block: true }]);
+        const { request, ops } = setup([{ mac: MAC, name: 'laptop-1', block: true }]);
         request.post.mockResolvedValue(doesNotExist);
 
         await expect(ops.unblockClient(MAC)).rejects.toThrow(/cannot unblock .* offline.*Known Clients.*omada_deleteClient/);
     });
 
     it('a known record without block state is not proof of an unblock', async () => {
-        const { request, ops } = setup([{ mac: MAC, name: 'node-1271' }]);
+        const { request, ops } = setup([{ mac: MAC, name: 'laptop-1' }]);
         request.post.mockResolvedValue(doesNotExist);
 
         await expect(ops.unblockClient(MAC)).rejects.toThrow(/cannot unblock/);
@@ -113,12 +113,12 @@ describe('unblockClient through the real request handler', () => {
 describe('ClientOperations.listBlockedClients / deleteClient', () => {
     it('lists only blocked known clients, offline ones included', async () => {
         const { ops } = setup([
-            { mac: MAC, name: 'node-1271', block: true, lastSeen: 1 },
+            { mac: MAC, name: 'laptop-1', block: true, lastSeen: 1 },
             { mac: 'AA-BB-CC-DD-EE-FF', name: 'tv', block: false },
             { mac: '11-22-33-44-55-66', name: 'old' },
         ]);
 
-        await expect(ops.listBlockedClients()).resolves.toEqual([{ mac: MAC, name: 'node-1271', block: true, lastSeen: 1 }]);
+        await expect(ops.listBlockedClients()).resolves.toEqual([{ mac: MAC, name: 'laptop-1', block: true, lastSeen: 1 }]);
     });
 
     it('deletes the client record with DELETE /clients/{mac}, encoding the MAC', async () => {

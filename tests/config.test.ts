@@ -190,14 +190,14 @@ describe('loadConfig', () => {
     const env = {
       HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',
       HA_TOKEN: 'test-token-12345',
-      MCP_HTTP_ALLOWED_ORIGINS: 'http://mcpserver.10.0.0.18.nip.io:3000,http://192.168.0.10:8080,localhost',
+      MCP_HTTP_ALLOWED_ORIGINS: 'http://mcpserver.10.0.0.18.nip.io:3000,http://10.0.0.10:8080,localhost',
     };
 
     const config = loadConfig(env);
 
     expect(config.httpAllowedOrigins).toEqual([
       'http://mcpserver.10.0.0.18.nip.io:3000',
-      'http://192.168.0.10:8080',
+      'http://10.0.0.10:8080',
       'localhost',
     ]);
   });

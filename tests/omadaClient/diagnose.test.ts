@@ -10,7 +10,7 @@ import type { MacGroup } from '../../src/omadaClient/macGroups.js';
 import { OmadaApiError } from '../../src/omadaClient/request.js';
 import { logger } from '../../src/utils/logger.js';
 
-const MAC = '4C-1D-96-8D-37-C7';
+const MAC = '02-1A-2B-3C-4D-5E';
 
 const group = (groupId: string, name: string, macs: string[]): MacGroup => ({
     groupId,
@@ -52,17 +52,17 @@ const levels = (d: { verdict: Array<{ level: string; message: string }> }) => d.
 
 describe('diagnoseClient', () => {
     it('reports a connected, unrestricted client', async () => {
-        const { client } = fakeClient({ clients: [{ mac: '4c:1d:96:8d:37:c7', name: 'node-1271', ip: '192.168.0.50', blocked: false }] });
+        const { client } = fakeClient({ clients: [{ mac: '02:1a:2b:3c:4d:5e', name: 'laptop-1', ip: '10.0.0.50', blocked: false }] });
 
-        const d = await diagnoseClient(client, '4c1d968d37c7');
+        const d = await diagnoseClient(client, '021a2b3c4d5e');
 
         expect(d.mac).toBe(MAC);
-        expect(d.active).toMatchObject({ name: 'node-1271', ip: '192.168.0.50', blocked: false });
+        expect(d.active).toMatchObject({ name: 'laptop-1', ip: '10.0.0.50', blocked: false });
         expect(levels(d)).toEqual(['info: Connected; nothing in Omada restricts it.']);
     });
 
     it('flags a block on the known client record', async () => {
-        const { client } = fakeClient({ known: [{ mac: MAC, name: 'node-1271', block: true }] });
+        const { client } = fakeClient({ known: [{ mac: MAC, name: 'laptop-1', block: true }] });
 
         expect(levels(await diagnoseClient(client, MAC))[0]).toMatch(/^blocks: Blocked in Omada. Use omada_unblockClient/);
     });
@@ -96,7 +96,7 @@ describe('diagnoseClient', () => {
     it('flags an SSID deny list that contains the MAC', async () => {
         const { client } = fakeClient({
             clients: [{ mac: MAC }],
-            groups: [group('g2', 'Banned', ['4c:1d:96:8d:37:c7'])],
+            groups: [group('g2', 'Banned', ['02:1a:2b:3c:4d:5e'])],
             ssidFilter: { macFilterEnable: true, policy: 0, macFilterId: 'g2' },
         });
 
@@ -113,8 +113,8 @@ describe('diagnoseClient', () => {
         const { client } = fakeClient({
             clients: [{ mac: MAC }],
             pages: {
-                '/sites/{siteId}/mac-filters/deny': [{ mac: '4C1D968D37C7' }],
-                '/sites/{siteId}/ip-mac-binds': [{ macAddress: MAC, ip: '192.168.0.50' }],
+                '/sites/{siteId}/mac-filters/deny': [{ mac: '021A2B3C4D5E' }],
+                '/sites/{siteId}/ip-mac-binds': [{ macAddress: MAC, ip: '10.0.0.50' }],
                 '/sites/{siteId}/setting/service/dhcp': [{ clientMac: MAC }],
             },
         });
@@ -143,7 +143,7 @@ describe('diagnoseClient', () => {
     });
 
     it('does not call it orphaned while Omada still knows the client', async () => {
-        const { client } = fakeClient({ known: [{ mac: MAC, name: 'node-1271', block: false }], audit: [{ time: 1, content: `Client ${MAC} failed to unblock.` }] });
+        const { client } = fakeClient({ known: [{ mac: MAC, name: 'laptop-1', block: false }], audit: [{ time: 1, content: `Client ${MAC} failed to unblock.` }] });
 
         expect(levels(await diagnoseClient(client, MAC, { includeAudit: true }))).toEqual(['info: Nothing that Omada exposes restricts this client.']);
     });
@@ -177,7 +177,7 @@ describe('diagnoseClient', () => {
     it('rejects an incomplete MAC before reading anything', async () => {
         const { client, readResource } = fakeClient();
 
-        await expect(diagnoseClient(client, '4C-1D-96')).rejects.toThrow(/not a complete MAC address/);
+        await expect(diagnoseClient(client, '02-1A-2B')).rejects.toThrow(/not a complete MAC address/);
         expect(readResource).not.toHaveBeenCalled();
     });
 });

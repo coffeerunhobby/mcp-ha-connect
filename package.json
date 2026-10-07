@@ -7,6 +7,10 @@
   "bin": {
     "mcp-ha-connect": "dist/index.js"
   },
+  "files": [
+    "dist",
+    ".env.example"
+  ],
   "scripts": {
     "dev": "tsx watch --env-file=.env src/index.ts",
     "dev:http": "tsx watch --env-file=.env src/index.ts",

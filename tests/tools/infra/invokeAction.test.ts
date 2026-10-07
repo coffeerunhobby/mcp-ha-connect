@@ -22,11 +22,11 @@ describe('parseRestActions', () => {
 
     it('parses a valid action map (method defaults to POST)', () => {
         const parsed = parseRestActions(
-            '{"update-node-u2":{"url":"http://192.168.0.9:8425/v1/update","bearerToken":"secret-1","description":"deploy latest images"}}'
+            '{"update-node-u2":{"url":"http://10.0.0.9:8425/v1/update","bearerToken":"secret-1","description":"deploy latest images"}}'
         );
         expect(parsed['update-node-u2']).toMatchObject({
             method: 'POST',
-            url: 'http://192.168.0.9:8425/v1/update',
+            url: 'http://10.0.0.9:8425/v1/update',
             bearerToken: 'secret-1',
         });
     });
@@ -73,11 +73,11 @@ const adminExtra = {
 const ACTIONS = parseRestActions(
     JSON.stringify({
         'update-node-u2': {
-            url: 'http://192.168.0.9:8425/v1/update',
+            url: 'http://10.0.0.9:8425/v1/update',
             bearerToken: 'tok-u2',
             description: 'deploy latest images on node-u2',
         },
-        'ping-webhook': { url: 'http://192.168.0.18:5678/webhook/ping', method: 'GET' },
+        'ping-webhook': { url: 'http://10.0.0.18:5678/webhook/ping', method: 'GET' },
     })
 );
 
@@ -119,7 +119,7 @@ describe('invokeAction tool', () => {
 
         expect(fetchSpy).toHaveBeenCalledTimes(1);
         expect(fetchSpy).toHaveBeenCalledWith(
-            'http://192.168.0.9:8425/v1/update',
+            'http://10.0.0.9:8425/v1/update',
             expect.objectContaining({
                 method: 'POST',
                 headers: { Authorization: 'Bearer tok-u2' },
@@ -139,7 +139,7 @@ describe('invokeAction tool', () => {
         await handler({ action: 'ping-webhook' }, adminExtra);
 
         expect(fetchSpy).toHaveBeenCalledWith(
-            'http://192.168.0.18:5678/webhook/ping',
+            'http://10.0.0.18:5678/webhook/ping',
             expect.objectContaining({ method: 'GET', headers: undefined })
         );
     });
@@ -244,7 +244,7 @@ describe('invokeAction tool', () => {
     it('cooldownMs: 0 disables the rate limit for that action', async () => {
         fetchSpy.mockResolvedValue(new Response('OK', { status: 200 }));
         const noCooldown = parseRestActions(
-            '{"rapid":{"url":"http://192.168.0.9:1/x","cooldownMs":0}}'
+            '{"rapid":{"url":"http://10.0.0.9:1/x","cooldownMs":0}}'
         );
         const server = createMockServer();
         registerInfraTools(server, noCooldown);

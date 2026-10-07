@@ -193,7 +193,7 @@ describe('isValidOrigin', () => {
     });
 
     it('should accept URL with port', () => {
-      expect(isValidOrigin('http://192.168.0.10:8080')).toBe(true);
+      expect(isValidOrigin('http://10.0.0.10:8080')).toBe(true);
     });
 
     it('should accept simple hostname', () => {
@@ -281,7 +281,7 @@ describe('isValidOrigin', () => {
 
     it('should accept local network origins', () => {
       const localOrigins = [
-        'http://192.168.0.10:8080',
+        'http://10.0.0.10:8080',
         'http://10.0.0.5:3000',
         '192.168.1.100',
       ];
@@ -324,7 +324,7 @@ describe('isValidOrigin', () => {
 
   describe('Integration with config', () => {
     it('should validate comma-separated origins', () => {
-      const originsString = 'http://mcpserver.10.0.0.18.nip.io:3000,http://192.168.0.10:8080,localhost';
+      const originsString = 'http://mcpserver.10.0.0.18.nip.io:3000,http://10.0.0.10:8080,localhost';
       const origins = originsString.split(',').map(s => s.trim());
 
       for (const origin of origins) {

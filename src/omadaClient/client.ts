@@ -338,12 +338,12 @@ export interface KnownClient {
 export function formatMac(mac: string): string {
     const hex = normalizeMac(mac);
     if (!/^[0-9A-F]{12}$/.test(hex)) {
-        throw new Error(`'${mac}' is not a complete MAC address (expected 12 hex digits, e.g. 4C-1D-96-8D-37-C7)`);
+        throw new Error(`'${mac}' is not a complete MAC address (expected 12 hex digits, e.g. 02-1A-2B-3C-4D-5E)`);
     }
     return hex.match(/../g)!.join('-');
 }
 
-/** "4c:1d:96:8d:37:c7", "4C-1D-96-8D-37-C7" and "4c1d968d37c7" compare equal. */
+/** "02:1a:2b:3c:4d:5e", "02-1A-2B-3C-4D-5E" and "021a2b3c4d5e" compare equal. */
 export function normalizeMac(mac: string): string {
     return mac.replace(/[^0-9a-f]/gi, '').toUpperCase();
 }

@@ -46,7 +46,7 @@ const actionSchema = z.object({
 
 /**
  * Parse MCP_REST_ACTIONS (JSON):
- *   {"update-node-u2":{"method":"POST","url":"http://192.168.0.9:8425/v1/update","bearerToken":"…","description":"deploy latest images on node-u2"}}
+ *   {"update-node-u2":{"method":"POST","url":"http://10.0.0.9:8425/v1/update","bearerToken":"…","description":"deploy latest images on node-u2"}}
  *
  * Returns an empty map when unset; throws on malformed input so a config typo
  * fails loudly at startup instead of silently disabling the tool.

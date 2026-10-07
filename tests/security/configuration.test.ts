@@ -98,12 +98,12 @@ describe('SEC-CONFIG M3: opt-in DNS-rebinding Host validation', () => {
   it('enforces exactly the configured hosts (plus loopback) when MCP_HTTP_ALLOWED_HOSTS is set', () => {
     const cfg = loadConfig({
       ...base,
-      MCP_HTTP_ALLOWED_HOSTS: 'mcp.example.com,192.168.0.18:3000',
+      MCP_HTTP_ALLOWED_HOSTS: 'mcp.example.com,10.0.0.18:3000',
     } as NodeJS.ProcessEnv);
     const opts = buildTransportSecurityOptions(cfg);
     expect(opts.enableDnsRebindingProtection).toBe(true);
     expect(opts.allowedHosts).toContain('mcp.example.com');
-    expect(opts.allowedHosts).toContain('192.168.0.18:3000');
+    expect(opts.allowedHosts).toContain('10.0.0.18:3000');
     // Loopback/bind conveniences are always added so on-box access keeps working.
     expect(opts.allowedHosts).toContain('localhost:3000');
     expect(opts.allowedHosts).toContain('0.0.0.0:3000');
