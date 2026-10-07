@@ -25,6 +25,7 @@ import { DeviceOperations } from './device.js';
 import { NetworkOperations, type SsidEnableResult } from './network.js';
 import { RequestHandler, type RequestOptions } from './request.js';
 import { SecurityOperations } from './security.js';
+import { MacGroupOperations, type MacGroup, type MacGroupChange } from './macGroups.js';
 import { SiteOperations, type SiteNtpChangeResult } from './site.js';
 
 export interface OmadaClientOptions {
@@ -55,6 +56,8 @@ export class OmadaClient {
     private readonly securityOps: SecurityOperations;
 
     private readonly networkOps: NetworkOperations;
+
+    private readonly macGroupOps: MacGroupOperations;
 
     private readonly omadacId: string;
 
@@ -87,6 +90,7 @@ export class OmadaClient {
         this.clientOps = new ClientOperations(this.request, this.siteOps, this.buildOmadaPath.bind(this));
         this.securityOps = new SecurityOperations(this.request, this.buildOmadaPath.bind(this));
         this.networkOps = new NetworkOperations(this.request, this.siteOps, this.buildOmadaPath.bind(this));
+        this.macGroupOps = new MacGroupOperations(this.request, this.siteOps, this.buildOmadaPath.bind(this));
     }
 
     // Site operations
@@ -171,6 +175,22 @@ export class OmadaClient {
 
     public async unblockClient(clientMac: string, siteId?: string): Promise<ClientBlockStatus> {
         return await this.clientOps.unblockClient(clientMac, siteId);
+    }
+
+    public async listKnownClients(siteId?: string): Promise<KnownClient[]> {
+        return await this.clientOps.listKnownClients(siteId);
+    }
+
+    public async listMacGroups(siteId?: string): Promise<MacGroup[]> {
+        return await this.macGroupOps.listMacGroups(siteId);
+    }
+
+    public async setMacGroupEntry(group: string, clientMac: string, name: string, siteId?: string): Promise<MacGroupChange> {
+        return await this.macGroupOps.setMacGroupEntry(group, clientMac, name, siteId);
+    }
+
+    public async removeMacGroupEntry(group: string, clientMac: string, siteId?: string): Promise<MacGroupChange> {
+        return await this.macGroupOps.removeMacGroupEntry(group, clientMac, siteId);
     }
 
     public async listBlockedClients(siteId?: string): Promise<KnownClient[]> {

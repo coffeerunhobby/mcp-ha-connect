@@ -160,7 +160,7 @@ Known limit: cancellations and answers are kept in memory. After a restart, some
 | `listCalendars` | List all calendar entities |
 | `getCalendarEvents` | Get events from one or all calendars |
 
-### Omada Network Tools (32)
+### Omada Network Tools (36)
 
 #### Site Tools
 
@@ -207,6 +207,15 @@ Known limit: cancellations and answers are kept in memory. After a restart, some
 | `omada_deleteClient` | Delete a client's record (name, history, block) to clear a block unblock can't reach (needs `CONFIGURE`) |
 | `omada_cyclePoePort` | Power-cycle PoE switch ports (remote-reboots APs/cameras) |
 | `omada_setSsidEnabled` | Turn an SSID (e.g. guest WiFi) on or off by name |
+
+#### Client Diagnosis and MAC Groups
+
+| Tool | Description |
+|------|-------------|
+| `omada_diagnoseClient` | Explain why a device (by MAC) can't get on: block state, MAC groups and the SSID allow/deny lists using them, site MAC filter, IP-MAC binding, DHCP reservation, and for ADMIN callers the audit log (detects an orphaned block). Read-only |
+| `omada_listMacGroups` | List MAC groups with their entries and which SSIDs use them as allow or deny lists (graph mode: `omada_read /profiles/mac-groups`) |
+| `omada_setMacGroupEntry` | Add a MAC to a MAC group, or rename its entry (needs `CONFIGURE`) |
+| `omada_removeMacGroupEntry` | Remove a MAC from a MAC group (needs `CONFIGURE`) |
 
 #### Security Tools
 

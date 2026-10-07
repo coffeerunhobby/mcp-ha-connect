@@ -79,11 +79,11 @@ describe('Omada graph tools - registration', () => {
     expect(server.handlers.has('omada_read')).toBe(true);
   });
 
-  it('graph mode registers browse + read + 9 typed writes, and NO typed getters', () => {
+  it('graph mode registers browse + read + typed writes + diagnosis, and NO typed getters', () => {
     const server = createMockServer();
     const client = createMockClient();
     const count = registerOmadaTools(server, client, 'graph');
-    expect(count).toBe(11);
+    expect(count).toBe(14);
     const names = [...server.handlers.keys()];
     expect(names).toContain('omada_browse');
     expect(names).toContain('omada_read');
@@ -94,11 +94,15 @@ describe('Omada graph tools - registration', () => {
     expect(names).toContain('omada_setSsidEnabled');
     expect(names).toContain('omada_setSiteNtpServers');
     expect(names).toContain('omada_deleteClient');
+    expect(names).toContain('omada_diagnoseClient');
+    expect(names).toContain('omada_setMacGroupEntry');
+    expect(names).toContain('omada_removeMacGroupEntry');
     // Typed read getters must NOT be present in graph mode.
     expect(names).not.toContain('omada_listSites');
     expect(names).not.toContain('omada_getFirewallSetting');
     expect(names).not.toContain('omada_getSiteNtpStatus');
     expect(names).not.toContain('omada_listBlockedClients');
+    expect(names).not.toContain('omada_listMacGroups');
   });
 
   it('eager mode (default) registers the typed getters, not the graph tools', () => {

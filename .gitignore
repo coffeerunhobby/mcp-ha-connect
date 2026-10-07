@@ -42,3 +42,7 @@ Thumbs.db
 *.tmp
 *.temp
 example/
+
+# Local agent files
+AGENTS.md
+.codex/

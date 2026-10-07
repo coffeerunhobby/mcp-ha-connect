@@ -943,6 +943,14 @@ export const OMADA_RESOURCES: ResourceNode[] = [
     description: 'Reusable network profiles: per-device Wi-Fi keys (PPSK) and time-range schedules.',
   },
   {
+    path: '/profiles/mac-groups',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'MAC group profiles with their entries (usable as SSID allow or deny lists; an SSID detail shows which group it uses in macFilter).',
+    fetch: (c, a) => c.listMacGroups(a.siteId),
+  },
+  {
     path: '/profiles/ppsk',
     kind: 'collection',
     permission: Q,

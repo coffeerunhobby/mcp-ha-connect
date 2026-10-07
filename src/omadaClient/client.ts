@@ -331,6 +331,18 @@ export interface KnownClient {
     [field: string]: unknown;
 }
 
+/**
+ * A complete MAC in Omada's format (AA-BB-CC-DD-EE-FF). Anything that is not
+ * exactly 12 hex digits is refused, so a write never runs with a partial MAC.
+ */
+export function formatMac(mac: string): string {
+    const hex = normalizeMac(mac);
+    if (!/^[0-9A-F]{12}$/.test(hex)) {
+        throw new Error(`'${mac}' is not a complete MAC address (expected 12 hex digits, e.g. 4C-1D-96-8D-37-C7)`);
+    }
+    return hex.match(/../g)!.join('-');
+}
+
 /** "4c:1d:96:8d:37:c7", "4C-1D-96-8D-37-C7" and "4c1d968d37c7" compare equal. */
 export function normalizeMac(mac: string): string {
     return mac.replace(/[^0-9a-f]/gi, '').toUpperCase();
