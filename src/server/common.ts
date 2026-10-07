@@ -15,6 +15,7 @@ import type { RestAction } from '../tools/infra/index.js';
 import { registerAllResources } from '../resources/index.js';
 import { generateInstructions } from './instructions.js';
 import { logger } from '../utils/logger.js';
+import type { OwnerQuestionService } from '../ownerQuestions/service.js';
 import { VERSION } from '../version.js';
 
 export interface CreateServerOptions {
@@ -32,10 +33,12 @@ export interface CreateServerOptions {
    * Execution-time RBAC in wrapToolHandler still applies either way.
    */
   callerPermissions?: number;
+  /** Owner questions service (askOwner & co.), when running. */
+  ownerQuestions?: OwnerQuestionService;
 }
 
 export function createServer(options: CreateServerOptions): McpServer {
-  const { haClient, omadaClient, aiClient, restActions, toolRegistrationMode, callerPermissions } = options;
+  const { haClient, omadaClient, aiClient, restActions, toolRegistrationMode, callerPermissions, ownerQuestions } = options;
   logger.debug('Creating MCP server instance');
 
   // Generate instructions based on enabled plugins
@@ -77,6 +80,7 @@ export function createServer(options: CreateServerOptions): McpServer {
       aiClient,
       restActions,
       toolRegistrationMode,
+      ownerQuestions,
     });
   } finally {
     server.registerTool = originalRegisterTool;

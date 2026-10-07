@@ -37,6 +37,18 @@ describe('loadConfig', () => {
     expect(config.stateful).toBe(false);
   });
 
+  it('parses owner question settings (enabled by default; HA users as a trimmed list)', () => {
+    const base = { HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123', HA_TOKEN: 't' };
+
+    const defaults = loadConfig(base);
+    expect(defaults.ownerQuestionsEnabled).toBe(true);
+    expect(defaults.ownerQuestionsHaUsers).toEqual([]);
+
+    const set = loadConfig({ ...base, MCP_OWNER_QUESTIONS_ENABLED: 'false', MCP_OWNER_QUESTIONS_HA_USERS: ' a1b2 , c3d4 ,' });
+    expect(set.ownerQuestionsEnabled).toBe(false);
+    expect(set.ownerQuestionsHaUsers).toEqual(['a1b2', 'c3d4']);
+  });
+
   it('should apply default values for optional fields', () => {
     const env = {
       HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123',

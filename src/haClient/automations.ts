@@ -8,6 +8,19 @@ import { logger } from '../utils/logger.js';
 import type { StateOperations } from './states.js';
 import type { ServiceOperations } from './services.js';
 import type { RequestHandler } from './request.js';
+import type { HaWebSocketCommand } from './wsCommand.js';
+
+/** One run of an automation, as `trace/list` summarizes it. */
+export interface AutomationTraceSummary {
+  run_id: string;
+  state?: string;
+  script_execution?: string | null;
+  last_step?: string | null;
+  error?: string;
+  trigger?: string;
+  timestamp?: { start: string; finish: string | null };
+  [key: string]: unknown;
+}
 
 /**
  * Automation-related operations for the Home Assistant API.
@@ -16,7 +29,8 @@ export class AutomationOperations {
   constructor(
     private readonly stateOps: StateOperations,
     private readonly serviceOps?: ServiceOperations,
-    private readonly request?: RequestHandler
+    private readonly request?: RequestHandler,
+    private readonly wsCommand?: HaWebSocketCommand
   ) {}
 
   /**
@@ -216,14 +230,32 @@ export class AutomationOperations {
   /**
    * Get automation trace (execution history)
    */
-  async getAutomationTrace(entityId: string): Promise<unknown[]> {
-    if (!this.request) {
-      throw new Error('RequestHandler not available');
+  async getAutomationTrace(entityId: string, limit = 5): Promise<AutomationTraceSummary[]> {
+    if (!this.wsCommand) {
+      throw new Error('Automation traces need the Home Assistant WebSocket API, which is not available');
     }
 
-    const automationId = entityId.replace('automation.', '');
-    logger.debug('Fetching automation trace', { automationId });
+    // Traces are WebSocket-only (there is no REST endpoint) and are keyed by the
+    // automation's config id (its `id` attribute), not by the entity id.
+    const state = await this.stateOps.getState(entityId);
+    if (!state) {
+      throw new Error(`Automation ${entityId} not found`);
+    }
+    const itemId = state.attributes.id;
+    if (itemId === undefined || itemId === null || itemId === '') {
+      throw new Error(
+        `Automation ${entityId} has no 'id' (an automation defined in YAML without an id), so Home Assistant keeps no traces for it`
+      );
+    }
+    logger.debug('Fetching automation traces', { entityId, itemId });
 
-    return this.request.get<unknown[]>(`/trace/automation/${encodeURIComponent(automationId)}`);
+    const traces = await this.wsCommand<AutomationTraceSummary[]>({
+      type: 'trace/list',
+      domain: 'automation',
+      item_id: String(itemId),
+    });
+    return [...(traces ?? [])]
+      .sort((a, b) => (b.timestamp?.start ?? '').localeCompare(a.timestamp?.start ?? ''))
+      .slice(0, limit);
   }
 }

@@ -131,3 +131,19 @@ describe('AutomationOperations', () => {
     });
   });
 });
+
+describe('AutomationOperations.createAutomation path encoding', () => {
+  it('encodes the automation id in the URL path but keeps it unchanged in the body', async () => {
+    const post = vi.fn().mockResolvedValue({ result: 'ok' });
+    const serviceOps = { callService: vi.fn().mockResolvedValue([]) };
+    const ops = new AutomationOperations(
+      { getState: vi.fn() } as unknown as StateOperations,
+      serviceOps as never,
+      { post, get: vi.fn() } as never
+    );
+
+    await ops.createAutomation({ id: 'room/a?b', alias: 'Test', trigger: [], action: [] } as never);
+
+    expect(post).toHaveBeenCalledWith('/config/automation/config/room%2Fa%3Fb', expect.objectContaining({ id: 'room/a?b' }));
+  });
+});

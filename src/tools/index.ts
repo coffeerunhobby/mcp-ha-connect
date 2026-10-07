@@ -13,6 +13,8 @@ import { registerHomeAssistantTools } from './homeassistant/index.js';
 import { registerOmadaTools, type OmadaRegistrationMode } from './omada/index.js';
 import { registerAITools } from './ai/index.js';
 import { registerInfraTools, type RestAction } from './infra/index.js';
+import { registerOwnerQuestionTools } from './homeassistant/askOwner.js';
+import type { OwnerQuestionService } from '../ownerQuestions/service.js';
 
 export interface RegisterToolsOptions {
   server: McpServer;
@@ -23,13 +25,15 @@ export interface RegisterToolsOptions {
   restActions?: Record<string, RestAction>;
   /** Tool registration strategy for the Omada plugin (default 'eager'). */
   toolRegistrationMode?: OmadaRegistrationMode;
+  /** Owner questions (askOwner & co.); registered only when the service is running. */
+  ownerQuestions?: OwnerQuestionService;
 }
 
 /**
  * Register all available tools based on configured clients
  */
 export function registerAllTools(options: RegisterToolsOptions): void {
-  const { server, haClient, omadaClient, aiClient, restActions, toolRegistrationMode } = options;
+  const { server, haClient, omadaClient, aiClient, restActions, toolRegistrationMode, ownerQuestions } = options;
   logger.debug('Registering all tools');
 
   let totalTools = 0;
@@ -38,6 +42,9 @@ export function registerAllTools(options: RegisterToolsOptions): void {
   if (haClient) {
     const haToolCount = registerHomeAssistantTools(server, haClient);
     totalTools += haToolCount;
+    if (ownerQuestions) {
+      totalTools += registerOwnerQuestionTools(server, ownerQuestions);
+    }
   }
 
   // Omada tools (if client provided)

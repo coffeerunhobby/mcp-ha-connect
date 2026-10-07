@@ -147,7 +147,10 @@ export function wrapToolHandler<T>(
       }, true);
     }
 
-    logger.info('Tool invoked', { tool: name, sessionId, args: safeSerialize(args) });
+    // Arguments can carry message text, entity names or MAC addresses: they are
+    // logged at debug level only, never in normal (info) operation.
+    logger.info('Tool invoked', { tool: name, sessionId });
+    logger.debug('Tool arguments', { tool: name, sessionId, args: safeSerialize(args) });
 
     try {
       const result = await handler(args, extra);

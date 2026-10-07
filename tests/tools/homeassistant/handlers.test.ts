@@ -551,8 +551,17 @@ describe('HomeAssistant Tool Handlers', () => {
       const handler = server.getHandler('getAutomationTrace')!;
       const result = await handler({ entity_id: 'automation.test' }, mockExtra);
 
-      expect(mockClient.getAutomationTrace).toHaveBeenCalledWith('automation.test');
+      expect(mockClient.getAutomationTrace).toHaveBeenCalledWith('automation.test', undefined);
       expect(result.content[0].text).toContain('trace_count');
+    });
+
+    it('getAutomationTrace forwards limit', async () => {
+      mockClient.getAutomationTrace.mockResolvedValue([]);
+      registerGetAutomationTraceTool(server as any, mockClient as any);
+
+      await server.getHandler('getAutomationTrace')!({ entity_id: 'automation.test', limit: 3 }, mockExtra);
+
+      expect(mockClient.getAutomationTrace).toHaveBeenCalledWith('automation.test', 3);
     });
   });
 

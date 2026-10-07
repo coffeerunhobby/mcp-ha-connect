@@ -18,7 +18,8 @@ import type {
 } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 
-import { AutomationOperations } from './automations.js';
+import { AutomationOperations, type AutomationTraceSummary } from './automations.js';
+import { createHaWebSocketCommand } from './wsCommand.js';
 import { ConfigOperations } from './config.js';
 import { DeviceOperations } from './devices.js';
 import { EntityOperations } from './entities.js';
@@ -67,7 +68,12 @@ export class HaClient {
     this.stateOps = new StateOperations(this.request);
     this.serviceOps = new ServiceOperations(this.request);
     this.entityOps = new EntityOperations(this.stateOps);
-    this.automationOps = new AutomationOperations(this.stateOps, this.serviceOps, this.request);
+    this.automationOps = new AutomationOperations(
+      this.stateOps,
+      this.serviceOps,
+      this.request,
+      createHaWebSocketCommand({ baseUrl: config.baseUrl, token: config.token, strictSsl: config.strictSsl })
+    );
     this.historyOps = new HistoryOperations(this.request);
     this.updateOps = new UpdateOperations(this.entityOps);
     this.configOps = new ConfigOperations(this.request);
@@ -226,8 +232,8 @@ export class HaClient {
   /**
    * Get automation execution trace
    */
-  async getAutomationTrace(entityId: string): Promise<unknown[]> {
-    return this.automationOps.getAutomationTrace(entityId);
+  async getAutomationTrace(entityId: string, limit?: number): Promise<AutomationTraceSummary[]> {
+    return this.automationOps.getAutomationTrace(entityId, limit);
   }
 
   // ===== History Operations =====

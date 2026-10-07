@@ -79,7 +79,7 @@ high-value questions an LLM can actually answer about your network:
 
 ## Available Tools (60 Total)
 
-### Home Assistant Tools (35)
+### Home Assistant Tools (38)
 
 #### State & Entity Tools
 
@@ -116,6 +116,20 @@ high-value questions an LLM can actually answer about your network:
 | `sendNotification` | Send notifications with full mobile app support (actions, priority, images) |
 | `listNotificationTargets` | Discover available mobile app notification targets |
 
+#### Owner Questions (approval on the phone)
+
+Ask the owner a question as a phone notification with up to 3 buttons and read back the tap. HTTP mode only; needs an **admin** Home Assistant token (button taps are admin-only events) and `MCP_AUTH_SECRET` so open questions survive a restart. Everything except an explicit approving answer counts as NO.
+
+| Tool | Description |
+|------|-------------|
+| `askOwner` | Send the question (plain text, max 256 characters; 1-3 buttons, default Approve / Deny; open up to 7 days) and return a `requestId` at once |
+| `getOwnerAnswer` | Wait up to 50 s per call: `answered` (button index and label, time, HA user), `pending`, `timeout`, `cancelled` or `unknown` |
+| `cancelOwnerQuestion` | Withdraw an open question; the notification changes to "Cancelled" |
+
+Taps are verified with signed button ids and must come from the mobile app (an automation cannot fake one); set `MCP_OWNER_QUESTIONS_HA_USERS` so only your HA user can answer. Only the client that asked can read the answer; at most 3 open questions and 30 per hour per client.
+
+Known limit: cancellations and answers are kept in memory. After a restart, someone with a Home Assistant login could re-send an old button id through HA's own API and answer a question that had been cancelled or denied (the phone no longer shows its buttons). That access already allows controlling the house directly.
+
 #### Automation Tools
 
 | Tool | Description |
@@ -128,7 +142,7 @@ high-value questions an LLM can actually answer about your network:
 | `reloadAutomations` | Reload automations from config |
 | `createAutomation` | Create a new automation |
 | `deleteAutomation` | Delete an automation |
-| `getAutomationTrace` | Get automation execution history |
+| `getAutomationTrace` | Recent runs of an automation, newest first: trigger, result, errors (automations with an `id` only) |
 
 #### System Tools
 
@@ -303,7 +317,9 @@ and dispatch through the same handlers, validation, and RBAC as the MCP face.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MCP_SSE_EVENTS_ENABLED` | `false` | Enable real-time SSE events |
+| `MCP_SSE_EVENTS_ENABLED` | `true` | Enable real-time SSE events |
+| `MCP_OWNER_QUESTIONS_ENABLED` | `true` | Enable `askOwner` / `getOwnerAnswer` / `cancelOwnerQuestion` (HTTP mode with Home Assistant) |
+| `MCP_OWNER_QUESTIONS_HA_USERS` | (any HA user) | Comma-separated Home Assistant user ids allowed to answer owner questions (the `answeredBy` value of an answer) |
 | `MCP_SSE_EVENTS_PATH` | `/subscribe_events` | SSE endpoint path |
 
 ### Optional - Rate Limiting

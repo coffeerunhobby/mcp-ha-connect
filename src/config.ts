@@ -80,6 +80,8 @@ const envSchema = z
 
     // SSE Event Subscription Configuration
     sseEventsEnabled: createBooleanStringSchema(true),
+    ownerQuestionsEnabled: createBooleanStringSchema(true),
+    ownerQuestionsHaUsers: z.string().optional(),
     sseEventsPath: z.string().optional(),
 
     // Rate Limiting Configuration
@@ -230,6 +232,10 @@ export interface EnvironmentConfig {
 
   // SSE Event Subscription Configuration
   sseEventsEnabled: boolean;
+  /** askOwner / getOwnerAnswer / cancelOwnerQuestion (HTTP mode with Home Assistant). */
+  ownerQuestionsEnabled: boolean;
+  /** HA user ids allowed to answer owner questions; empty = any HA user. */
+  ownerQuestionsHaUsers: string[];
   sseEventsPath: string;
 
   // Rate Limiting Configuration
@@ -301,6 +307,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
 
     // SSE Event Subscription Configuration
     sseEventsEnabled: env.MCP_SSE_EVENTS_ENABLED,
+    ownerQuestionsEnabled: env.MCP_OWNER_QUESTIONS_ENABLED,
+    ownerQuestionsHaUsers: env.MCP_OWNER_QUESTIONS_HA_USERS,
     sseEventsPath: env.MCP_SSE_EVENTS_PATH,
 
     // Rate Limiting Configuration
@@ -401,6 +409,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
 
     // SSE Event Subscription Configuration
     sseEventsEnabled: parsed.data.sseEventsEnabled,
+    ownerQuestionsEnabled: parsed.data.ownerQuestionsEnabled,
+    ownerQuestionsHaUsers: (parsed.data.ownerQuestionsHaUsers ?? '').split(',').map((u) => u.trim()).filter(Boolean),
     sseEventsPath: parsed.data.sseEventsPath ?? '/subscribe_events',
 
     // Rate Limiting Configuration

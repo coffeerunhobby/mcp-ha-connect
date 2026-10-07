@@ -12,6 +12,7 @@ import type { LocalAIClient } from '../localAI/index.js';
 import type { OmadaClient } from '../omadaClient/index.js';
 import { logger } from '../utils/logger.js';
 import { createServer } from './common.js';
+import type { OwnerQuestionService } from '../ownerQuestions/service.js';
 import type { AuthenticatedRequest } from './auth.js';
 
 interface StreamTransportState {
@@ -27,6 +28,7 @@ export interface StreamTransportOptions {
   omadaClient?: OmadaClient;
   aiClient?: LocalAIClient;
   config: EnvironmentConfig;
+  ownerQuestions?: OwnerQuestionService;
 }
 
 export interface TransportSecurityOptions {
@@ -94,11 +96,12 @@ export function buildTransportSecurityOptions(config: EnvironmentConfig): Transp
  * This implements the MCP protocol version 2025-03-26
  */
 export function createStreamTransport(options: StreamTransportOptions, callerPermissions?: number): StreamTransportState {
-  const { haClient, omadaClient, aiClient, config } = options;
+  const { haClient, omadaClient, aiClient, config, ownerQuestions } = options;
   const mcpServer = createServer({
     haClient,
     omadaClient,
     aiClient,
+    ownerQuestions,
     restActions: config.restActions,
     toolRegistrationMode: config.toolRegistrationMode,
     // Hide tools this caller can never use from tools/list (RBAC still enforced per call).

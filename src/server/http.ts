@@ -15,6 +15,7 @@ import { handleEventSubscription } from './eventSubscription.js';
 import { RateLimiter } from './rateLimiter.js';
 import { createAuthMiddleware } from './auth.js';
 import { sanitizeError } from '../utils/sanitizeError.js';
+import { OwnerQuestionService } from '../ownerQuestions/service.js';
 import {
   LEGACY_BINDINGS,
   resolveChatBindings,
@@ -343,23 +344,45 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
     audience: config.authAudience,
   });
 
-  // Initialize event subscriber if SSE events are enabled and HA is configured
+  // Initialize the HA event subscriber when SSE events or owner questions need it
   let eventSubscriber: EventSubscriber | null = null;
-  if (config.sseEventsEnabled && config.baseUrl && config.token) {
+  if ((config.sseEventsEnabled || config.ownerQuestionsEnabled) && config.baseUrl && config.token) {
     eventSubscriber = new EventSubscriber({
       baseUrl: config.baseUrl,
       token: config.token,
+      strictSsl: config.strictSsl,
     });
 
-    // Connect to Home Assistant WebSocket
+    // Connect to Home Assistant WebSocket. On failure the subscriber keeps
+    // retrying in the background; it is kept (not dropped) so events and owner
+    // questions start working as soon as Home Assistant is reachable.
     try {
       await eventSubscriber.connect();
       logger.info('Event subscriber connected to Home Assistant');
     } catch (error) {
-      logger.warn('Failed to connect event subscriber, SSE events will be unavailable', {
+      logger.warn('Home Assistant WebSocket not reachable yet; retrying in the background', {
         error: error instanceof Error ? error.message : String(error),
       });
-      eventSubscriber = null;
+    }
+  }
+
+  // Owner questions (askOwner & co.) listen for notification taps on the subscriber.
+  let ownerQuestions: OwnerQuestionService | undefined;
+  if (config.ownerQuestionsEnabled && eventSubscriber && client) {
+    const subscriber = eventSubscriber;
+    const service = new OwnerQuestionService({
+      notify: (target, serviceData) => client.callService({ domain: 'notify', service: target, service_data: serviceData }),
+      subscribe: (eventType, callback, onRejected) => subscriber.subscribeEventType(eventType, callback, onRejected),
+      secret: config.authSecret,
+      allowedUserIds: config.ownerQuestionsHaUsers,
+    });
+    try {
+      await service.start();
+      ownerQuestions = service;
+    } catch (error) {
+      logger.warn('Owner questions unavailable: could not subscribe to notification taps', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -482,7 +505,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const existingState = sessionId ? sessions.get(sessionId) : undefined;
 
         const body = req.method !== 'GET' ? await parseBody(req) : undefined;
-        const streamOptions: StreamTransportOptions = { haClient: client, omadaClient, aiClient, config };
+        const streamOptions: StreamTransportOptions = { haClient: client, omadaClient, aiClient, config, ownerQuestions };
         const state = await handleStreamRequest(streamOptions, req, res, body, existingState);
 
         if (state && config.stateful && sessionId) {
@@ -562,6 +585,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
     sessions.clear();
 
     // Close event subscriber
+    ownerQuestions?.stop();
     if (eventSubscriber) {
       eventSubscriber.disconnect();
     }
