@@ -44,11 +44,9 @@ Home Assistant, TP-Link Omada, and Local AI integration.
 
 ## Secrets & Credentials
 
-Server secrets live in the NAS `.env` file. The one release secret — the GHCR push token
-(a GitHub classic PAT with `write:packages`, used for the Docker push in step 5) — lives only
-in the maintainer's password manager. Never store it as an environment variable, in a file, in
-a commit, in chat, or in this file; fetch it at push time and pipe it to `docker login
---password-stdin`.
+Server secrets live in the NAS `.env` file. Releasing needs **no secret at all**: npm
+publishes via OIDC (step 4) and the Docker image is pushed by CI with the run's own
+`GITHUB_TOKEN` (step 5). No personal access token is involved.
 
 ### npm publishing needs no token
 
@@ -107,24 +105,27 @@ the GitHub Release (idempotent — a manual `gh release create` just no-ops).
 > ```
 > `npm whoami` from the agent returns 401 (no session) — expected, not a failure.
 
-### 5. Docker build & push — via WSL (NO Docker Desktop)
+### 5. Docker image — AUTOMATED by CI (do NOT build or push by hand)
 
-**Docker Desktop is not used on this box.** The working engine is **Docker CE inside
-WSL2 Ubuntu-24.04**. CI's `docker-smoke` job only *boot-tests* the image — it does
-**not** push to GHCR, so this push is the one genuinely manual release leg.
+**The same `v*` tag also publishes the image.** The `publish-image` job in
+`.github/workflows/ci.yml` runs after the test matrix and the `docker-smoke` boot test:
+it builds the image, boot-tests **that exact image** (`scripts/ci/smoke.sh`), scans it
+with Trivy (pinned) **before** pushing — a fixable HIGH/CRITICAL vulnerability fails the
+release — then pushes `ghcr.io/coffeerunhobby/mcp-ha-connect:X.Y.Z`, and moves `:latest`
+only for the newest final release (`vX.Y.Z`; pre-releases such as `-rc.1` and re-runs of
+older releases never move it; image publishes run one at a time). The decisions live in
+`scripts/ci/publish-image.ts` (unit-tested). It logs in with
+the run's own `GITHUB_TOKEN` (`packages: write`) — no personal token. Runners are
+amd64, the NAS architecture.
 
-```powershell
-# GHCR login — token fetched from the maintainer's password manager at push time and piped
-# over stdin (never a command-line arg or env var). WSL keeps the login for the push below.
-<token from password manager> | wsl -d Ubuntu-24.04 -- bash -lc "docker login ghcr.io -u coffeerunhobby --password-stdin"
-
-# Build (repo is /mnt/c/workspace/mcp inside WSL) + push both tags
-wsl -d Ubuntu-24.04 -- bash -lc "cd /mnt/c/workspace/mcp && docker build --no-cache -t ghcr.io/coffeerunhobby/mcp-ha-connect:X.Y.Z -t ghcr.io/coffeerunhobby/mcp-ha-connect:latest ."
-wsl -d Ubuntu-24.04 -- bash -lc "docker push ghcr.io/coffeerunhobby/mcp-ha-connect:X.Y.Z && docker push ghcr.io/coffeerunhobby/mcp-ha-connect:latest"
-```
-
-WSL2 is amd64 = the NAS arch, so a plain `docker build` (not `buildx --platform`)
-produces the correct image.
+> Agent rule: just push the tag, then verify:
+> ```powershell
+> gh run list --limit 3    # publish-image green on the v tag
+> gh api users/coffeerunhobby/packages/container/mcp-ha-connect/versions --jq '.[0].metadata.container.tags'
+> ```
+> If the push fails with `permission_denied: write_package`, grant the repository
+> write access once: package page → Package settings → Manage Actions access → add
+> `coffeerunhobby/mcp-ha-connect` with role **Write**.
 
 ### 6. Deploy to NAS
 

@@ -91,37 +91,10 @@ jobs:
       - name: Build image
         run: docker build -t mcp-smoke:ci .
 
+      # The boot test lives in scripts/ci/smoke.sh so publish-image can run the
+      # same check on the exact image it publishes.
       - name: Boot against a mock HA and assert /health
-        run: |
-          set -eu
-          docker network create smoke
-          # Mock HA: 200 {"message":"API running."} — the same body the real
-          # /api/ startup check (checkApi) expects.
-          docker run -d --name mockha --network smoke node:24-alpine \
-            node -e 'require("http").createServer((q,s)=>{s.writeHead(200,{"Content-Type":"application/json"});s.end(JSON.stringify({message:"API running."}))}).listen(8123,()=>console.log("mock HA up"))'
-          # HA_STRICT_SSL=false mirrors the REAL NAS config — the exact combination
-          # (http HA + strictSsl=false) that crash-looped v1.5.5 on a node:26 base
-          # (npm-undici-6 dispatcher passed to Node's built-in fetch -> "invalid
-          # onError method" -> "fetch failed"). The smoke must boot with it forever.
-          docker run -d --name mcp --network smoke \
-            -e MCP_SERVER_USE_HTTP=true \
-            -e MCP_HTTP_PORT=3000 -e MCP_HTTP_BIND_ADDR=0.0.0.0 \
-            -e MCP_HTTP_ENABLE_HEALTHCHECK=true -e MCP_HTTP_HEALTHCHECK_PATH=/health \
-            -e MCP_AUTH_METHOD=bearer -e MCP_AUTH_SECRET=ci-smoke-dummy-secret-0123456789 \
-            -e HA_PLUGIN_ENABLED=true -e HA_URL=http://mockha:8123 -e HA_TOKEN=ci-dummy \
-            -e HA_STRICT_SSL=false \
-            -e AI_PLUGIN_ENABLED=false -e OMADA_PLUGIN_ENABLED=false \
-            mcp-smoke:ci
-          for i in $(seq 1 15); do
-            if docker run --rm --network smoke curlimages/curl:latest -sf http://mcp:3000/health >/dev/null 2>&1; then
-              echo "smoke OK: image boots, startup HA check passes, /health answers"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "SMOKE FAILED — container logs:"
-          docker logs mcp
-          exit 1
+        run: bash scripts/ci/smoke.sh mcp-smoke:ci
 
   publish-npm:
     # Tokenless npm publish via OIDC trusted publishing (one-time npmjs.com config:
@@ -169,6 +142,59 @@ jobs:
           fi
           # Belt-and-braces: the tarball npm just packed must contain the entrypoint.
           npm pack --dry-run 2>&1 | grep -q 'dist/index.js' || { echo "FATAL: packed tarball missing dist/index.js"; exit 1; }
+
+  publish-image:
+    # Build, boot-test, scan and push the release image to GHCR on a `v*` tag,
+    # after the test matrix and the docker-smoke job pass. Replaces the manual WSL
+    # build/push leg: it authenticates with this run's own GITHUB_TOKEN
+    # (packages: write), so no personal access token exists anywhere.
+    # The image that is pushed is the one this job boot-tested and scanned; the
+    # decisions (tag = version, scan before push, latest only for the newest final release)
+    # live in scripts/ci/publish-image.ts and are unit-tested.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-test-lint, docker-smoke]
+    runs-on: ubuntu-latest
+    # One image publish at a time, across tags: an older release's run can never
+    # move `latest` after a newer one (the newest-tag check runs inside the lock).
+    concurrency:
+      group: publish-image
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/coffeerunhobby/mcp-ha-connect
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Node 24 runs scripts/ci/publish-image.ts directly (type stripping).
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+
+      - name: Build
+        run: |
+          set -eu
+          VER=$(node -p "require('./package.json').version")
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          docker build --pull -t "$IMAGE:$VER" .
+
+      - name: Boot-test this exact image
+        run: bash scripts/ci/smoke.sh "$IMAGE:$VER"
+
+      - name: Log in to GHCR (this run's token, never a personal one)
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: printenv GHCR_TOKEN | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Scan, push, move latest if newest final release
+        run: node scripts/ci/publish-image.ts
+
+      - name: Log out
+        if: always()
+        run: docker logout ghcr.io
 
   release:
     # Auto-create the GitHub Release when a `v*` tag passes BOTH gates above —
