@@ -25,6 +25,8 @@ import { buildTimeRange, describeTimeRange, type TimeRangeEntry, type TimeWindow
 
 export const IP_GROUP_TYPE = 0;
 const SWITCH_ACL_PAGE_SIZE = 50;
+/** WLAN group id under which Omada lists every SSID a second time (no SSID detail there). */
+const PSEUDO_WLAN_ID = 'gateway';
 /** All protocols, in Omada's ACL protocol numbering. */
 export const ALL_PROTOCOLS = 256;
 
@@ -217,14 +219,11 @@ export class AccessControlOperations {
     /** What references a time range: gateway and switch ACL rules, SSID WLAN schedules. */
     private async timeRangeUsers(profileId: string, siteId: string): Promise<string[]> {
         const users = (await this.listGatewayAcls(siteId)).filter((a) => a.timeRangeId === profileId).map((a) => `gateway ACL '${a.description}'`);
-        // The switch ACL list rejects page sizes above 50 or so (errorCode -1001 with 200).
         const switchAcls = await this.request.fetchPaginated<GatewayAcl>(this.sitePath(siteId, '/acls/osw-acls'), { pageSize: SWITCH_ACL_PAGE_SIZE });
         users.push(...switchAcls.filter((a) => a.timeRangeId === profileId).map((a) => `switch ACL '${a.description}'`));
-        for (const wlan of await this.network.listAllSsids(siteId)) {
-            for (const ssid of wlan.ssidList ?? []) {
-                const detail = (await this.network.getSsidDetail(wlan.wlanId, ssid.ssidId, siteId)) as { wlanSchedule?: { scheduleId?: string } };
-                if (detail?.wlanSchedule?.scheduleId === profileId) users.push(`the Wi-Fi schedule of SSID ${ssid.ssidName}`);
-            }
+        for (const ssid of await this.listSsids(siteId)) {
+            const detail = (await this.network.getSsidDetail(ssid.wlanId, ssid.ssidId, siteId)) as { wlanSchedule?: { scheduleId?: string } };
+            if (detail?.wlanSchedule?.scheduleId === profileId) users.push(`the Wi-Fi schedule of SSID ${ssid.ssidName}`);
         }
         return users;
     }
@@ -490,7 +489,7 @@ export class AccessControlOperations {
                 ? (await this.listIpGroups(siteId)).map((g) => ({ id: g.groupId, name: g.name }))
                 : type === 'network'
                   ? ((await this.network.getLanNetworkList(siteId)) as Array<{ id: string; name: string }>).map((n) => ({ id: n.id, name: n.name }))
-                  : (await this.network.listAllSsids(siteId)).flatMap((w) => (w.ssidList ?? []).map((s) => ({ id: s.ssidId, name: s.ssidName })));
+                  : (await this.listSsids(siteId)).map((s) => ({ id: s.ssidId, name: s.ssidName }));
         return values.map((v) => resolveByIdOrName(candidates, v, (c) => c.id, (c) => c.name, typeLabel(type)).id);
     }
 
@@ -511,13 +510,26 @@ export class AccessControlOperations {
 
     private async listSsidFilters(siteId: string) {
         const result: Array<{ wlanId: string; ssidId: string; ssidName: string; filter: { macFilterEnable?: boolean; policy?: number; macFilterId?: string } }> = [];
-        for (const wlan of await this.network.listAllSsids(siteId)) {
-            for (const s of wlan.ssidList ?? []) {
-                const detail = (await this.network.getSsidDetail(wlan.wlanId, s.ssidId, siteId)) as { macFilter?: Record<string, unknown> };
-                result.push({ wlanId: wlan.wlanId, ssidId: s.ssidId, ssidName: s.ssidName, filter: (detail?.macFilter ?? {}) as never });
-            }
+        for (const s of await this.listSsids(siteId)) {
+            const detail = (await this.network.getSsidDetail(s.wlanId, s.ssidId, siteId)) as { macFilter?: Record<string, unknown> };
+            result.push({ ...s, filter: (detail?.macFilter ?? {}) as never });
         }
         return result;
+    }
+
+    /**
+     * Each SSID once, with its real WLAN group. Omada also lists every SSID under a
+     * pseudo WLAN group 'gateway', which has no SSID detail (errorCode -1001).
+     */
+    private async listSsids(siteId: string): Promise<Array<{ wlanId: string; ssidId: string; ssidName: string }>> {
+        const seen = new Map<string, { wlanId: string; ssidId: string; ssidName: string }>();
+        for (const wlan of await this.network.listAllSsids(siteId)) {
+            if (wlan.wlanId === PSEUDO_WLAN_ID) continue;
+            for (const s of wlan.ssidList ?? []) {
+                if (!seen.has(s.ssidId)) seen.set(s.ssidId, { wlanId: wlan.wlanId, ssidId: s.ssidId, ssidName: s.ssidName });
+            }
+        }
+        return [...seen.values()];
     }
 
     /**

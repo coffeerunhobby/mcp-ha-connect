@@ -102,6 +102,18 @@ describe('NetworkOperations.setSsidEnabled', () => {
         expect(result).toMatchObject({ ssidId: 'ssid-guest', ssidName: 'Tower-Guest', enabled: true });
     });
 
+    it("never targets the pseudo WLAN group 'gateway' Omada lists every SSID under again", async () => {
+        request.get.mockResolvedValueOnce(ok([{ wlanId: 'gateway', wlanName: 'gateway', ssidList: WLANS[0].ssidList }, ...WLANS]));
+        request.patch.mockResolvedValue(ok());
+
+        await ops.setSsidEnabled('Tower-Guest', true);
+
+        expect(request.patch).toHaveBeenCalledWith(
+            '/openapi/v1/omadac1/sites/site-1/wireless-network/wlans/wlan-1/ssids/ssid-guest/update-wlan-schedule',
+            { wlanScheduleEnable: false }
+        );
+    });
+
     it('resolves the SSID case-insensitively by name, or exactly by ssidId', async () => {
         request.get.mockResolvedValue(ok(WLANS));
         request.patch.mockResolvedValue(ok());

@@ -195,6 +195,8 @@ export class NetworkOperations {
         const needle = ssid.trim().toLowerCase();
         let match: { wlanId: string; ssidId: string; ssidName: string } | undefined;
         for (const wlan of wlans) {
+            // Omada lists every SSID again under a pseudo WLAN group 'gateway' that cannot be updated.
+            if (wlan.wlanId === 'gateway') continue;
             for (const s of wlan.ssidList ?? []) {
                 if (s.ssidId === ssid || s.ssidName.toLowerCase() === needle) {
                     match = { wlanId: wlan.wlanId, ssidId: s.ssidId, ssidName: s.ssidName };

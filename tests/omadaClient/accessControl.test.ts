@@ -96,8 +96,15 @@ function controller() {
             { id: 'lan-default', name: 'Default', gatewaySubnet: '10.0.0.1/24' },
             { id: 'lan-iot', name: 'IoT', gatewaySubnet: '10.0.1.1/24' },
         ]),
-        listAllSsids: vi.fn(async () => [{ wlanId: 'w1', wlanName: 'Home', ssidList: [{ ssidId: 's1', ssidName: 'home-wifi' }] }]),
-        getSsidDetail: vi.fn(async () => ({ name: 'home-wifi', macFilter: structuredClone(state.macFilter), wlanSchedule: structuredClone(state.wlanSchedule) })),
+        // Like the real controller: every SSID again (here listed first) under a pseudo WLAN group 'gateway' without SSID detail.
+        listAllSsids: vi.fn(async () => [
+            { wlanId: 'gateway', wlanName: 'gateway', ssidList: [{ ssidId: 's1', ssidName: 'home-wifi' }] },
+            { wlanId: 'w1', wlanName: 'Home', ssidList: [{ ssidId: 's1', ssidName: 'home-wifi' }] },
+        ]),
+        getSsidDetail: vi.fn(async (wlanId: string) => {
+            if (wlanId === 'gateway') throw new Error('Invalid request parameters.');
+            return { name: 'home-wifi', macFilter: structuredClone(state.macFilter), wlanSchedule: structuredClone(state.wlanSchedule) };
+        }),
     } as unknown as NetworkOperations;
     // Slow like a real controller, so other calls can interleave with a lockout check.
     const clients = {
