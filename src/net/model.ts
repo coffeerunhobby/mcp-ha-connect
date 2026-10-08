@@ -177,7 +177,12 @@ export interface Rule {
     enabled: boolean;
     /** 1 = evaluated first. */
     position: number;
-    /** Rules found on the controller that this model can't express faithfully (shown read-only). */
+    /**
+     * Set on rules found on the controller that this model can't express faithfully
+     * (shown read-only, never changed through the model). Rules built by hand that it CAN
+     * express (e.g. the Omada curfew: IP-group source, LAN→WAN, time range) are read as
+     * ordinary rules, so they can be recreated on another vendor.
+     */
     foreign?: { reason: string };
 }
 
