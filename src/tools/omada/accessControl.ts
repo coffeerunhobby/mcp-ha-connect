@@ -18,7 +18,10 @@ const windows = z.array(windowSchema).min(1).max(50);
 const invertWindows = z
     .boolean()
     .optional()
-    .describe('If true, the windows are the FREE times and the profile covers every other time of the week (curfew: give the allowed hours)');
+    .describe(
+        'If true, the windows are the FREE times and the profile covers every other time of the week. A profile holds at most 7 windows, ' +
+            'so for a curfew use two profiles: one with the free time from the start of play to 24:00 (= blocked mornings), one with 00:00 to the end of play (= blocked evenings)'
+    );
 
 const endpoint = <const T extends readonly [string, ...string[]]>(types: T) =>
     z.object({
@@ -128,8 +131,9 @@ export function registerOmadaAccessControlTools(server: McpServer, client: Omada
         'omada_createTimeRange',
         {
             description:
-                'Create a time-range profile (a weekly schedule in quarter hours) for gateway ACL rules. With invertWindows the windows are ' +
-                'the free times and the profile covers the rest, e.g. give the allowed play hours to get the curfew hours.',
+                'Create a time-range profile (a weekly schedule in quarter hours, at most 7 windows) for gateway ACL rules. With invertWindows the ' +
+                'windows are the free times and the profile covers the rest. A schedule with two windows on several days (e.g. curfew mornings and ' +
+                'evenings) needs two profiles, each with its own rule.',
             inputSchema: createTimeRangeSchema,
         },
         wrapToolHandler(

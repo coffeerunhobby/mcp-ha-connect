@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { buildTimeRange, describeTimeRange, parseTime } from '../../src/omadaClient/timeRange.js';
+import { buildTimeRange, describeTimeRange, parseTime, type Day } from '../../src/omadaClient/timeRange.js';
 
 describe('parseTime', () => {
     it('reads quarter hours, including 24:00', () => {
@@ -43,35 +43,57 @@ describe('buildTimeRange', () => {
         });
     });
 
-    it('inverts allowed hours into the curfew hours of each day', () => {
+    it('inverts allowed hours into the blocked ones (the live curfew morning profile)', () => {
+        // Free from the start of play time to midnight -> blocked from midnight to the start of play time.
         const body = buildTimeRange(
-            'Curfew',
+            'Curfew morning',
             [
-                { days: ['mon', 'tue', 'wed', 'thu'], start: '14:30', end: '19:00' },
-                { days: ['fri'], start: '14:00', end: '19:30' },
-                { days: ['sat'], start: '09:00', end: '19:00' },
-                { days: ['sun'], start: '10:00', end: '19:00' },
+                { days: ['mon', 'tue', 'wed', 'thu'], start: '14:30', end: '24:00' },
+                { days: ['fri'], start: '14:00', end: '24:00' },
+                { days: ['sat'], start: '09:00', end: '24:00' },
+                { days: ['sun'], start: '10:00', end: '24:00' },
             ],
             true
         );
 
         expect(describeTimeRange(body)).toEqual([
             'mon 00:00-14:30',
-            'mon 19:00-24:00',
             'tue 00:00-14:30',
-            'tue 19:00-24:00',
             'wed 00:00-14:30',
-            'wed 19:00-24:00',
             'thu 00:00-14:30',
-            'thu 19:00-24:00',
             'fri 00:00-14:00',
-            'fri 19:30-24:00',
             'sat 00:00-09:00',
-            'sat 19:00-24:00',
             'sun 00:00-10:00',
-            'sun 19:00-24:00',
         ]);
         expect(Object.values(body.customDayMode!).every(Boolean)).toBe(true);
+    });
+
+    it('refuses a whole inverted curfew week in one profile: Omada holds at most 7 windows', () => {
+        const allowed = [
+            { days: ['mon', 'tue', 'wed', 'thu'] as Day[], start: '14:30', end: '19:00' },
+            { days: ['fri'] as Day[], start: '14:00', end: '19:30' },
+            { days: ['sat'] as Day[], start: '09:00', end: '19:00' },
+            { days: ['sun'] as Day[], start: '10:00', end: '19:00' },
+        ];
+
+        expect(() => buildTimeRange('Curfew', allowed, true)).toThrow(
+            /needs 14 time windows, but an Omada time range holds at most 7\. Split it into two time ranges.*Nothing was sent/
+        );
+    });
+
+    it('accepts 7 windows, two on one day, and refuses 8', () => {
+        const seven = buildTimeRange('Seven', [
+            { days: ['mon'], start: '08:00', end: '09:00' },
+            { days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'], start: '20:00', end: '21:00' },
+        ]);
+        expect(seven.timeList).toHaveLength(7);
+
+        expect(() =>
+            buildTimeRange('Eight', [
+                { days: ['mon', 'tue'], start: '08:00', end: '09:00' },
+                { days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'], start: '20:00', end: '21:00' },
+            ])
+        ).toThrow(/needs 8 time windows/);
     });
 
     it('inverting covers whole days that have no free window', () => {

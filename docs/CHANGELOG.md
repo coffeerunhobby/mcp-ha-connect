@@ -1,3 +1,8 @@
+### 2.4.3
+- **Fix — `omada_createTimeRange` / `omada_updateTimeRange` sent schedules the controller cannot hold.** An Omada time range holds at most 7 windows (seen on the OC200: 7 accepted, also two on one day; 8 refused with "The number of time range per entry has reached the limit"). An inverted curfew needs two windows on most days, so it always failed with that message. The tools now refuse such a schedule before calling the controller and say how to split it: one time range for the mornings, one for the evenings, each with its own rule (how the live curfew was built). The tool descriptions say so up front.
+- README: the limit is noted.
+- +4 tests (the limit at 7/8, the refusal without a controller call, the morning profile via `invertWindows`; mutation-checked).
+
 ### 2.4.2
 - **Fix — `omada_deleteTimeRange` still failed with "Invalid request parameters"; so did `omada_setSsidMacFilter` and deleting a MAC group.** The real cause: Omada lists every SSID a second time under a pseudo WLAN group `gateway`, which has no SSID detail. Every check that reads SSID details (time range used by a Wi-Fi schedule, MAC group used by an SSID filter, the SSID filter itself) now reads each SSID once, in its real WLAN group. `omada_setSsidEnabled` skips the pseudo group too. **Correction:** 2.4.1 blamed the switch ACL page size; that was a misread log line. Its smaller page size is harmless and stays. Nothing was ever deleted by the failed calls: the checks run before any write.
 - +1 test, and the fake controller in the access control tests now lists the pseudo group first, like a worst case of the real one (mutation-checked).

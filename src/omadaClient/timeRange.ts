@@ -34,6 +34,12 @@ export interface TimeRangeBody {
 const DAY_MODE_CUSTOM = 3;
 const DAY_KEYS = ['dayMon', 'dayTue', 'dayWed', 'dayThu', 'dayFri', 'daySat', 'daySun'] as const;
 const DAY_END = 24 * 60;
+/**
+ * Most time windows one Omada profile holds. Seen on the live controller (OC200):
+ * 7 entries are accepted (two on one day too), 8 are refused with "The number of
+ * time range per entry has reached the limit".
+ */
+export const MAX_TIME_RANGE_ENTRIES = 7;
 
 /** "14:30" -> 870. Only quarter hours, 00:00 to 24:00. */
 export function parseTime(value: string): number {
@@ -109,6 +115,14 @@ export function buildTimeRange(name: string, windows: TimeWindow[], invert = fal
         for (const [s, e] of list) {
             timeList.push({ dayType: day, startTimeH: Math.floor(s / 60), startTimeM: s % 60, endTimeH: Math.floor(e / 60), endTimeM: e % 60 });
         }
+    }
+    // More than 7 entries always means a day with two windows (e.g. the hours before and after an allowed window).
+    if (timeList.length > MAX_TIME_RANGE_ENTRIES) {
+        throw new Error(
+            `This schedule needs ${timeList.length} time windows, but an Omada time range holds at most ${MAX_TIME_RANGE_ENTRIES}. ` +
+                'Split it into two time ranges, e.g. one for the mornings and one for the evenings, each with its own rule. ' +
+                'Nothing was sent to the controller.'
+        );
     }
     const customDayMode = Object.fromEntries(DAY_KEYS.map((key, i) => [key, covered.has(i + 1)])) as TimeRangeBody['customDayMode'];
     return { name, dayMode: DAY_MODE_CUSTOM, customDayMode, timeList };

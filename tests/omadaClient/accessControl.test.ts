@@ -122,12 +122,19 @@ describe('time ranges', () => {
     it('creates a curfew from the allowed hours and finds its id again', async () => {
         const { writes, ops } = controller();
 
-        const result = await ops.createTimeRange('Curfew', [{ days: ['sat'], start: '09:00', end: '19:00' }], { invert: true });
+        const result = await ops.createTimeRange('Curfew', [{ days: ['sat'], start: '09:00', end: '24:00' }], { invert: true });
 
         expect(result.profileId).toBe('tr-new');
         expect(result.windows).toContain('sat 00:00-09:00');
         expect(result.windows).toContain('mon 00:00-24:00');
         expect(writes).toEqual([{ method: 'POST', url: `${base}/time-range-profiles`, data: expect.objectContaining({ name: 'Curfew', dayMode: 3 }) }]);
+    });
+
+    it('refuses a schedule over the 7-window limit without calling the controller', async () => {
+        const { writes, ops } = controller();
+
+        await expect(ops.createTimeRange('Curfew', [{ days: ['sat'], start: '09:00', end: '19:00' }], { invert: true })).rejects.toThrow(/needs 8 time windows/);
+        expect(writes).toEqual([]);
     });
 
     it('refuses a duplicate name', async () => {

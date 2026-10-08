@@ -224,7 +224,7 @@ Lets the controller enforce a schedule itself (e.g. a curfew) instead of a daily
 | Tool | Description |
 |------|-------------|
 | `omada_listAccessControl` | Time ranges (readable windows), IP groups and gateway ACL rules with names and schedules (graph mode: `omada_read` `/profiles/time-range`, `/profiles/ip-groups`, `/network/acls/gateway`) |
-| `omada_createTimeRange` / `omada_updateTimeRange` / `omada_deleteTimeRange` | Weekly schedules in quarter hours, e.g. `{days:["mon","tue"], start:"14:30", end:"19:00"}`; `invertWindows` turns allowed hours into the blocked ones. Delete is refused while a rule uses it |
+| `omada_createTimeRange` / `omada_updateTimeRange` / `omada_deleteTimeRange` | Weekly schedules in quarter hours, e.g. `{days:["mon","tue"], start:"14:30", end:"19:00"}`; `invertWindows` turns allowed hours into the blocked ones. At most 7 windows per profile (a curfew needs a morning and an evening profile). Delete is refused while a rule uses it |
 | `omada_createGroup` / `omada_deleteGroup` | IP groups (ACL sources/destinations) and MAC groups (SSID allow/deny lists); delete is refused for built-in groups and groups in use |
 | `omada_setDhcpReservation` / `omada_removeDhcpReservation` | Fixed IP for a device (so an ACL can match it); refuses an address reserved for another device |
 | `omada_createGatewayAcl` / `omada_updateGatewayAcl` / `omada_deleteGatewayAcl` / `omada_moveGatewayAcl` | Gateway (router) LAN-to-internet rules: allow/deny a source (IP group, LAN network or SSID), optionally only during a time range; covers wired and Wi-Fi |
