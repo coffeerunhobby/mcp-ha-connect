@@ -217,7 +217,8 @@ export class RequestHandler {
     }
 
     /**
-     * Fetch all pages of a paginated API endpoint.
+     * Fetch all pages of a paginated API endpoint. `params.pageSize` overrides the
+     * default for endpoints with a lower limit (the switch ACL list rejects 200).
      */
     public async fetchPaginated<T>(path: string, params: Record<string, unknown> = {}): Promise<T[]> {
         const records: T[] = [];
@@ -227,9 +228,9 @@ export class RequestHandler {
         // Fetch sequential pages because OpenAPI requires explicit pagination parameters.
         do {
             const response = await this.get<OmadaApiResponse<PaginatedResult<T>>>(path, {
+                pageSize: DEFAULT_PAGE_SIZE,
                 ...params,
                 page,
-                pageSize: DEFAULT_PAGE_SIZE,
             });
 
             const result = this.ensureSuccess(response);

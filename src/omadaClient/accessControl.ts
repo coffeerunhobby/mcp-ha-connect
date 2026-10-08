@@ -24,6 +24,7 @@ import type { SiteOperations } from './site.js';
 import { buildTimeRange, describeTimeRange, type TimeRangeEntry, type TimeWindow } from './timeRange.js';
 
 export const IP_GROUP_TYPE = 0;
+const SWITCH_ACL_PAGE_SIZE = 50;
 /** All protocols, in Omada's ACL protocol numbering. */
 export const ALL_PROTOCOLS = 256;
 
@@ -216,7 +217,8 @@ export class AccessControlOperations {
     /** What references a time range: gateway and switch ACL rules, SSID WLAN schedules. */
     private async timeRangeUsers(profileId: string, siteId: string): Promise<string[]> {
         const users = (await this.listGatewayAcls(siteId)).filter((a) => a.timeRangeId === profileId).map((a) => `gateway ACL '${a.description}'`);
-        const switchAcls = await this.request.fetchPaginated<GatewayAcl>(this.sitePath(siteId, '/acls/osw-acls'));
+        // The switch ACL list rejects page sizes above 50 or so (errorCode -1001 with 200).
+        const switchAcls = await this.request.fetchPaginated<GatewayAcl>(this.sitePath(siteId, '/acls/osw-acls'), { pageSize: SWITCH_ACL_PAGE_SIZE });
         users.push(...switchAcls.filter((a) => a.timeRangeId === profileId).map((a) => `switch ACL '${a.description}'`));
         for (const wlan of await this.network.listAllSsids(siteId)) {
             for (const ssid of wlan.ssidList ?? []) {

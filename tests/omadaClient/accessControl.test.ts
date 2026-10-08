@@ -108,7 +108,7 @@ function controller() {
     } as unknown as ClientOperations;
     const macGroups = new MacGroupOperations(request as unknown as RequestHandler, site, buildPath);
     const ops = new AccessControlOperations(request as unknown as RequestHandler, site, buildPath, network, macGroups, clients);
-    return { state, writes, ops, macGroups, filterWrittenWith };
+    return { state, writes, ops, macGroups, filterWrittenWith, request };
 }
 
 describe('time ranges', () => {
@@ -140,7 +140,7 @@ describe('time ranges', () => {
     });
 
     it('refuses to delete a time range a switch ACL or an SSID Wi-Fi schedule uses', async () => {
-        const { state, writes, ops } = controller();
+        const { state, writes, ops, request } = controller();
 
         state.switchAcls = [{ id: 'sw-1', description: 'Lab ports', timeRangeId: 'tr-1' }];
         await expect(ops.deleteTimeRange('tr-1')).rejects.toThrow(/used by switch ACL 'Lab ports'/);
@@ -149,6 +149,8 @@ describe('time ranges', () => {
         state.wlanSchedule = { wlanScheduleEnable: true, action: 0, scheduleId: 'tr-1' };
         await expect(ops.deleteTimeRange('tr-1')).rejects.toThrow(/used by the Wi-Fi schedule of SSID home-wifi/);
         expect(writes).toEqual([]);
+        // The switch ACL list rejects the default page size of 200.
+        expect(request.fetchPaginated).toHaveBeenCalledWith(`${base}/acls/osw-acls`, { pageSize: 50 });
     });
 
     it('never lets a rule be created on a time range that is being deleted', async () => {
