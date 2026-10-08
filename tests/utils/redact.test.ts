@@ -54,6 +54,30 @@ describe('redactSecrets', () => {
         expect(out).toEqual({ publicKey: 'wg-public', keyId: 'k1', searchKey: 'abc', ppskProfileId: 'p1' });
     });
 
+    it('redacts the SIM PIN/PUK and the dial-up account names of the internet settings (omada_read /network/internet)', () => {
+        const internet = {
+            wanPortSettings: [{ wanPortIpv4Setting: { ipv4Pppoe: { userName: 'isp-login-123', password: 'isp-pw', mssClampingType: 0 } } }],
+            usbLteSettings: [{ pin: '1234', puk: '12345678', simPin: '4321', manuallyConfig: { apn: 'internet.example', username: 'apn-user', password: 'apn-pw' } }],
+        };
+
+        expect(redactSecrets(internet)).toEqual({
+            wanPortSettings: [{ wanPortIpv4Setting: { ipv4Pppoe: { userName: '<redacted>', password: '<redacted>', mssClampingType: 0 } } }],
+            usbLteSettings: [{ pin: '<redacted>', puk: '<redacted>', simPin: '<redacted>', manuallyConfig: { apn: 'internet.example', username: '<redacted>', password: '<redacted>' } }],
+        });
+    });
+
+    it('inside a VPN section redacts only the account name, not the profile name or server', () => {
+        expect(redactSecrets({ clientVpns: [{ name: 'Office', server: 'vpn.example', username: 'vpn-user', serviceName: 'svc' }] })).toEqual({
+            clientVpns: [{ name: 'Office', server: 'vpn.example', username: '<redacted>', serviceName: 'svc' }],
+        });
+    });
+
+    it('keeps ordinary user names and pin-like names outside dial-up and VPN sections', () => {
+        const value = { users: [{ username: 'cristi', name: 'Cristi' }], pinned: 'yes', mapping: 'a', ping: 'ok', pinEnable: true, pinCount: 3 };
+
+        expect(redactSecrets(value)).toEqual(value);
+    });
+
     it('masks tokens inside URLs (Home Assistant camera image)', () => {
         const out = redactSecrets({
             entity_picture: '/api/camera_proxy/camera.door?token=0123456789abcdef&width=640',
@@ -85,6 +109,21 @@ describe('tool responses are redacted', () => {
         const result = toToolResult(ssidDetail);
         expect(result.content[0].text).not.toContain('HouseWifiPassw0rd!');
         expect(result.content[0].text).toContain(REDACTED);
+    });
+
+    it('omada_read of a VPN resource redacts account names in an unwrapped list, but not elsewhere', async () => {
+        const handlers = new Map<string, (args: unknown, extra: unknown) => Promise<{ content: { text: string }[] }>>();
+        const server = { registerTool: vi.fn((name, _c, h) => handlers.set(name, h)) } as unknown as McpServer;
+        const vpnUsers = [{ name: 'Office', username: 'vpn-user', ip: '10.8.0.2' }];
+        const client = { readResource: vi.fn().mockResolvedValue(vpnUsers), listMacGroups: vi.fn().mockResolvedValue([{ name: 'KnownWiFi', username: 'not-an-account' }]) } as unknown as OmadaClient;
+        registerOmadaGraphTools(server, client);
+        const extra = { sessionId: 's', http: { authInfo: { extra: { permissions: 0xff } } } };
+
+        const vpn = JSON.parse((await handlers.get('omada_read')!({ path: '/vpn/client-to-site/clients' }, extra)).content[0].text);
+        const groups = JSON.parse((await handlers.get('omada_read')!({ path: '/profiles/mac-groups' }, extra)).content[0].text);
+
+        expect(vpn).toEqual([{ name: 'Office', username: REDACTED, ip: '10.8.0.2' }]);
+        expect(groups).toEqual([{ name: 'KnownWiFi', username: 'not-an-account' }]);
     });
 
     it('omada_read /wifi/ssids (SSID detail) does not return the Wi-Fi password', async () => {

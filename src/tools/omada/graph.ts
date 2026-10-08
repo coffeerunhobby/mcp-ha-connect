@@ -20,6 +20,7 @@ import { z } from 'zod';
 import type { OmadaClient } from '../../omadaClient/index.js';
 import { hasPermission, getPermissionNames } from '../../permissions/index.js';
 import { toToolResult, wrapToolHandler, getCallerPermissions, setToolVisibilityRule, Permission, type ToolExtra } from '../common.js';
+import { isAccountSection } from '../../utils/redact.js';
 import { OMADA_RESOURCES, childrenOf, getResourceNode, normalizePath, type ReadArgs, type ResourceNode } from './namespace.js';
 
 /** Compact, model-friendly metadata for a node (used in browse output). */
@@ -150,7 +151,8 @@ export function createReadHandler(client: OmadaClient) {
         page: args.page,
         pageSize: args.pageSize,
       };
-      return toToolResult(await node.fetch(client, readArgs));
+      // A VPN or dial-up resource can return a bare list of accounts: redact their names from the top.
+      return toToolResult(await node.fetch(client, readArgs), false, { accountSection: isAccountSection(node.path) });
     }
   );
 }

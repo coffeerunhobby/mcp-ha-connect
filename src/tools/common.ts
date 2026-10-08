@@ -54,10 +54,10 @@ export function getCallerPermissions(extra: ToolExtra): number {
 /**
  * Convert any value to a CallToolResult
  */
-export function toToolResult(value: unknown, isError = false): CallToolResult {
+export function toToolResult(value: unknown, isError = false, redaction: { accountSection?: boolean } = {}): CallToolResult {
   // Every tool response passes here: secrets returned by Home Assistant or Omada
   // (Wi-Fi password, RADIUS/VPN keys, access tokens) never reach the client.
-  const safe = redactSecrets(value);
+  const safe = redactSecrets(value, redaction);
   const text = typeof safe === 'string' ? safe : JSON.stringify(safe, null, 2);
   return {
     content: text ? [{ type: 'text' as const, text }] : [],

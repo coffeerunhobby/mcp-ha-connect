@@ -1,3 +1,8 @@
+### 2.4.4
+- **Security — the SIM PIN of a USB LTE modem was returned in plain text** by `omada_read /network/internet` (`usbLteSettings[].pin`), together with the ISP PPPoE login name and the LTE APN user name (passwords were already redacted). Every tool response now also redacts SIM PIN/PUK fields (`pin`, `simPin`, `pinCode`, `puk`, `puk2`...) and, inside dial-up and VPN sections (PPPoE, L2TP, PPTP, LTE/APN, VPN), account user names, also when a VPN read returns a bare list of accounts (`omada_read` passes the resource path as context). Ordinary names elsewhere (Home Assistant users, devices, profile names) stay readable, and so do fields like `pinEnable`, `ping` or `mapping`.
+- Checked live: every readable `omada_read` node (51, parameterized ones included) was read and scanned for credential-like fields that came back unredacted; these three were the only ones.
+- +4 tests (the internet settings shape, a VPN section, an unwrapped VPN list through `omada_read`, names left alone; mutation-checked).
+
 ### 2.4.3
 - **Fix — `omada_createTimeRange` / `omada_updateTimeRange` sent schedules the controller cannot hold.** An Omada time range holds at most 7 windows (seen on the OC200: 7 accepted, also two on one day; 8 refused with "The number of time range per entry has reached the limit"). An inverted curfew needs two windows on most days, so it always failed with that message. The tools now refuse such a schedule before calling the controller and say how to split it: one time range for the mornings, one for the evenings, each with its own rule (how the live curfew was built). The tool descriptions say so up front.
 - README: the limit is noted.
