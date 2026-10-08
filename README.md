@@ -160,7 +160,7 @@ Known limit: cancellations and answers are kept in memory. After a restart, some
 | `listCalendars` | List all calendar entities |
 | `getCalendarEvents` | Get events from one or all calendars |
 
-### Omada Network Tools (36)
+### Omada Network Tools (49)
 
 #### Site Tools
 
@@ -216,6 +216,19 @@ Known limit: cancellations and answers are kept in memory. After a restart, some
 | `omada_listMacGroups` | List MAC groups with their entries and which SSIDs use them as allow or deny lists (graph mode: `omada_read /profiles/mac-groups`) |
 | `omada_setMacGroupEntry` | Add a MAC to a MAC group, or rename its entry (needs `CONFIGURE`) |
 | `omada_removeMacGroupEntry` | Remove a MAC from a MAC group (needs `CONFIGURE`) |
+
+#### Access Control (schedules, groups, gateway ACLs)
+
+Lets the controller enforce a schedule itself (e.g. a curfew) instead of a daily block/unblock loop. All writes need `CONFIGURE`.
+
+| Tool | Description |
+|------|-------------|
+| `omada_listAccessControl` | Time ranges (readable windows), IP groups and gateway ACL rules with names and schedules (graph mode: `omada_read` `/profiles/time-range`, `/profiles/ip-groups`, `/network/acls/gateway`) |
+| `omada_createTimeRange` / `omada_updateTimeRange` / `omada_deleteTimeRange` | Weekly schedules in quarter hours, e.g. `{days:["mon","tue"], start:"14:30", end:"19:00"}`; `invertWindows` turns allowed hours into the blocked ones. Delete is refused while a rule uses it |
+| `omada_createGroup` / `omada_deleteGroup` | IP groups (ACL sources/destinations) and MAC groups (SSID allow/deny lists); delete is refused for built-in groups and groups in use |
+| `omada_setDhcpReservation` / `omada_removeDhcpReservation` | Fixed IP for a device (so an ACL can match it); refuses an address reserved for another device |
+| `omada_createGatewayAcl` / `omada_updateGatewayAcl` / `omada_deleteGatewayAcl` / `omada_moveGatewayAcl` | Gateway (router) LAN-to-internet rules: allow/deny a source (IP group, LAN network or SSID), optionally only during a time range; covers wired and Wi-Fi |
+| `omada_setSsidMacFilter` | Turn an SSID's MAC filter on (MAC group as allow or deny list) or off; reports and refuses to disconnect connected clients unless `allowLockout`; `dryRun` previews |
 
 #### Security Tools
 

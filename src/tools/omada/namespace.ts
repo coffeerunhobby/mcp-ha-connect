@@ -951,6 +951,14 @@ export const OMADA_RESOURCES: ResourceNode[] = [
     fetch: (c, a) => c.listMacGroups(a.siteId),
   },
   {
+    path: '/profiles/ip-groups',
+    kind: 'collection',
+    permission: Q,
+    estimatedSize: 'small',
+    description: 'IP group profiles (sources and destinations of gateway ACL rules; IPGroup_Any = everything).',
+    fetch: (c, a) => c.accessControl.listIpGroups(a.siteId),
+  },
+  {
     path: '/profiles/ppsk',
     kind: 'collection',
     permission: Q,

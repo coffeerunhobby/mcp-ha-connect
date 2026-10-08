@@ -2,6 +2,7 @@ import type { OmadaApiResponse } from '../types/index.js';
 
 import { formatMac, normalizeMac } from './client.js';
 import type { RequestHandler } from './request.js';
+import { accessControlLockKey, serialize } from './serialize.js';
 import type { SiteOperations } from './site.js';
 
 /** Omada group profile type for MAC groups (0 IP, 1 IP-port, 2 MAC, 3 IPv6, 4 IPv6-port). */
@@ -36,7 +37,7 @@ export interface MacGroupChange {
  * list), so adding, renaming or removing one entry is a read-modify-write. The
  * group is re-read just before the write and the change is refused if anything
  * else in it moved in the meantime (an outside writer, e.g. the web UI). Changes
- * made through this server are serialized per site and group, so two concurrent
+ * made through this server are serialized per site, so two concurrent
  * calls cannot both pass that check and overwrite each other.
  *
  * Accepted limit: Omada offers no conditional update, so an outside edit to the
@@ -104,7 +105,7 @@ export class MacGroupOperations {
         const resolvedSiteId = this.site.resolveSiteId(siteId);
         // Resolve once to find the lock key; everything after runs under the lock.
         const groupId = this.resolveGroup(await this.listMacGroups(resolvedSiteId), group).groupId;
-        return await serialize(`${resolvedSiteId}/${groupId}`, () => this.modifyLocked(resolvedSiteId, groupId, mac, change));
+        return await serialize(accessControlLockKey(resolvedSiteId), () => this.modifyLocked(resolvedSiteId, groupId, mac, change));
     }
 
     private async modifyLocked(
@@ -147,24 +148,6 @@ export class MacGroupOperations {
         );
         this.request.ensureSuccess(response);
         return result;
-    }
-}
-
-const locks = new Map<string, Promise<unknown>>();
-
-/** Run `task` after every earlier task with the same key has settled. */
-async function serialize<T>(key: string, task: () => Promise<T>): Promise<T> {
-    const previous = locks.get(key) ?? Promise.resolve();
-    const run = previous.then(task, task);
-    const settled = run.then(
-        () => undefined,
-        () => undefined
-    );
-    locks.set(key, settled);
-    try {
-        return await run;
-    } finally {
-        if (locks.get(key) === settled) locks.delete(key);
     }
 }
 

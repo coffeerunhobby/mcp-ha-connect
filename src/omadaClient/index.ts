@@ -19,6 +19,7 @@ import type {
     ThreatInfo,
 } from '../types/index.js';
 
+import { AccessControlOperations } from './accessControl.js';
 import { AuthManager } from './auth.js';
 import { ClientOperations, type KnownClient } from './client.js';
 import { DeviceOperations } from './device.js';
@@ -59,6 +60,9 @@ export class OmadaClient {
 
     private readonly macGroupOps: MacGroupOperations;
 
+    /** Time ranges, IP/MAC groups, DHCP reservations, gateway ACLs and the SSID MAC filter. */
+    public readonly accessControl: AccessControlOperations;
+
     private readonly omadacId: string;
 
     constructor(options: OmadaClientOptions) {
@@ -91,6 +95,14 @@ export class OmadaClient {
         this.securityOps = new SecurityOperations(this.request, this.buildOmadaPath.bind(this));
         this.networkOps = new NetworkOperations(this.request, this.siteOps, this.buildOmadaPath.bind(this));
         this.macGroupOps = new MacGroupOperations(this.request, this.siteOps, this.buildOmadaPath.bind(this));
+        this.accessControl = new AccessControlOperations(
+            this.request,
+            this.siteOps,
+            this.buildOmadaPath.bind(this),
+            this.networkOps,
+            this.macGroupOps,
+            this.clientOps
+        );
     }
 
     // Site operations

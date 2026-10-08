@@ -9,6 +9,7 @@ import { logger } from '../../utils/logger.js';
 import { registerBlockClientTool } from './blockClient.js';
 import { registerDeleteClientTool } from './deleteClient.js';
 import { registerListBlockedClientsTool } from './listBlockedClients.js';
+import { registerOmadaAccessControlTools } from './accessControl.js';
 import { registerOmadaClientDiagnosticTools } from './macGroups.js';
 import { registerCyclePoePortTool } from './cyclePoePort.js';
 import { registerOmadaGraphTools } from './graph.js';
@@ -100,6 +101,7 @@ export function registerOmadaTools(
 
   // Client diagnosis and MAC groups (allow/deny lists)
   toolCount += registerOmadaClientDiagnosticTools(server, client);
+  toolCount += registerOmadaAccessControlTools(server, client);
 
   // Device action tools
   registerCyclePoePortTool(server, client);
@@ -154,6 +156,7 @@ function registerOmadaToolsGraph(server: McpServer, client: OmadaClient): number
   // Diagnosis is a composite analysis (not a single endpoint) and the MAC group
   // writes are typed writes, so they are registered in graph mode too.
   toolCount += registerOmadaClientDiagnosticTools(server, client, 'graph');
+  toolCount += registerOmadaAccessControlTools(server, client, 'graph');
 
   logger.info('Omada tools registered', { mode: 'graph', toolCount });
   return toolCount;
