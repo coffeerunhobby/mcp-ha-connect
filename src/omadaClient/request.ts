@@ -1,6 +1,7 @@
 import type { Dispatcher } from 'undici';
 import type { OmadaApiResponse, PaginatedResult } from '../types/index.js';
 import { logger } from '../utils/logger.js';
+import { REDACTED, isSecretName } from '../utils/redact.js';
 import { createTlsDispatcher, tlsAwareFetch, type FetchInitWithDispatcher } from '../utils/tlsDispatcher.js';
 
 import type { AuthManager } from './auth.js';
@@ -329,7 +330,8 @@ export class RequestHandler {
     }
 
     /**
-     * Check if a key name indicates sensitive data.
+     * Check if a key name indicates sensitive data: the auth-related names plus every
+     * secret the tool responses redact (Wi-Fi securityKey, RADIUS/VPN keys, SIM PIN...).
      */
     private isSensitiveKey(key: string): boolean {
         const normalized = key.toLowerCase();
@@ -338,7 +340,8 @@ export class RequestHandler {
             normalized.includes('token') ||
             normalized.includes('secret') ||
             normalized.includes('password') ||
-            normalized.includes('client_id')
+            normalized.includes('client_id') ||
+            isSecretName(key)
         );
     }
 
@@ -346,11 +349,10 @@ export class RequestHandler {
      * Mask a sensitive value for logging.
      */
     private maskValue(value: unknown): unknown {
+        // Never a prefix or suffix: four characters of each end give most of a short
+        // Wi-Fi password away.
         if (typeof value === 'string') {
-            if (value.length <= 8) {
-                return '********';
-            }
-            return `${value.slice(0, 4)}…${value.slice(-4)}`;
+            return value === '' ? '' : REDACTED;
         }
 
         if (Array.isArray(value)) {

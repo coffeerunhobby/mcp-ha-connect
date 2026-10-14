@@ -90,7 +90,12 @@ export interface Client {
 // ---- Wi-Fi --------------------------------------------------------------------------
 
 export type Band = '2.4' | '5' | '6';
-export type WifiSecurity = 'open' | 'wpa2' | 'wpa3' | 'wpa2wpa3';
+/**
+ * Every security mode a controller may report. wpa1, wpa1wpa2 (legacy), enterprise
+ * (RADIUS) and ppsk (per-device keys) are read-only in the model: they can be listed and
+ * replaced by wpa2/wpa3/open, but not created through the tools.
+ */
+export type WifiSecurity = 'open' | 'wpa1' | 'wpa1wpa2' | 'wpa2' | 'wpa3' | 'wpa2wpa3' | 'enterprise' | 'ppsk';
 
 /**
  * Wi-Fi passwords are never a tool argument and never returned (owner's decision,

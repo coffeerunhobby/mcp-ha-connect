@@ -11,6 +11,8 @@ import { logger } from '../utils/logger.js';
 // Tool registration functions by domain
 import { registerHomeAssistantTools } from './homeassistant/index.js';
 import { registerOmadaTools, type OmadaRegistrationMode } from './omada/index.js';
+import { registerNetTools } from './net/index.js';
+import { OmadaNetworkController } from '../net/adapters/omada.js';
 import { registerAITools } from './ai/index.js';
 import { registerInfraTools, type RestAction } from './infra/index.js';
 import { registerOwnerQuestionTools } from './homeassistant/askOwner.js';
@@ -51,6 +53,8 @@ export function registerAllTools(options: RegisterToolsOptions): void {
   if (omadaClient) {
     const omadaToolCount = registerOmadaTools(server, omadaClient, toolRegistrationMode);
     totalTools += omadaToolCount;
+    // Vendor-neutral net_* tools, through the Omada adapter (same in eager and graph mode).
+    totalTools += registerNetTools(server, new OmadaNetworkController(omadaClient, { controllerHost: omadaClient.controllerHost }));
   }
 
   // AI tools (always register, but may be disabled if no aiClient)

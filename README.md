@@ -77,7 +77,7 @@ high-value questions an LLM can actually answer about your network:
 > above through two tools — `omada_browse` + `omada_read` — keeping the tool-schema budget
 > small for low-context models. See the Omada tool tables below for the full eager surface.
 
-## Available Tools (60 Total)
+## Available Tools (69 Total)
 
 ### Home Assistant Tools (38)
 
@@ -250,6 +250,27 @@ Lets the controller enforce a schedule itself (e.g. a curfew) instead of a daily
 | `omada_getFirewallSetting` | Get firewall configuration for a site |
 | `omada_getSiteNtpStatus` | Get the site's NTP server configuration and status |
 | `omada_setSiteNtpServers` | Replace the site's NTP server list (needs `CONFIGURE`; `dryRun` previews the change) |
+
+### Vendor-neutral Network Tools (9)
+
+The `net_` tools describe networks the same way for every controller vendor: one shared model, with an adapter per
+vendor (TP-Link Omada today; UniFi and MikroTik are planned). Each adapter says per feature whether it is native,
+built from several objects, or unsupported (`net_capabilities`), and refuses what it can't do instead of dropping it.
+Every change is planned first: `dryRun` shows the steps, what they mean and which online devices would be cut off;
+applying refuses if the controller changed in between, or if devices would be cut off without `allowLockout`.
+Wi-Fi passwords are never taken or shown: a new or reset Wi-Fi network gets a random temporary password, and the real
+one is set in the controller's web UI. Reads need `QUERY`, changes `CONFIGURE`.
+
+| Tool | Description |
+|------|-------------|
+| `net_capabilities` | What the controller can do, per feature |
+| `net_listNetworks` | Networks (VLANs): VLAN, gateway, DHCP, IPv6, protected |
+| `net_createNetwork` / `net_updateNetwork` / `net_deleteNetwork` | Create or change a VLAN with its gateway and DHCP range. The network the controller is on is protected; delete is refused while a Wi-Fi network, port profile, reservation or rule uses it |
+| `net_listWifi` | Wi-Fi networks: network, bands, security, isolation, MAC filter |
+| `net_createWifi` / `net_updateWifi` / `net_deleteWifi` | Create or change an SSID on a given network (bands, WPA2/WPA3, PMF, isolation, hidden, 802.11r, MAC filter), or reset its password to a random one |
+
+On Omada, network isolation, a "guest" network type, switching IPv6 on, and WPA2/WPA3 mixed mode are not available
+through the API and are refused. Rules arrive in 2.4.6, switch ports and mDNS in 2.4.7.
 
 ### AI Tools (1)
 

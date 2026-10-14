@@ -24,6 +24,7 @@ import { AuthManager } from './auth.js';
 import { ClientOperations, type KnownClient } from './client.js';
 import { DeviceOperations } from './device.js';
 import { NetworkOperations, type SsidEnableResult } from './network.js';
+import { NetworkConfigOperations } from './networkConfig.js';
 import { RequestHandler, type RequestOptions } from './request.js';
 import { SecurityOperations } from './security.js';
 import { MacGroupOperations, type MacGroup, type MacGroupChange } from './macGroups.js';
@@ -63,10 +64,17 @@ export class OmadaClient {
     /** Time ranges, IP/MAC groups, DHCP reservations, gateway ACLs and the SSID MAC filter. */
     public readonly accessControl: AccessControlOperations;
 
+    /** Raw LAN network and SSID endpoints for the vendor-neutral net_* tools (see src/net). */
+    public readonly networkConfig: NetworkConfigOperations;
+
     private readonly omadacId: string;
+
+    /** Host name or address of the controller (from baseUrl), e.g. for protecting its network. */
+    public readonly controllerHost: string;
 
     constructor(options: OmadaClientOptions) {
         this.omadacId = options.omadacId;
+        this.controllerHost = new URL(options.baseUrl).hostname;
 
         const timeout = options.requestTimeout ?? 30000;
 
@@ -95,6 +103,7 @@ export class OmadaClient {
         this.securityOps = new SecurityOperations(this.request, this.buildOmadaPath.bind(this));
         this.networkOps = new NetworkOperations(this.request, this.siteOps, this.buildOmadaPath.bind(this));
         this.macGroupOps = new MacGroupOperations(this.request, this.siteOps, this.buildOmadaPath.bind(this));
+        this.networkConfig = new NetworkConfigOperations(this.request, this.siteOps, this.buildOmadaPath.bind(this));
         this.accessControl = new AccessControlOperations(
             this.request,
             this.siteOps,
@@ -335,6 +344,11 @@ export class OmadaClient {
      * @param relativePath - The relative path to append to the base API path
      * @param version - The API version to use (default: 'v1')
      */
+    /** The site id a call with this (optional) siteId would use. */
+    public resolveSiteId(siteId?: string): string {
+        return this.siteOps.resolveSiteId(siteId);
+    }
+
     private buildOmadaPath(relativePath: string, version = 'v1'): string {
         const normalized = relativePath.startsWith('/') ? relativePath : `/${relativePath}`;
         return `/openapi/${version}/${encodeURIComponent(this.omadacId)}${normalized}`;

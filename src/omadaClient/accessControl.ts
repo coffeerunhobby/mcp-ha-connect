@@ -21,6 +21,7 @@ import { ALWAYS_PROFILE_NAME } from './network.js';
 import type { RequestHandler } from './request.js';
 import { accessControlLockKey, serialize } from './serialize.js';
 import type { SiteOperations } from './site.js';
+import { inSubnet, ipToNumber } from '../utils/ipv4.js';
 import { buildTimeRange, describeTimeRange, type TimeRangeEntry, type TimeWindow } from './timeRange.js';
 
 export const IP_GROUP_TYPE = 0;
@@ -260,7 +261,7 @@ export class AccessControlOperations {
         }
         const body =
             input.type === 'ip'
-                ? { name, type: IP_GROUP_TYPE, ipList: input.ips.map(parseCidr) }
+                ? { name, type: IP_GROUP_TYPE, ipList: input.ips.map(parseGroupAddress) }
                 : { name, type: MAC_GROUP_TYPE, macAddressList: input.macs.map((m) => ({ name: m.name, macAddress: formatMac(m.mac) })) };
         if ((input.type === 'ip' ? input.ips : input.macs).length === 0) throw new Error('A group needs at least one entry');
         await this.send('POST', this.sitePath(resolved, '/profiles/groups'), body);
@@ -622,23 +623,8 @@ function checkDescription(value: string): string {
     return text;
 }
 
-function ipToNumber(ip: string): number {
-    const parts = ip.trim().split('.');
-    if (parts.length !== 4 || parts.some((p) => !/^\d{1,3}$/.test(p) || Number(p) > 255)) {
-        throw new Error(`'${ip}' is not an IPv4 address`);
-    }
-    return parts.reduce((n, p) => n * 256 + Number(p), 0);
-}
-
-function inSubnet(address: number, cidr: string): boolean {
-    const [base, bits] = cidr.split('/');
-    const mask = Number(bits);
-    if (!base || !Number.isInteger(mask) || mask < 0 || mask > 32) return false;
-    const size = 2 ** (32 - mask);
-    return Math.floor(address / size) === Math.floor(ipToNumber(base) / size);
-}
-
-function parseCidr(value: string): { ip: string; mask: number } {
+/** An IP group entry: "a.b.c.d" (= /32) or "a.b.c.d/n", n 1-32. */
+function parseGroupAddress(value: string): { ip: string; mask: number } {
     const [ip, bits] = value.trim().split('/');
     ipToNumber(ip);
     const mask = bits === undefined ? 32 : Number(bits);
