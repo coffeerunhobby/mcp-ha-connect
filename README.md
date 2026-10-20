@@ -77,7 +77,7 @@ high-value questions an LLM can actually answer about your network:
 > above through two tools — `omada_browse` + `omada_read` — keeping the tool-schema budget
 > small for low-context models. See the Omada tool tables below for the full eager surface.
 
-## Available Tools (69 Total)
+## Available Tools (75 Total)
 
 ### Home Assistant Tools (38)
 
@@ -251,7 +251,7 @@ Lets the controller enforce a schedule itself (e.g. a curfew) instead of a daily
 | `omada_getSiteNtpStatus` | Get the site's NTP server configuration and status |
 | `omada_setSiteNtpServers` | Replace the site's NTP server list (needs `CONFIGURE`; `dryRun` previews the change) |
 
-### Vendor-neutral Network Tools (9)
+### Vendor-neutral Network Tools (15)
 
 The `net_` tools describe networks the same way for every controller vendor: one shared model, with an adapter per
 vendor (TP-Link Omada today; UniFi and MikroTik are planned). Each adapter says per feature whether it is native,
@@ -268,9 +268,16 @@ one is set in the controller's web UI. Reads need `QUERY`, changes `CONFIGURE`.
 | `net_createNetwork` / `net_updateNetwork` / `net_deleteNetwork` | Create or change a VLAN with its gateway and DHCP range. The network the controller is on is protected; delete is refused while a Wi-Fi network, port profile, reservation or rule uses it |
 | `net_listWifi` | Wi-Fi networks: network, bands, security, isolation, MAC filter |
 | `net_createWifi` / `net_updateWifi` / `net_deleteWifi` | Create or change an SSID on a given network (bands, WPA2/WPA3, PMF, isolation, hidden, 802.11r, MAC filter), or reset its password to a random one |
+| `net_listRules` | Traffic rules in evaluation order (the first match decides); rules the model can't express are shown read-only (`foreign`, with the reason) |
+| `net_createRule` / `net_updateRule` / `net_deleteRule` / `net_moveRule` | Allow or block traffic from networks, a group or addresses to networks, a group, addresses (optionally on ports) or the internet, at a chosen position. **Stateful:** a block stops new connections, replies to connections started from the other side still pass ("block IoT → Home" lets Home still reach IoT). Addresses given in a rule become a group the rule owns and removes with it. A change after which the controller (and this server) could no longer reach the internet, in its end state or on the way there, is refused |
+| `net_listGroups` | Address groups (usable in rules) and MAC groups (Wi-Fi allow/deny lists) |
 
-On Omada, network isolation, a "guest" network type, switching IPv6 on, and WPA2/WPA3 mixed mode are not available
-through the API and are refused. Rules arrive in 2.4.7, switch ports and mDNS in 2.4.8.
+On Omada, a network isolation flag (use a block rule instead), a "guest" network type, switching IPv6 on, and WPA2/WPA3
+mixed mode are not available through the API and are refused. Rules are gateway ACLs (the gateway routes between the
+VLANs): LAN to LAN between your networks, LAN to WAN towards the internet. Refused with the reason: the gateway itself as
+a destination (no API option for its own addresses), one device by MAC (give its address), a Wi-Fi network as the
+source, rules that also match replies, schedules (the `omada_` time-range tools do those) and port ranges. Switch
+ports and mDNS arrive in 2.4.8.
 
 ### AI Tools (1)
 

@@ -1,9 +1,9 @@
 /**
  * Omada adapter for the vendor-neutral network model (src/net/model.ts).
  *
- * 2.4.5 covers networks (LAN networks / VLANs) and Wi-Fi (SSIDs). Rules, groups, switch
- * ports and mDNS arrive with 2.4.7 and 2.4.8; until then those calls fail with
- * NetError UNSUPPORTED.
+ * 2.4.5 covers networks (LAN networks / VLANs) and Wi-Fi (SSIDs); 2.4.7 rules (gateway
+ * ACLs, see omadaRules.ts) and listing groups. Switch ports and mDNS arrive with 2.4.8;
+ * until then those calls fail with NetError UNSUPPORTED.
  *
  * Omada specifics handled here:
  * - networks have no "guest" purpose and no isolation flag in the API (guest is per
@@ -32,6 +32,7 @@ import {
     type Capabilities,
     type Change,
     type Client,
+    type Group,
     type Network,
     type NetworkController,
     type PassphraseSource,
@@ -39,11 +40,31 @@ import {
     type ProtectedResources,
     type Ref,
     type Reservation,
+    type Rule,
     type Step,
     type Wifi,
     type WifiSecurity,
 } from '../model.js';
 import { MAX_NETWORK_NAME, MAX_WIFI_NAME, checkBands, checkDhcp, checkGateway, checkName, checkNetworkUnique, checkVlan } from '../validate.js';
+
+import {
+    GROUP_TYPE,
+    controllerPath,
+    controllerRisk,
+    draftAsAcl,
+    draftRule,
+    isOwnedGroup,
+    newRuleKey,
+    ownedGroupName,
+    resolve,
+    ruleKey,
+    tagged,
+    toRule,
+    type Endpoint,
+    type RuleDraft,
+    type RuleFields,
+    type RuleWorld,
+} from './omadaRules.js';
 
 const PSEUDO_WLAN_ID = 'gateway';
 /** Omada LAN network purpose: 0 = VLAN only (switches), 1 = interface (routed by the gateway). */
@@ -83,6 +104,12 @@ interface Snapshot {
     ssids: SsidRaw[];
     clients: Client[];
     macGroups: MacGroup[];
+    /** Gateway ACLs in evaluation order, and the IP / IP-port groups rules use. */
+    acls: RawRecord[];
+    /** Switch and access point ACLs: they can reference the same groups. */
+    otherAcls: RawRecord[];
+    ipGroups: RawRecord[];
+    ipPortGroups: RawRecord[];
     /** The 24/7 time range omada_setSsidEnabled switches SSIDs off with (absent until first used). */
     alwaysProfileId?: string;
 }
@@ -121,7 +148,7 @@ export class OmadaNetworkController implements NetworkController {
             networks: { create: 'native', isolation: 'unsupported', ipv6: 'unsupported', guestPurpose: 'unsupported' },
             wifi: { create: 'native', bands: ['2.4', '5', '6'], security: ['open', 'wpa2', 'wpa3'], pmf: 'native', fastRoaming: 'native', bandSteering: 'unsupported' },
             ports: { profiles: 'unsupported', assign: 'unsupported' },
-            rules: { between: 'unsupported', toInternet: 'unsupported', deviceMatch: 'unsupported', wifiMatch: 'unsupported', stateful: 'unsupported', schedule: 'unsupported' },
+            rules: { between: 'native', toInternet: 'native', deviceMatch: 'unsupported', wifiMatch: 'unsupported', stateful: 'native', schedule: 'unsupported' },
             groups: { address: 'unsupported', mac: 'unsupported' },
             reservations: 'native',
             mdnsRepeater: 'unsupported',
@@ -169,7 +196,11 @@ export class OmadaNetworkController implements NetworkController {
         const clients = (await this.client.listClients(siteId)).map((c) => this.toClient(c as RawRecord, networks));
         const alwaysProfileId = (await this.client.accessControl.listTimeRanges(siteId)).find((p) => p.name === ALWAYS_PROFILE_NAME)?.profileId;
         const macGroups = await this.client.listMacGroups(siteId);
-        return { siteId, networksRaw, networks, ssids, clients, macGroups, ...(alwaysProfileId ? { alwaysProfileId } : {}) };
+        const acls = (await this.client.networkConfig.listAcls('osg-acls', siteId)).sort((a, b) => Number(a.index ?? 0) - Number(b.index ?? 0));
+        const otherAcls = [...(await this.client.networkConfig.listAcls('osw-acls', siteId)), ...(await this.client.networkConfig.listAcls('eap-acls', siteId))];
+        const ipGroups = await this.client.networkConfig.listGroups(GROUP_TYPE.ip, siteId);
+        const ipPortGroups = await this.client.networkConfig.listGroups(GROUP_TYPE.ipPort, siteId);
+        return { siteId, networksRaw, networks, ssids, clients, macGroups, acls, otherAcls, ipGroups, ipPortGroups, ...(alwaysProfileId ? { alwaysProfileId } : {}) };
     }
 
     private toNetwork(raw: RawRecord): Network {
@@ -301,11 +332,30 @@ export class OmadaNetworkController implements NetworkController {
     async listPorts(): Promise<never> {
         throw notYet('switch ports', '2.4.8');
     }
-    async listRules(): Promise<never> {
-        throw notYet('rules', '2.4.7');
+    async listRules(): Promise<Rule[]> {
+        const snap = await this.snapshot();
+        const world = this.ruleWorld(snap);
+        return snap.acls.map((raw, i) => toRule(raw, i + 1, world));
     }
-    async listGroups(): Promise<never> {
-        throw notYet('groups', '2.4.7');
+
+    async listGroups(kind?: Group['kind']): Promise<Group[]> {
+        const snap = await this.snapshot();
+        const address: Group[] = snap.ipGroups.map((g) => ({
+            id: String(g.groupId),
+            name: String(g.name),
+            kind: 'address',
+            entries: ((g.ipList as Array<{ ip: string; mask: number; description?: string }> | undefined) ?? []).map((e) => ({
+                value: Number(e.mask) === 32 ? e.ip : `${e.ip}/${e.mask}`,
+                ...(e.description ? { name: e.description } : {}),
+            })),
+        }));
+        const mac: Group[] = snap.macGroups.map((g) => ({
+            id: g.groupId,
+            name: g.name,
+            kind: 'mac',
+            entries: (g.macAddressList ?? []).map((e) => ({ value: formatMac(e.macAddress), ...(e.name ? { name: e.name } : {}) })),
+        }));
+        return kind === 'address' ? address : kind === 'mac' ? mac : [...address, ...mac];
     }
     async getMdnsRepeater(): Promise<never> {
         throw notYet('the mDNS repeater', '2.4.8');
@@ -363,10 +413,402 @@ export class OmadaNetworkController implements NetworkController {
                 if (change.op === 'update') return await this.buildWifiUpdate(change.value.ref, change.value.set, change.passphrase, snap);
                 if (change.op === 'delete') return this.buildWifiDelete(change.ref, snap);
                 break;
+            case 'rule':
+                if (change.op === 'create') return this.buildRuleCreate(change.value, snap);
+                if (change.op === 'update') return this.buildRuleUpdate(change.value.ref, change.value.set, snap);
+                if (change.op === 'delete') return this.buildRuleDelete(change.ref, snap);
+                if (change.op === 'move') return this.buildRuleMove(change.ref, change.position, snap);
+                break;
             default:
-                throw notYet(`${change.kind} changes`, change.kind === 'rule' || change.kind === 'group' ? '2.4.7' : change.kind === 'reservation' ? 'a later release (use omada_setDhcpReservation)' : '2.4.8');
+                throw notYet(
+                    `${change.kind} changes`,
+                    change.kind === 'group' ? 'a later release (use omada_createGroup / omada_deleteGroup)' : change.kind === 'reservation' ? 'a later release (use omada_setDhcpReservation)' : '2.4.8'
+                );
         }
         throw new NetError('INVALID', 'This change is not supported');
+    }
+
+    // ---- rules (gateway ACLs; mapping and checks in omadaRules.ts) ---------------------------
+
+    private ruleWorld(snap: Snapshot): RuleWorld {
+        return {
+            networks: snap.networks,
+            acls: snap.acls,
+            ipGroups: snap.ipGroups,
+            ipPortGroups: snap.ipPortGroups,
+            ssids: snap.ssids.map((s) => ({ id: s.ssidId, name: String(s.detail.name) })),
+            controllerAddresses: this.controllerAddresses,
+        };
+    }
+
+    /** The rule as the model sees it, with its raw ACL; a rule the model can't express is refused. */
+    private editableRule(ref: Ref, snap: Snapshot, what: string): { raw: RawRecord; rule: Rule } {
+        const world = this.ruleWorld(snap);
+        const rules = snap.acls.map((raw, i) => ({ raw, rule: toRule(raw, i + 1, world) }));
+        const found = resolve(
+            rules.map((r) => ({ ...r, id: r.rule.id, name: r.rule.name })),
+            ref,
+            'rule'
+        );
+        if (found.rule.foreign) throw new NetError('UNSUPPORTED', `Rule '${found.rule.name}' can't be ${what} through net_: ${found.rule.foreign.reason} Use the omada_ gateway ACL tools for it.`, { capability: 'rules' });
+        return { raw: found.raw, rule: found.rule };
+    }
+
+    private checkPosition(position: number, count: number): number {
+        if (!Number.isInteger(position) || position < 1 || position > count) throw new NetError('INVALID', `Position must be 1 to ${count}`);
+        return position;
+    }
+
+    /**
+     * Refuses a change if any rule list it passes through (the end state, and the staged
+     * one where the rule is switched off) could expose some of the controller's (and this
+     * server's) internet traffic to a block that doesn't reach it today (controllerRisk).
+     * Waived only when the controller is certainly cut off already.
+     */
+    private guardController(snap: Snapshot, states: Array<{ acls: RawRecord[]; world: RuleWorld }>): void {
+        const today = controllerPath(snap.acls, this.ruleWorld(snap));
+        for (const state of states) {
+            const risk = controllerRisk(today, controllerPath(state.acls, state.world));
+            if (risk) throw new NetError('PROTECTED', `This could cut the controller (and this server next to it) off the internet: ${risk}. Nothing was changed.`);
+        }
+    }
+
+    private buildRuleCreate(value: Extract<Change, { op: 'create'; kind: 'rule' }>['value'], snap: Snapshot): Built {
+        const world = this.ruleWorld(snap);
+        const draft = draftRule(value, world);
+        const position = value.position === undefined ? undefined : this.checkPosition(value.position, snap.acls.length + 1);
+        const moves = position !== undefined && position <= snap.acls.length;
+        const steps = [
+            ...groupSteps(draft),
+            { action: 'create' as const, object: 'omada.gatewayAcl', name: draft.name, detail: draft.direction === 'lanToLan' ? 'LAN to LAN' : 'LAN to internet' },
+            ...(moves ? [{ action: 'update' as const, object: 'omada.gatewayAclOrder', name: draft.name, detail: `position ${position}` }] : []),
+            ...(moves && draft.enabled ? [{ action: 'update' as const, object: 'omada.gatewayAcl', name: draft.name, detail: 'switched on once in place' }] : []),
+        ];
+        const at = position ?? snap.acls.length + 1;
+        const placed = draftAsAcl(draft, 'new-rule', world);
+        this.guardController(snap, [{ acls: placeAt(snap.acls, placed.acl, at), world: placed.world }]);
+        return {
+            steps,
+            effects: [...draft.effects, `It is rule ${at} of ${snap.acls.length + 1}; rules are checked in order and the first match decides.`],
+            wouldLockOut: [],
+            reads: { networks: true, ssids: true, rules: true },
+            execute: async (s) => {
+                // Every new rule carries a fresh tag: its description is unique, so the rule is found
+                // again (and undone) by it, never mistaken for one made elsewhere at the same moment.
+                const key = newRuleKey();
+                const description = tagged(draft.name, key);
+                const made: TrackedGroup[] = [];
+                // 'none': nothing sent; 'sent': the create was sent and may have happened.
+                let acl: 'none' | 'sent' = 'none';
+                let aclId: string | undefined;
+                try {
+                    const source = await this.materialize(draft.source, key, 'from', s.siteId, made);
+                    const destination = await this.materialize(draft.destination, key, 'to', s.siteId, made);
+                    // A rule that still has to move is created switched off, so it never acts from the wrong place.
+                    const body = aclBody(draft, description, source, destination, false);
+                    acl = 'sent';
+                    await this.client.networkConfig.createGatewayAcl({ ...body, status: moves ? false : draft.enabled }, s.siteId);
+                    const acls = await this.sortedAcls(s.siteId);
+                    aclId = acls.find((a) => a.description === description)?.id as string | undefined;
+                    if (!aclId) throw new NetError('CONFLICT', `Created rule '${draft.name}' but could not find it again`);
+                    if (moves) {
+                        await this.reorder(acls, aclId, position, s.siteId);
+                        if (draft.enabled) await this.client.networkConfig.updateGatewayAcl(aclId, body, s.siteId);
+                    }
+                } catch (error) {
+                    throw await this.undoCreate(error, acl, description, made, s.siteId);
+                }
+                return await this.done(aclId, await this.sweepOwnedGroups(s.siteId), [
+                    ...made.map((g) => ({ object: g.type === GROUP_TYPE.ip ? 'omada.ipGroup' : 'omada.ipPortGroup', id: g.id ?? g.name })),
+                    { object: 'omada.gatewayAcl', id: aclId },
+                ]);
+            },
+        };
+    }
+
+    private buildRuleUpdate(ref: Ref, set: Partial<RuleFields> & { position?: number }, snap: Snapshot): Built {
+        const current = this.editableRule(ref, snap, 'changed');
+        const world = this.ruleWorld(snap);
+        const { position, ...fields } = set;
+        const next: RuleFields = { ...current.rule, ...fields };
+        const draft = draftRule(next, world, current);
+        const target = position === undefined ? undefined : this.checkPosition(position, snap.acls.length);
+        const moves = target !== undefined && target !== current.rule.position;
+        const changes = describeRuleChanges(current.rule, next);
+        if (changes.length === 0 && !moves) throw new NetError('INVALID', `Nothing to change on rule '${current.rule.name}'`);
+        const oldKey = ruleKey(String(current.raw.description));
+        // Changed and moved: written switched off, moved, then switched on, so the new content never acts from the old place.
+        const staged = moves && changes.length > 0 && draft.enabled;
+        {
+            const id = String(current.raw.id);
+            const others = snap.acls.filter((a) => String(a.id) !== id);
+            const after = draftAsAcl(draft, id, world);
+            const states = [{ acls: placeAt(others, after.acl, target ?? current.rule.position), world: after.world }];
+            // Switched off on the way (staging, and the first step of undoing it): as if the rule were gone.
+            if (staged) states.push({ acls: others, world });
+            this.guardController(snap, states);
+        }
+        const steps = [
+            ...groupSteps(draft),
+            ...(changes.length ? [{ action: 'update' as const, object: 'omada.gatewayAcl', name: current.rule.name, detail: `${changes.join('; ')}${staged ? ' (switched off until in place)' : ''}` }] : []),
+            ...(moves ? [{ action: 'update' as const, object: 'omada.gatewayAclOrder', name: current.rule.name, detail: `position ${target}` }] : []),
+            ...(staged ? [{ action: 'update' as const, object: 'omada.gatewayAcl', name: current.rule.name, detail: 'switched on in place' }] : []),
+        ];
+        return {
+            steps,
+            effects: [
+                ...(changes.length ? [`'${current.rule.name}': ${changes.join('; ')}.`, ...draft.effects] : []),
+                ...(moves ? [`It moves from position ${current.rule.position} to ${target} of ${snap.acls.length}.`] : []),
+            ],
+            wouldLockOut: [],
+            reads: { networks: true, ssids: true, rules: true },
+            execute: async (s) => {
+                const aclId = String(current.raw.id);
+                const original = writableAcl(current.raw);
+                const originalOrder = orderOf(s.acls);
+                const made: TrackedGroup[] = [];
+                // 'sent' = the write was sent and may have happened, even if it reported an error.
+                let put: 'none' | 'sent' = 'none';
+                let reorder: 'none' | 'sent' = 'none';
+                try {
+                    if (changes.length) {
+                        const key = oldKey ?? (needsGroups(draft) ? newRuleKey() : undefined);
+                        const source = await this.materialize(draft.source, key, 'from', s.siteId, made);
+                        const destination = await this.materialize(draft.destination, key, 'to', s.siteId, made);
+                        const body = aclBody(draft, tagged(draft.name, key), source, destination, current.raw.syslog === true);
+                        put = 'sent';
+                        await this.client.networkConfig.updateGatewayAcl(aclId, staged ? { ...body, status: false } : body, s.siteId);
+                        if (moves) {
+                            reorder = 'sent';
+                            await this.reorder(await this.sortedAcls(s.siteId), aclId, target, s.siteId);
+                        }
+                        if (staged) await this.client.networkConfig.updateGatewayAcl(aclId, body, s.siteId);
+                    } else if (moves) {
+                        reorder = 'sent';
+                        await this.reorder(await this.sortedAcls(s.siteId), aclId, target, s.siteId);
+                    }
+                } catch (error) {
+                    throw await this.undoUpdate(error, { aclId, original, originalOrder, put, reorder, made }, s.siteId);
+                }
+                // Only now, with everything in place: groups no rule uses any more.
+                return await this.done(aclId, await this.sweepOwnedGroups(s.siteId));
+            },
+        };
+    }
+
+    private buildRuleDelete(ref: Ref, snap: Snapshot): Built {
+        const current = this.editableRule(ref, snap, 'deleted');
+        const ids = referencedIds(current.raw);
+        const otherUses = new Set([...snap.acls.filter((a) => a.id !== current.raw.id), ...snap.otherAcls].flatMap(referencedIds));
+        const released = [...snap.ipGroups, ...snap.ipPortGroups].filter((g) => isOwnedGroup(g) && ids.includes(String(g.groupId)) && !otherUses.has(String(g.groupId)));
+        this.guardController(snap, [{ acls: snap.acls.filter((a) => a.id !== current.raw.id), world: this.ruleWorld(snap) }]);
+        return {
+            steps: [
+                { action: 'delete', object: 'omada.gatewayAcl', name: current.rule.name },
+                ...released.map((g) => ({ action: 'delete' as const, object: g.type === GROUP_TYPE.ipPort ? 'omada.ipPortGroup' : 'omada.ipGroup', name: String(g.name) })),
+            ],
+            effects: [`Rule '${current.rule.name}' is removed${released.length ? ', with the address group it owns' : ''}.`],
+            wouldLockOut: [],
+            reads: { networks: true, ssids: true, rules: true },
+            execute: async (s) => {
+                const warnings: string[] = [];
+                try {
+                    await this.client.networkConfig.deleteGatewayAcl(String(current.raw.id), s.siteId);
+                } catch (error) {
+                    // The delete may have happened even though it reported an error: look.
+                    let gone: boolean;
+                    try {
+                        gone = !(await this.sortedAcls(s.siteId)).some((a) => String(a.id) === String(current.raw.id));
+                    } catch {
+                        throw withNote(error, `whether rule '${current.rule.name}' was deleted is unknown; check net_listRules`);
+                    }
+                    if (!gone) throw error;
+                    warnings.push("The controller's answer was lost, but the rule is gone.");
+                }
+                return await this.done(undefined, [...warnings, ...(await this.sweepOwnedGroups(s.siteId))]);
+            },
+        };
+    }
+
+    private buildRuleMove(ref: Ref, position: number, snap: Snapshot): Built {
+        const world = this.ruleWorld(snap);
+        const rules = snap.acls.map((raw, i) => ({ raw, rule: toRule(raw, i + 1, world) }));
+        // Moving touches only the order, so a rule the model can't otherwise express may move too.
+        const found = resolve(rules.map((r) => ({ ...r, id: r.rule.id, name: r.rule.name })), ref, 'rule');
+        const target = this.checkPosition(position, snap.acls.length);
+        if (target === found.rule.position) throw new NetError('INVALID', `Rule '${found.rule.name}' is already at position ${target}`);
+        this.guardController(snap, [{ acls: placeAt(snap.acls.filter((a) => a.id !== found.raw.id), found.raw, target), world }]);
+        return {
+            steps: [{ action: 'update', object: 'omada.gatewayAclOrder', name: found.rule.name, detail: `position ${target}` }],
+            effects: [`'${found.rule.name}' moves from position ${found.rule.position} to ${target} of ${snap.acls.length}; rules are checked in order and the first match decides.`],
+            wouldLockOut: [],
+            reads: { networks: true, ssids: true, rules: true },
+            execute: async (s) => {
+                const originalOrder = orderOf(s.acls);
+                try {
+                    await this.reorder(await this.sortedAcls(s.siteId), String(found.raw.id), target, s.siteId);
+                } catch (error) {
+                    // The reorder may have happened even though it reported an error: put the order back.
+                    throw await this.restoreOrder(error, originalOrder, s.siteId);
+                }
+                return await this.done(String(found.raw.id), await this.sweepOwnedGroups(s.siteId));
+            },
+        };
+    }
+
+    /**
+     * Existing ids for an endpoint, or the id of the group created for it. The group is
+     * tracked by its (unique) name before it is created, so a create whose answer or
+     * read-back got lost can still be found and undone.
+     */
+    private async materialize(endpoint: Endpoint, key: string | undefined, side: 'from' | 'to', siteId: string, made: TrackedGroup[]): Promise<{ type: number; ids: string[] }> {
+        if ('ids' in endpoint) return { type: endpoint.type, ids: endpoint.ids };
+        if (!key) throw new NetError('INVALID', 'Internal: a rule that owns a group needs a tag');
+        const { groupType, body } = endpoint.newGroup;
+        // A name no group has yet: finding it by name afterwards (or in an undo) can only find this one.
+        const existing = await this.client.networkConfig.listGroups(groupType, siteId);
+        const tracked: TrackedGroup = { type: groupType, name: ownedGroupName(key, side, new Set(existing.map((g) => String(g.name)))) };
+        made.push(tracked);
+        await this.client.networkConfig.createGroup({ name: tracked.name, ...body }, siteId);
+        const group = (await this.client.networkConfig.listGroups(groupType, siteId)).find((g) => g.name === tracked.name);
+        if (!group) throw new NetError('CONFLICT', `Created group '${tracked.name}' but could not find it again`);
+        tracked.id = String(group.groupId);
+        return { type: endpoint.type, ids: [tracked.id] };
+    }
+
+    /**
+     * Undoes a create that failed part-way and returns the error to throw. A create that
+     * was sent may have happened even if it reported an error: the rule is looked up by
+     * its description and removed before its groups. When that can't be confirmed, the
+     * groups stay (a live rule must never point at deleted groups) and the error says so.
+     */
+    private async undoCreate(error: unknown, acl: 'none' | 'sent', description: string, made: TrackedGroup[], siteId: string): Promise<unknown> {
+        const notes: string[] = [];
+        if (acl === 'sent') {
+            try {
+                const found = (await this.sortedAcls(siteId)).find((a) => a.description === description);
+                if (found) await this.client.networkConfig.deleteGatewayAcl(String(found.id), siteId);
+            } catch {
+                return withNote(error, `the rule may have been created; check net_listRules for '${description}' (its groups were kept)`);
+            }
+        }
+        notes.push(...(await this.dropGroups(made, siteId)));
+        return notes.length ? withNote(error, notes.join('; ')) : error;
+    }
+
+    /**
+     * Undoes an update that failed part-way and returns the error to throw: puts the rule
+     * back as it was (if the change may have been written) and removes the groups made
+     * for it, unless the rule might still point at them.
+     */
+    private async undoUpdate(
+        error: unknown,
+        u: { aclId: string; original: RawRecord; originalOrder: Record<string, number>; put: 'none' | 'sent'; reorder: 'none' | 'sent'; made: TrackedGroup[] },
+        siteId: string
+    ): Promise<unknown> {
+        if (u.reorder === 'sent') {
+            try {
+                // Content changed too: switch it off first, so neither version acts from the wrong place while the order goes back.
+                if (u.put === 'sent') await this.client.networkConfig.updateGatewayAcl(u.aclId, { ...u.original, status: false }, siteId);
+                await this.client.networkConfig.reorderGatewayAcls(u.originalOrder, siteId);
+            } catch {
+                return withNote(error, 'the rule order could not be put back; check it with net_listRules (the groups made for the change were kept)');
+            }
+        }
+        if (u.put === 'sent') {
+            try {
+                await this.client.networkConfig.updateGatewayAcl(u.aclId, u.original, siteId);
+            } catch {
+                return withNote(error, 'the rule could not be put back as it was; check it with net_listRules (the groups made for the change were kept)');
+            }
+        }
+        const notes = await this.dropGroups(u.made, siteId);
+        return notes.length ? withNote(error, notes.join('; ')) : error;
+    }
+
+    /** Puts the rule order back after a move that failed (it may have happened anyway); returns the error to throw. */
+    private async restoreOrder(error: unknown, originalOrder: Record<string, number>, siteId: string): Promise<unknown> {
+        try {
+            await this.client.networkConfig.reorderGatewayAcls(originalOrder, siteId);
+            return error;
+        } catch {
+            return withNote(error, 'the rule order could not be put back; check it with net_listRules');
+        }
+    }
+
+    /** Deletes groups made during a failed change (found by name when the id is unknown); returns what it couldn't remove. */
+    private async dropGroups(made: TrackedGroup[], siteId: string): Promise<string[]> {
+        const left: string[] = [];
+        for (const g of made) {
+            try {
+                const id = g.id ?? ((await this.client.networkConfig.listGroups(g.type, siteId)).find((x) => x.name === g.name)?.groupId as string | undefined);
+                if (id) await this.client.networkConfig.deleteGroup(g.type, String(id), siteId);
+            } catch {
+                left.push(`group '${g.name}' may be left behind`);
+            }
+        }
+        return left;
+    }
+
+    /**
+     * Deletes every group a net_ rule owned that no ACL (gateway, switch or access point)
+     * references any more. Run after each successful rule change, so a cleanup that failed
+     * once is finished by the next change; a failure here is a warning, not an error (the
+     * change itself is done). Writes are serialized per site, so no rule is half-created
+     * meanwhile.
+     */
+    private async sweepOwnedGroups(siteId: string): Promise<string[]> {
+        try {
+            const acls = [
+                ...(await this.client.networkConfig.listAcls('osg-acls', siteId)),
+                ...(await this.client.networkConfig.listAcls('osw-acls', siteId)),
+                ...(await this.client.networkConfig.listAcls('eap-acls', siteId)),
+            ];
+            const used = new Set(acls.flatMap(referencedIds));
+            const left: string[] = [];
+            for (const type of [GROUP_TYPE.ip, GROUP_TYPE.ipPort] as const) {
+                for (const g of await this.client.networkConfig.listGroups(type, siteId)) {
+                    const id = String(g.groupId);
+                    if (!isOwnedGroup(g) || used.has(id)) continue;
+                    await this.client.networkConfig.deleteGroup(type, id, siteId).catch(() => left.push(String(g.name)));
+                }
+            }
+            return left.length ? [`Could not remove the unused group(s) ${left.join(', ')} now; the next rule change removes them.`] : [];
+        } catch {
+            return ['Could not check for unused rule groups now; the next rule change removes them.'];
+        }
+    }
+
+    private async sortedAcls(siteId: string): Promise<RawRecord[]> {
+        return (await this.client.networkConfig.listAcls('osg-acls', siteId)).sort((a, b) => Number(a.index ?? 0) - Number(b.index ?? 0));
+    }
+
+    /** Moves one rule to `position` (1 = first); the others keep their order. */
+    private async reorder(acls: RawRecord[], aclId: string, position: number, siteId: string): Promise<void> {
+        const moving = acls.find((a) => String(a.id) === aclId);
+        if (!moving) throw new NetError('NOT_FOUND', 'The rule disappeared before it could be moved');
+        const order = acls.filter((a) => String(a.id) !== aclId);
+        order.splice(Math.min(position, acls.length) - 1, 0, moving);
+        await this.client.networkConfig.reorderGatewayAcls(Object.fromEntries(order.map((a, i) => [String(a.id), i + 1])), siteId);
+    }
+
+    /**
+     * The result of a change that is done: the rule as it reads back, plus warnings. A
+     * failed read-back is a warning, never an error: the change is already applied.
+     */
+    private async done(aclId: string | undefined, warnings: string[], owned: ApplyResult['owned'] = []): Promise<ApplyResult> {
+        const notes = [...warnings];
+        let object: Rule | undefined;
+        if (aclId) {
+            try {
+                const snap = await this.snapshot();
+                const index = snap.acls.findIndex((a) => String(a.id) === aclId);
+                if (index >= 0) object = toRule(snap.acls[index], index + 1, this.ruleWorld(snap));
+            } catch {
+                notes.push(`The change is applied, but reading the rule back failed; check it with net_listRules (rule id ${aclId}).`);
+            }
+        }
+        return { applied: true, ...(object ? { object } : {}), owned, ...(notes.length ? { warnings: notes } : {}) };
     }
 
     // ---- networks ------------------------------------------------------------------------
@@ -374,7 +816,7 @@ export class OmadaNetworkController implements NetworkController {
     private buildNetworkCreate(value: Extract<Change, { op: 'create'; kind: 'network' }>['value'], snap: Snapshot): Built {
         const name = checkName(value.name, MAX_NETWORK_NAME, 'Network');
         if (value.purpose === 'guest') throw unsupported('a guest network type (Omada makes a Wi-Fi network a guest network instead: clientIsolation)', 'networks.guestPurpose');
-        if (value.isolated) throw unsupported('network isolation (it comes as rules in 2.4.7)', 'networks.isolation');
+        if (value.isolated) throw unsupported('a network isolation flag (make a block rule from this network to the others with net_createRule)', 'networks.isolation');
         if (value.ipv6) throw unsupported('switching IPv6 on (do it in the controller web UI)', 'networks.ipv6');
         const vlan = checkVlan(value.vlan);
         const vlanOnly = value.purpose === 'vlanOnly';
@@ -431,7 +873,7 @@ export class OmadaNetworkController implements NetworkController {
         if (current.purpose === 'vlanOnly' && (set.gateway !== undefined || set.dhcp !== undefined)) {
             throw new NetError('INVALID', `'${current.name}' is switch-only: it has no gateway and no DHCP to change`);
         }
-        if (set.isolated) throw unsupported('network isolation (it comes as rules in 2.4.7)', 'networks.isolation');
+        if (set.isolated) throw unsupported('a network isolation flag (make a block rule from this network to the others with net_createRule)', 'networks.isolation');
         if (set.ipv6 === true && !current.ipv6) throw unsupported('switching IPv6 on (do it in the controller web UI)', 'networks.ipv6');
         const addressing = (set.vlan !== undefined && set.vlan !== current.vlan) || (set.gateway !== undefined && set.gateway !== current.gateway);
         if (current.protected && addressing) {
@@ -757,11 +1199,91 @@ interface Built {
     effects: string[];
     wouldLockOut: Client[];
     /** Which parts of the snapshot the plan depends on (the fingerprint covers only those). */
-    reads: { networks?: boolean; ssids?: boolean; macGroups?: boolean };
+    reads: { networks?: boolean; ssids?: boolean; macGroups?: boolean; rules?: boolean };
     execute: Executor;
 }
 
 // ---- helpers -----------------------------------------------------------------------------
+
+/** A group created for a change, tracked by name from before its create is sent. */
+interface TrackedGroup {
+    type: 0 | 1;
+    name: string;
+    id?: string;
+}
+
+/**
+ * Every id an ACL's source or destination references. Endpoint type numbers differ between
+ * gateway, switch and access point ACLs, so ids are not filtered by type: a network id
+ * never equals a group id, and over-counting only keeps a group longer.
+ */
+function referencedIds(acl: RawRecord): string[] {
+    return [...((acl.sourceIds as string[] | undefined) ?? []), ...((acl.destinationIds as string[] | undefined) ?? [])].map(String);
+}
+
+/** A rule list with `acl` at `position` (1 = first). */
+function placeAt(acls: RawRecord[], acl: RawRecord, position: number): RawRecord[] {
+    const list = [...acls];
+    list.splice(Math.min(Math.max(position, 1), list.length + 1) - 1, 0, acl);
+    return list;
+}
+
+/** The current rule order as reorderGatewayAcls takes it. */
+function orderOf(acls: RawRecord[]): Record<string, number> {
+    return Object.fromEntries(acls.map((a, i) => [String(a.id), i + 1]));
+}
+
+/** What a PUT must resend to put an ACL back exactly as it was. */
+function writableAcl(raw: RawRecord): RawRecord {
+    const fields = ['description', 'status', 'policy', 'protocols', 'sourceType', 'sourceIds', 'destinationType', 'destinationIds', 'syslog', 'direction', 'stateMode', 'states', 'timeRangeId'];
+    return Object.fromEntries(fields.filter((f) => raw[f] !== undefined && raw[f] !== null).map((f) => [f, raw[f]]));
+}
+
+/** The original error, with what the undo couldn't do appended. */
+function withNote(error: unknown, note: string): unknown {
+    if (error instanceof NetError) return new NetError(error.code, `${error.message} (${note})`, error.details);
+    return new Error(`${error instanceof Error ? error.message : String(error)} (${note})`);
+}
+
+function needsGroups(draft: RuleDraft): boolean {
+    return 'newGroup' in draft.source || 'newGroup' in draft.destination;
+}
+
+function groupSteps(draft: RuleDraft): Step[] {
+    return [draft.source, draft.destination]
+        .filter((e): e is Extract<Endpoint, { newGroup: unknown }> => 'newGroup' in e)
+        .map((e) => ({ action: 'create' as const, object: e.newGroup.groupType === GROUP_TYPE.ipPort ? 'omada.ipPortGroup' : 'omada.ipGroup', name: e.label }));
+}
+
+function aclBody(draft: RuleDraft, description: string, source: { type: number; ids: string[] }, destination: { type: number; ids: string[] }, syslog: boolean): RawRecord {
+    return {
+        description,
+        status: draft.enabled,
+        policy: draft.policy,
+        protocols: draft.protocols,
+        sourceType: source.type,
+        sourceIds: source.ids,
+        destinationType: destination.type,
+        destinationIds: destination.ids,
+        syslog,
+        direction: { lanToWan: draft.direction === 'lanToWan', lanToLan: draft.direction === 'lanToLan', wanInIds: [], vpnInIds: [] },
+        // 0 = "Auto": replies to connections started on the other side pass (see omadaRules.ts).
+        stateMode: 0,
+    };
+}
+
+function describeRuleChanges(current: Rule, next: RuleFields): string[] {
+    const out: string[] = [];
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+    if (next.name !== current.name) out.push(`name → ${next.name}`);
+    if (next.action !== current.action) out.push(`action → ${next.action}`);
+    if (!same(next.from, current.from)) out.push('source changed');
+    if (!same(next.to, current.to)) out.push('destination changed');
+    if (!same(next.protocol, current.protocol)) out.push(`protocol → ${typeof next.protocol === 'object' ? `ports ${next.protocol.tcpUdpPorts}` : next.protocol}`);
+    if (next.enabled !== current.enabled) out.push(next.enabled ? 'switched on' : 'switched off');
+    return out;
+}
+
 
 function notYet(what: string, release: string): NetError {
     return new NetError('UNSUPPORTED', `Changing ${what} through the net_ tools arrives in ${release}`, { capability: what });
@@ -769,22 +1291,6 @@ function notYet(what: string, release: string): NetError {
 
 function unsupported(what: string, capability: string): NetError {
     return new NetError('UNSUPPORTED', `Omada can't do ${what} through its API`, { capability });
-}
-
-function resolve<T extends { id: string; name: string }>(items: T[], ref: Ref, what: string): T {
-    if ('id' in ref) {
-        const byId = items.find((i) => i.id === ref.id);
-        if (byId) return byId;
-        throw new NetError('NOT_FOUND', `No ${what} with id '${ref.id}'`);
-    }
-    // Tools pass what the user typed as { name }; an exact id match wins.
-    const byId = items.find((i) => i.id === ref.name);
-    if (byId) return byId;
-    const wanted = ref.name.trim().toLowerCase();
-    const matches = items.filter((i) => i.name.toLowerCase() === wanted);
-    if (matches.length === 1) return matches[0];
-    if (matches.length > 1) throw new NetError('AMBIGUOUS', `Several ${what}s are named '${ref.name}'; use the id`);
-    throw new NetError('NOT_FOUND', `${what[0].toUpperCase()}${what.slice(1)} '${ref.name}' not found. Available: ${items.map((i) => i.name).join(', ') || '(none)'}`);
 }
 
 /** The network a Wi-Fi network may put its devices on: one with a gateway (and so an address for them). */
@@ -902,6 +1408,7 @@ function fingerprint(snap: Snapshot, reads: Built['reads']): string {
         ssids: reads.ssids ? redactSecrets(snap.ssids) : undefined,
         // A MAC filter plan resolved a group by name: a renamed or replaced group must not slip through.
         macGroups: reads.macGroups ? snap.macGroups : undefined,
+        rules: reads.rules ? { acls: snap.acls, otherAcls: snap.otherAcls, ipGroups: snap.ipGroups, ipPortGroups: snap.ipPortGroups } : undefined,
     };
     return createHash('sha256').update(JSON.stringify(material)).digest('hex').slice(0, 16);
 }

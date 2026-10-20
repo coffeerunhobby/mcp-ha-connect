@@ -255,6 +255,8 @@ export class AccessControlOperations {
         const resolved = this.site.resolveSiteId(siteId);
         const name = input.name.trim();
         if (name.length < 1 || name.length > 64) throw new Error('Group name must be 1 to 64 characters');
+        // Reserved for the groups net_ rules own (they are removed once no rule uses them).
+        if (/^\s*\[net:/i.test(name)) throw new Error("Group names can't start with '[net:': that prefix is reserved for groups the net_ rule tools own");
         const existing = input.type === 'ip' ? await this.listIpGroups(resolved) : await this.macGroups.listMacGroups(resolved);
         if (existing.some((g) => g.name.toLowerCase() === name.toLowerCase())) {
             throw new Error(`A ${input.type.toUpperCase()} group named '${name}' already exists`);

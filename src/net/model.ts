@@ -275,6 +275,8 @@ export interface ApplyResult {
     object?: Network | Wifi | PortProfile | Rule | Group | Reservation;
     /** Vendor objects created for this change; tagged so delete() removes them all again. */
     owned: Array<{ object: string; id: string }>;
+    /** The change is done, but a follow-up (e.g. cleanup) is not; each says what is left and what happens to it. */
+    warnings?: string[];
 }
 
 export type NetErrorCode =

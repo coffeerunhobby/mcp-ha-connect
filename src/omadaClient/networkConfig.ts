@@ -26,7 +26,7 @@ export class NetworkConfigOperations {
         return this.buildPath(`/sites/${encodeURIComponent(this.site.resolveSiteId(siteId))}${path}`, version);
     }
 
-    private async send(method: 'POST' | 'PATCH' | 'DELETE', url: string, data?: unknown): Promise<unknown> {
+    private async send(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', url: string, data?: unknown): Promise<unknown> {
         return this.request.ensureSuccess(await this.request.request<OmadaApiResponse<unknown>>({ method, url, data }));
     }
 
@@ -105,5 +105,41 @@ export class NetworkConfigOperations {
     /** OperationId: deleteSsid */
     public async deleteSsid(wlanId: string, ssidId: string, siteId?: string): Promise<void> {
         await this.send('DELETE', this.sitePath(siteId, `/wireless-network/wlans/${encodeURIComponent(wlanId)}/ssids/${encodeURIComponent(ssidId)}`));
+    }
+
+    // ---- gateway ACLs and their groups (net_ rules) -----------------------------------
+    // Bodies verified on the live controller (6.3.0.45, 2026-10-20): LAN→LAN rules between
+    // networks (endpoint type 0) and towards an IP-port group (type 2), IP-port groups
+    // {type: 1, ipList, portType: 0, portList: ["1883"]}.
+
+    /** IP groups (type 0) or IP-port groups (type 1). */
+    public async listGroups(type: 0 | 1, siteId?: string): Promise<RawRecord[]> {
+        const response = await this.request.get<OmadaApiResponse<RawRecord[]>>(this.sitePath(siteId, `/profiles/groups/${type}`));
+        return this.request.ensureSuccess(response) ?? [];
+    }
+
+    public async createGroup(body: RawRecord, siteId?: string): Promise<void> {
+        await this.send('POST', this.sitePath(siteId, '/profiles/groups'), body);
+    }
+
+    public async deleteGroup(type: 0 | 1, groupId: string, siteId?: string): Promise<void> {
+        await this.send('DELETE', this.sitePath(siteId, `/profiles/groups/${type}/${encodeURIComponent(groupId)}`));
+    }
+
+    public async createGatewayAcl(body: RawRecord, siteId?: string): Promise<void> {
+        await this.send('POST', this.sitePath(siteId, '/acls/osg-acls'), body);
+    }
+
+    public async updateGatewayAcl(aclId: string, body: RawRecord, siteId?: string): Promise<void> {
+        await this.send('PUT', this.sitePath(siteId, `/acls/osg-acls/${encodeURIComponent(aclId)}`), body);
+    }
+
+    public async deleteGatewayAcl(aclId: string, siteId?: string): Promise<void> {
+        await this.send('DELETE', this.sitePath(siteId, `/acls/${encodeURIComponent(aclId)}`));
+    }
+
+    /** New order of the gateway ACLs: id -> position (1 = evaluated first). */
+    public async reorderGatewayAcls(indexes: Record<string, number>, siteId?: string): Promise<void> {
+        await this.send('POST', this.sitePath(siteId, '/acls/modifyIndex'), { type: 'gateway', indexes });
     }
 }
