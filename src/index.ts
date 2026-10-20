@@ -6,12 +6,9 @@
  */
 
 import { loadConfig } from './config.js';
-import { HaClient } from './haClient/index.js';
-import { LocalAIClient } from './localAI/index.js';
-import { OmadaClient } from './omadaClient/index.js';
-import { checkConfiguredSite } from './omadaClient/site.js';
 import { startHttpServer } from './server/http.js';
 import { startStdioServer } from './server/stdio.js';
+import { connectUpstreams } from './upstreams.js';
 import { initLogger, logger } from './utils/logger.js';
 import { VERSION } from './version.js';
 
@@ -34,94 +31,9 @@ async function main(): Promise<void> {
       useHttp: config.useHttp,
     });
 
-    // Create Home Assistant client (if plugin enabled and configured)
-    let haClient: HaClient | undefined;
-    if (config.haPluginEnabled) {
-      if (config.baseUrl && config.token) {
-        haClient = new HaClient({
-          baseUrl: config.baseUrl,
-          token: config.token,
-          timeout: config.timeout,
-          strictSsl: config.strictSsl,
-        });
-
-        // Test Home Assistant connection
-        const apiCheck = await haClient.checkApi();
-        logger.info('Connected to Home Assistant', { message: apiCheck.message });
-      } else {
-        logger.warn('HA plugin enabled but HA_URL or HA_TOKEN not set');
-      }
-    } else {
-      logger.info('Home Assistant plugin disabled');
-    }
-
-    // Create Omada client (if plugin enabled and configured)
-    let omadaClient: OmadaClient | undefined;
-    if (config.omadaPluginEnabled) {
-      if (config.omadaBaseUrl && config.omadaClientId && config.omadaClientSecret && config.omadacId) {
-        try {
-          omadaClient = new OmadaClient({
-            baseUrl: config.omadaBaseUrl,
-            clientId: config.omadaClientId,
-            clientSecret: config.omadaClientSecret,
-            omadacId: config.omadacId,
-            siteId: config.siteId,
-            strictSsl: config.omadaStrictSsl,
-            requestTimeout: config.requestTimeout,
-          });
-
-          // Test Omada connection by listing sites
-          const sites = await omadaClient.listSites();
-
-          // Omada is the source of truth: a configured OMADA_SITE_ID that isn't
-          // on the controller is a deployment bug (drifted site id), not a
-          // transient outage. Fail the Omada plugin loudly — HA and AI keep
-          // working — instead of silently scoping every read to a dead site.
-          const siteError = checkConfiguredSite(config.siteId, sites);
-          if (siteError) {
-            logger.error(`Omada plugin disabled - invalid OMADA_SITE_ID. ${siteError}`);
-            omadaClient = undefined;
-          } else {
-            logger.info('Connected to Omada controller', { siteCount: sites.length });
-          }
-        } catch (error) {
-          logger.warn('Omada controller not available - Omada tools will be disabled', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-          omadaClient = undefined;
-        }
-      } else {
-        logger.warn('Omada plugin enabled but required config not set (OMADA_BASE_URL, OMADA_CLIENT_ID, OMADA_CLIENT_SECRET, OMADA_OMADAC_ID)');
-      }
-    } else {
-      logger.info('Omada plugin disabled');
-    }
-
-    // Create Local AI client (if plugin enabled)
-    let aiClient: LocalAIClient | undefined;
-    if (config.aiPluginEnabled) {
-      if (config.aiProvider === 'none') {
-        logger.info('AI plugin enabled but AI_PROVIDER=none');
-      } else {
-        aiClient = new LocalAIClient(config);
-        const aiHealthy = await aiClient.checkHealth();
-        if (aiHealthy) {
-          logger.info('Connected to AI provider', {
-            provider: aiClient.getProviderName(),
-            url: config.aiUrl,
-            model: config.aiModel,
-          });
-        } else {
-          logger.warn('AI provider not available - AI analysis tool will be disabled', {
-            provider: config.aiProvider,
-            url: config.aiUrl,
-          });
-          aiClient = undefined;
-        }
-      }
-    } else {
-      logger.info('AI plugin disabled');
-    }
+    // Connect the upstreams. One that doesn't answer yet doesn't stop the server:
+    // it is retried in the background (see upstreams.ts).
+    const { haClient, omadaClient, aiClient } = await connectUpstreams(config);
 
     // Start server in appropriate mode
     if (config.useHttp) {

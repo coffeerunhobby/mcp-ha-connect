@@ -41,6 +41,8 @@ export class RequestHandler {
     private readonly timeout: number;
     /** Per-client undici dispatcher; set only when strictSsl is disabled (H2). */
     private readonly dispatcher?: Dispatcher;
+    /** Set by disable(): every request refuses with this message instead of calling the controller. */
+    private disabledReason?: string;
 
     constructor(
         config: RequestHandlerConfig,
@@ -49,6 +51,11 @@ export class RequestHandler {
         this.baseUrl = config.baseUrl;
         this.timeout = config.timeout ?? 30000;
         this.dispatcher = createTlsDispatcher(config.strictSsl, config.baseUrl);
+    }
+
+    /** Refuse every further request with `reason` (e.g. OMADA_SITE_ID found invalid after startup). */
+    public disable(reason: string): void {
+        this.disabledReason = reason;
     }
 
     /**
@@ -83,6 +90,7 @@ export class RequestHandler {
      * Make an arbitrary HTTP request to the Omada API.
      */
     public async request<T>(config: RequestOptions, retry = true): Promise<T> {
+        if (this.disabledReason) throw new Error(this.disabledReason);
         const accessToken = await this.auth.getAccessToken();
 
         const method = (config.method ?? 'GET').toUpperCase();

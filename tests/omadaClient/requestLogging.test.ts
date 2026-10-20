@@ -31,3 +31,20 @@ describe('Omada request logging', () => {
         expect(logged).not.toMatch(/Hous|0rd!|Qz7r|K9xw|Tk42|zz88|"1234"/);
     });
 });
+
+describe('Omada request handler disable()', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it('refuses every request with the reason, without asking for a token or calling the controller', async () => {
+        const fetchSpy = vi.spyOn(globalThis, 'fetch');
+        const auth = { getAccessToken: vi.fn(async () => 'token') } as unknown as AuthManager;
+        const handler = new RequestHandler({ baseUrl: 'https://controller.test:8043', strictSsl: true }, auth);
+
+        handler.disable('Omada tools are disabled: test');
+
+        await expect(handler.get('/openapi/v1/c/sites')).rejects.toThrow('Omada tools are disabled: test');
+        await expect(handler.post('/openapi/v1/c/sites/s/acls/osg-acls', {})).rejects.toThrow('Omada tools are disabled: test');
+        expect(auth.getAccessToken).not.toHaveBeenCalled();
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+});

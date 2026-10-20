@@ -270,7 +270,7 @@ one is set in the controller's web UI. Reads need `QUERY`, changes `CONFIGURE`.
 | `net_createWifi` / `net_updateWifi` / `net_deleteWifi` | Create or change an SSID on a given network (bands, WPA2/WPA3, PMF, isolation, hidden, 802.11r, MAC filter), or reset its password to a random one |
 
 On Omada, network isolation, a "guest" network type, switching IPv6 on, and WPA2/WPA3 mixed mode are not available
-through the API and are refused. Rules arrive in 2.4.6, switch ports and mDNS in 2.4.7.
+through the API and are refused. Rules arrive in 2.4.7, switch ports and mDNS in 2.4.8.
 
 ### AI Tools (1)
 

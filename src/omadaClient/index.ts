@@ -114,6 +114,11 @@ export class OmadaClient {
         );
     }
 
+    /** Refuse every further Omada call with `reason` (used when OMADA_SITE_ID turns out invalid after startup). */
+    public disable(reason: string): void {
+        this.request.disable(reason);
+    }
+
     // Site operations
     public async listSites(): Promise<OmadaSiteSummary[]> {
         return await this.siteOps.listSites();

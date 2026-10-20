@@ -230,6 +230,7 @@ export function registerOmadaAccessControlTools(server: McpServer, client: Omada
             description:
                 'Create a gateway (router) ACL rule for LAN to internet traffic: allow or deny a source (IP group, LAN network or SSID) ' +
                 'to a destination (default everything), optionally only during a time range. Covers wired and wireless. ' +
+                'It cannot block traffic between your own networks (a LAN network, or LAN addresses, as the destination is refused). ' +
                 'Rules are evaluated in order (see omada_moveGatewayAcl).' +
                 CONFIRM,
             inputSchema: createGatewayAclSchema,

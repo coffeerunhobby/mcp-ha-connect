@@ -381,6 +381,62 @@ describe('gateway ACL', () => {
         expect(writes).toHaveLength(1);
     });
 
+    it('refuses a LAN network as the destination of a LAN to internet rule: it would never match', async () => {
+        const { writes, ops } = controller();
+        const source = { type: 'network' as const, ids: ['IoT'] };
+
+        await expect(ops.createGatewayAcl({ description: 'Deny IoT to Home', policy: 'deny', source, destination: { type: 'network', ids: ['Default'] } })).rejects.toThrow(
+            /LAN network can't be the destination.*only cover LAN to internet traffic.*LAN -> LAN/
+        );
+        expect(writes).toEqual([]);
+    });
+
+    it('refuses an IP group with an entry inside a LAN subnet as the destination, but not one that only overlaps', async () => {
+        const { state, writes, ops } = controller();
+        state.ipGroups.push({ groupId: 'ip-ha', name: 'HomeAssistant', ipList: [{ ip: '203.0.113.0', mask: 24 }, { ip: '10.0.1.19', mask: 32 }] });
+        const source = { type: 'network' as const, ids: ['IoT'] };
+
+        await expect(ops.createGatewayAcl({ description: 'x', policy: 'deny', source, destination: { type: 'ipGroup', ids: ['HomeAssistant'] } })).rejects.toThrow(
+            /IP group 'HomeAssistant' has 10\.0\.1\.19\/32, inside LAN network 'IoT' \(10\.0\.1\.1\/24\)/
+        );
+        expect(writes).toEqual([]);
+
+        // 10.0.0.0/8 reaches beyond the LANs, so part of it can leave through the WAN.
+        await ops.createGatewayAcl({ description: 'No private ranges', policy: 'deny', source, destination: { type: 'ipGroup', ids: ['IPGroup_RFC1918'] } });
+        expect(writes).toHaveLength(1);
+    });
+
+    it('refuses to point a LAN to internet rule at a LAN network on update, but leaves a LAN to LAN rule from the web UI editable', async () => {
+        const { state, writes, ops } = controller();
+        state.acls.push(
+            { ...state.acls[0], id: 'acl-wan', index: 2, description: 'Curfew', direction: { lanToWan: true, lanToLan: false, wanInIds: [], vpnInIds: [] } },
+            { ...state.acls[0], id: 'acl-lan', index: 3, description: 'IoT to Home', direction: { lanToWan: false, lanToLan: true, wanInIds: [], vpnInIds: [] } }
+        );
+
+        await expect(ops.updateGatewayAcl('Curfew', { destination: { type: 'network', ids: ['Default'] } })).rejects.toThrow(/LAN network can't be the destination/);
+        expect(writes).toEqual([]);
+
+        await ops.updateGatewayAcl('IoT to Home', { destination: { type: 'network', ids: ['Default'] } });
+        expect(writes[0].data).toMatchObject({ destinationType: 0, destinationIds: ['lan-default'], direction: { lanToLan: true } });
+    });
+
+    it('refuses to switch on or keep enabled an existing LAN to internet rule that can never match, but lets it be switched off', async () => {
+        const { state, writes, ops } = controller();
+        state.ipGroups.push({ groupId: 'ip-ha', name: 'HomeAssistant', ipList: [{ ip: '10.0.1.19', mask: 32 }] });
+        const wan = { lanToWan: true, lanToLan: false, wanInIds: [], vpnInIds: [] };
+        state.acls.push(
+            { ...state.acls[0], id: 'acl-net', index: 2, description: 'Old IoT block', status: false, sourceType: 0, sourceIds: ['lan-iot'], destinationType: 0, destinationIds: ['lan-default'], direction: wan },
+            { ...state.acls[0], id: 'acl-grp', index: 3, description: 'Old HA block', status: true, sourceType: 0, sourceIds: ['lan-iot'], destinationType: 1, destinationIds: ['ip-ha'], direction: wan }
+        );
+
+        await expect(ops.updateGatewayAcl('Old IoT block', { enabled: true })).rejects.toThrow(/LAN network can't be the destination/);
+        await expect(ops.updateGatewayAcl('Old HA block', { policy: 'allow' })).rejects.toThrow(/IP group 'HomeAssistant' has 10\.0\.1\.19\/32/);
+        expect(writes).toEqual([]);
+
+        await ops.updateGatewayAcl('Old HA block', { enabled: false });
+        expect(writes[0].data).toMatchObject({ status: false, destinationIds: ['ip-ha'] });
+    });
+
     it('deletes and reorders rules', async () => {
         const { state, writes, ops } = controller();
         state.acls.push({ ...state.acls[0], id: 'acl-2', index: 2, description: 'Second' }, { ...state.acls[0], id: 'acl-3', index: 3, description: 'Third' });

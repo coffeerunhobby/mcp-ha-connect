@@ -5,7 +5,7 @@
  * applied, refused if the controller changed meanwhile or if online devices would be
  * cut off without allowLockout.
  *
- * 2.4.5: networks and Wi-Fi. Rules arrive in 2.4.6, switch ports and mDNS in 2.4.7.
+ * 2.4.5: networks and Wi-Fi. Rules arrive in 2.4.7, switch ports and mDNS in 2.4.8.
  */
 
 import type { McpServer } from '@modelcontextprotocol/server';

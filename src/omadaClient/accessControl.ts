@@ -21,7 +21,7 @@ import { ALWAYS_PROFILE_NAME } from './network.js';
 import type { RequestHandler } from './request.js';
 import { accessControlLockKey, serialize } from './serialize.js';
 import type { SiteOperations } from './site.js';
-import { inSubnet, ipToNumber } from '../utils/ipv4.js';
+import { inSubnet, ipToNumber, parseCidr } from '../utils/ipv4.js';
 import { buildTimeRange, describeTimeRange, type TimeRangeEntry, type TimeWindow } from './timeRange.js';
 
 export const IP_GROUP_TYPE = 0;
@@ -372,6 +372,7 @@ export class AccessControlOperations {
             direction: { lanToWan: true, lanToLan: false, wanInIds: [], vpnInIds: [] },
             stateMode: 0,
         };
+        await this.refuseLanDestination(body.destinationType as number, body.destinationIds as string[], resolved);
         if (input.timeRange) body.timeRangeId = await this.timeRangeId(input.timeRange, resolved);
         await this.send('POST', this.sitePath(resolved, '/acls/osg-acls'), body);
         const created = (await this.listGatewayAcls(resolved)).find((a) => a.description === description);
@@ -408,6 +409,14 @@ export class AccessControlOperations {
                 resolved
             );
             Object.assign(body, endpoints);
+        }
+        // Check the rule as it will be, not only a changed destination: a never-matching rule from
+        // before 2.4.6 must not be switched on or edited as if it protected anything. Switching it
+        // off stays possible (and deleting it). A rule made LAN→LAN in the web UI may point at a
+        // network; only LAN→WAN-only rules are checked.
+        const direction = body.direction as NonNullable<GatewayAcl['direction']>;
+        if (body.status === true && direction.lanToWan && !direction.lanToLan) {
+            await this.refuseLanDestination(body.destinationType as number, body.destinationIds as string[], resolved);
         }
         const timeRangeId = changes.timeRange === undefined ? current.timeRangeId : changes.timeRange === null ? undefined : await this.timeRangeId(changes.timeRange, resolved);
         if (timeRangeId) body.timeRangeId = timeRangeId;
@@ -481,6 +490,39 @@ export class AccessControlOperations {
             destinationType: DESTINATION_TYPES[dest.type],
             destinationIds: await this.resolveIds(dest.type, dest.ids, siteId),
         };
+    }
+
+    /**
+     * The rules this class writes are LAN→WAN only: Omada applies them to traffic leaving
+     * through the WAN, so traffic between two of the site's own networks never meets them.
+     * A LAN network as the destination, or an IP group entry inside a LAN subnet, would
+     * look like an inter-VLAN block and never match anything; refuse those.
+     */
+    private async refuseLanDestination(destinationType: number, destinationIds: string[], siteId: string): Promise<void> {
+        const remedy =
+            'Gateway ACLs made here only cover LAN to internet traffic, so a rule towards your own networks would never match anything. ' +
+            'Rules between networks come with the net_ rule tools (2.4.7); until then make them in the controller web UI (Gateway ACL, direction LAN -> LAN).';
+        if (destinationType === DESTINATION_TYPES.network) {
+            throw new Error(`A LAN network can't be the destination. ${remedy}`);
+        }
+        const networks = ((await this.network.getLanNetworkList(siteId)) as Array<{ name: string; gatewaySubnet?: string }>).filter(
+            (n) => typeof n.gatewaySubnet === 'string'
+        );
+        const groups = (await this.listIpGroups(siteId)).filter((g) => destinationIds.includes(g.groupId));
+        for (const group of groups) {
+            for (const entry of group.ipList ?? []) {
+                let range: { network: number; broadcast: number };
+                try {
+                    range = parseCidr(`${entry.ip}/${entry.mask}`);
+                } catch {
+                    continue;
+                }
+                const lan = networks.find((n) => inSubnet(range.network, n.gatewaySubnet!) && inSubnet(range.broadcast, n.gatewaySubnet!));
+                if (lan) {
+                    throw new Error(`IP group '${group.name}' has ${entry.ip}/${entry.mask}, inside LAN network '${lan.name}' (${lan.gatewaySubnet}). ${remedy}`);
+                }
+            }
+        }
     }
 
     /** Ids or names of IP groups, LAN networks or SSIDs -> ids. */

@@ -2,7 +2,7 @@
  * Omada adapter for the vendor-neutral network model (src/net/model.ts).
  *
  * 2.4.5 covers networks (LAN networks / VLANs) and Wi-Fi (SSIDs). Rules, groups, switch
- * ports and mDNS arrive with 2.4.6 and 2.4.7; until then those calls fail with
+ * ports and mDNS arrive with 2.4.7 and 2.4.8; until then those calls fail with
  * NetError UNSUPPORTED.
  *
  * Omada specifics handled here:
@@ -296,19 +296,19 @@ export class OmadaNetworkController implements NetworkController {
     }
 
     async listPortProfiles(): Promise<never> {
-        throw notYet('switch port profiles', '2.4.7');
+        throw notYet('switch port profiles', '2.4.8');
     }
     async listPorts(): Promise<never> {
-        throw notYet('switch ports', '2.4.7');
+        throw notYet('switch ports', '2.4.8');
     }
     async listRules(): Promise<never> {
-        throw notYet('rules', '2.4.6');
+        throw notYet('rules', '2.4.7');
     }
     async listGroups(): Promise<never> {
-        throw notYet('groups', '2.4.6');
+        throw notYet('groups', '2.4.7');
     }
     async getMdnsRepeater(): Promise<never> {
-        throw notYet('the mDNS repeater', '2.4.7');
+        throw notYet('the mDNS repeater', '2.4.8');
     }
 
     // ---- plan / apply ------------------------------------------------------------------
@@ -364,7 +364,7 @@ export class OmadaNetworkController implements NetworkController {
                 if (change.op === 'delete') return this.buildWifiDelete(change.ref, snap);
                 break;
             default:
-                throw notYet(`${change.kind} changes`, change.kind === 'rule' || change.kind === 'group' ? '2.4.6' : change.kind === 'reservation' ? 'a later release (use omada_setDhcpReservation)' : '2.4.7');
+                throw notYet(`${change.kind} changes`, change.kind === 'rule' || change.kind === 'group' ? '2.4.7' : change.kind === 'reservation' ? 'a later release (use omada_setDhcpReservation)' : '2.4.8');
         }
         throw new NetError('INVALID', 'This change is not supported');
     }
@@ -374,7 +374,7 @@ export class OmadaNetworkController implements NetworkController {
     private buildNetworkCreate(value: Extract<Change, { op: 'create'; kind: 'network' }>['value'], snap: Snapshot): Built {
         const name = checkName(value.name, MAX_NETWORK_NAME, 'Network');
         if (value.purpose === 'guest') throw unsupported('a guest network type (Omada makes a Wi-Fi network a guest network instead: clientIsolation)', 'networks.guestPurpose');
-        if (value.isolated) throw unsupported('network isolation (it comes as rules in 2.4.6)', 'networks.isolation');
+        if (value.isolated) throw unsupported('network isolation (it comes as rules in 2.4.7)', 'networks.isolation');
         if (value.ipv6) throw unsupported('switching IPv6 on (do it in the controller web UI)', 'networks.ipv6');
         const vlan = checkVlan(value.vlan);
         const vlanOnly = value.purpose === 'vlanOnly';
@@ -431,7 +431,7 @@ export class OmadaNetworkController implements NetworkController {
         if (current.purpose === 'vlanOnly' && (set.gateway !== undefined || set.dhcp !== undefined)) {
             throw new NetError('INVALID', `'${current.name}' is switch-only: it has no gateway and no DHCP to change`);
         }
-        if (set.isolated) throw unsupported('network isolation (it comes as rules in 2.4.6)', 'networks.isolation');
+        if (set.isolated) throw unsupported('network isolation (it comes as rules in 2.4.7)', 'networks.isolation');
         if (set.ipv6 === true && !current.ipv6) throw unsupported('switching IPv6 on (do it in the controller web UI)', 'networks.ipv6');
         const addressing = (set.vlan !== undefined && set.vlan !== current.vlan) || (set.gateway !== undefined && set.gateway !== current.gateway);
         if (current.protected && addressing) {
