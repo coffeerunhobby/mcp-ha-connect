@@ -83,7 +83,7 @@ export interface UpstreamFactories {
   ai(config: EnvironmentConfig): LocalAIClient;
 }
 
-const defaultFactories: UpstreamFactories = {
+export const defaultFactories: UpstreamFactories = {
   ha: (config) =>
     new HaClient({
       baseUrl: config.baseUrl!,
@@ -100,6 +100,7 @@ const defaultFactories: UpstreamFactories = {
       siteId: config.siteId,
       strictSsl: config.omadaStrictSsl,
       requestTimeout: config.requestTimeout,
+      serverAddresses: config.serverAddresses,
     }),
   ai: (config) => new LocalAIClient(config),
 };

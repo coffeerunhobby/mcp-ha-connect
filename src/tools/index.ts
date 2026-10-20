@@ -54,7 +54,7 @@ export function registerAllTools(options: RegisterToolsOptions): void {
     const omadaToolCount = registerOmadaTools(server, omadaClient, toolRegistrationMode);
     totalTools += omadaToolCount;
     // Vendor-neutral net_* tools, through the Omada adapter (same in eager and graph mode).
-    totalTools += registerNetTools(server, new OmadaNetworkController(omadaClient, { controllerHost: omadaClient.controllerHost }));
+    totalTools += registerNetTools(server, new OmadaNetworkController(omadaClient, { controllerHost: omadaClient.controllerHost, serverHosts: omadaClient.serverAddresses }));
   }
 
   // AI tools (always register, but may be disabled if no aiClient)

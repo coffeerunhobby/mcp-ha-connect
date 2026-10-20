@@ -2,8 +2,9 @@
  * Omada adapter for the vendor-neutral network model (src/net/model.ts).
  *
  * 2.4.5 covers networks (LAN networks / VLANs) and Wi-Fi (SSIDs); 2.4.7 rules (gateway
- * ACLs, see omadaRules.ts) and listing groups. Switch ports and mDNS arrive with 2.4.8;
- * until then those calls fail with NetError UNSUPPORTED.
+ * ACLs, see omadaRules.ts) and listing groups; 2.4.8 switch ports (the networks a port
+ * carries), listing port profiles and the mDNS repeater (see omadaPorts.ts). Creating
+ * port profiles, groups and reservations is refused with NetError UNSUPPORTED.
  *
  * Omada specifics handled here:
  * - networks have no "guest" purpose and no isolation flag in the API (guest is per
@@ -33,10 +34,15 @@ import {
     type Change,
     type Client,
     type Group,
+    type MdnsRepeater,
     type Network,
     type NetworkController,
     type PassphraseSource,
     type Plan,
+    type Port,
+    type PortNetworks,
+    type PortProfile,
+    type PortRef,
     type ProtectedResources,
     type Ref,
     type Reservation,
@@ -65,6 +71,7 @@ import {
     type RuleFields,
     type RuleWorld,
 } from './omadaRules.js';
+import { MDNS_GATEWAY, TAGS, cutOff, describeNetworks, linkPorts, toMdns, toPortNetworks, toPortProfile } from './omadaPorts.js';
 
 const PSEUDO_WLAN_ID = 'gateway';
 /** Omada LAN network purpose: 0 = VLAN only (switches), 1 = interface (routed by the gateway). */
@@ -114,6 +121,59 @@ interface Snapshot {
     alwaysProfileId?: string;
 }
 
+/**
+ * A switch with its ports, the ports that link it to other network devices (undefined: unknown)
+ * and which of its ports carry each network (network id -> affectedPorts).
+ */
+interface SwitchRaw {
+    mac: string;
+    name: string;
+    ports: RawRecord[];
+    links?: Map<number, string>;
+    /** Undefined when the controller's lists contradict each other: what its ports carry is unknown. */
+    affected?: Map<string, RawRecord>;
+}
+
+/** For each network, the devices whose ports carry it (getGridVlanNetworkAffectedDevicePorts). */
+type Carrying = Array<{ id: string; devices: RawRecord[] }>;
+
+/** Lists a switch's entry under a network has (live, 6.3.0.45: always all six). */
+const AFFECTED_LISTS = ['nativePorts', 'untagPorts', 'tagPorts', 'nativeLags', 'untagLags', 'tagLags'];
+
+/** A switch's `affectedPorts` with every list in place, or undefined: then which of its ports carry the network can't be told. */
+function affectedPortsOf(device: RawRecord): RawRecord | undefined {
+    const affected = (device.switchInfo as RawRecord | undefined)?.affectedPorts as RawRecord | undefined;
+    return affected && AFFECTED_LISTS.every((k) => Array.isArray(affected[k])) ? affected : undefined;
+}
+
+/**
+ * Which ports of one switch carry each network (a network that doesn't list the switch reaches
+ * none of them); undefined when a network lists the switch twice or without all its lists.
+ */
+function affectedOf(carrying: Carrying, mac: string): Map<string, RawRecord> | undefined {
+    const out = new Map<string, RawRecord>();
+    for (const { id, devices } of carrying) {
+        const entries = devices.filter((d) => typeof d.mac === 'string' && normalizeMac(d.mac) === normalizeMac(mac));
+        if (entries.length > 1) return undefined;
+        if (!entries.length) {
+            out.set(id, {});
+            continue;
+        }
+        const affected = affectedPortsOf(entries[0]);
+        if (!affected) return undefined;
+        out.set(id, affected);
+    }
+    return out;
+}
+
+/** What port changes read on top of the snapshot. */
+interface PortWorld {
+    switches: SwitchRaw[];
+}
+
+/** Port fields a port change depends on (link state and counters change all the time and are left out). */
+const PORT_FIELDS = ['port', 'name', 'profileId', 'profileOverrideEnable', 'lagPort'];
+
 /** What plan() hands to apply(): the steps as closures (never serialized, never returned). */
 type Executor = (snapshot: Snapshot) => Promise<ApplyResult>;
 
@@ -124,6 +184,8 @@ export interface OmadaAdapterOptions {
     siteId?: string;
     /** The controller's host name or address (host of OMADA_BASE_URL): its network is protected. */
     controllerHost?: string;
+    /** Where this server runs (MCP_SERVER_ADDRESSES): the switch port it is on is never reassigned. */
+    serverHosts?: string[];
     /** Resolves a host name to IPv4 addresses (default: the system resolver). */
     resolveHost?: (host: string) => Promise<string[]>;
 }
@@ -134,6 +196,14 @@ export class OmadaNetworkController implements NetworkController {
     private readonly executors = new WeakMap<Plan, Executor>();
     /** The controller's IPv4 addresses; 'unknown' when its host name can't be resolved (then every routed network is protected). */
     private controllerAddresses: number[] | 'unknown' = [];
+    /** This server's IPv4 addresses; 'unset' when not configured, 'unknown' when one can't be resolved. */
+    private serverAddresses: number[] | 'unknown' | 'unset' = 'unset';
+    /**
+     * The controller's and this server's addresses together: their networks are protected and rules
+     * must not cut them off the internet. 'unknown' when either can't be resolved (then every routed
+     * network is protected); this server's are left out while not configured.
+     */
+    private hostAddresses: number[] | 'unknown' = [];
 
     constructor(
         private readonly client: OmadaClient,
@@ -147,11 +217,12 @@ export class OmadaNetworkController implements NetworkController {
             vendor: 'omada',
             networks: { create: 'native', isolation: 'unsupported', ipv6: 'unsupported', guestPurpose: 'unsupported' },
             wifi: { create: 'native', bands: ['2.4', '5', '6'], security: ['open', 'wpa2', 'wpa3'], pmf: 'native', fastRoaming: 'native', bandSteering: 'unsupported' },
-            ports: { profiles: 'unsupported', assign: 'unsupported' },
+            // Port profiles are listed and assigned; they are created in the controller web UI.
+            ports: { profiles: 'unsupported', assign: 'native' },
             rules: { between: 'native', toInternet: 'native', deviceMatch: 'unsupported', wifiMatch: 'unsupported', stateful: 'native', schedule: 'unsupported' },
             groups: { address: 'unsupported', mac: 'unsupported' },
             reservations: 'native',
-            mdnsRepeater: 'unsupported',
+            mdnsRepeater: 'native',
         };
     }
 
@@ -159,23 +230,33 @@ export class OmadaNetworkController implements NetworkController {
 
     private async resolveController(): Promise<void> {
         const host = this.options.controllerHost;
-        if (!host) {
-            this.controllerAddresses = [];
-            return;
+        this.controllerAddresses = host ? await this.addressesOf([host]) : [];
+        const server = this.options.serverHosts ?? [];
+        this.serverAddresses = server.length ? await this.addressesOf(server) : 'unset';
+        const both = [this.controllerAddresses, this.serverAddresses === 'unset' ? [] : this.serverAddresses];
+        this.hostAddresses = both.some((a) => a === 'unknown') ? 'unknown' : both.flatMap((a) => a as number[]);
+    }
+
+    /** IPv4 addresses of hosts given by address or name; 'unknown' if any can't be resolved. */
+    private async addressesOf(hosts: string[]): Promise<number[] | 'unknown'> {
+        const all: number[] = [];
+        for (const host of hosts) {
+            try {
+                all.push(ipToNumber(host));
+                continue;
+            } catch {
+                // a host name
+            }
+            try {
+                const resolve = this.options.resolveHost ?? (async (name: string) => (await lookup(name, { all: true, family: 4 })).map((a) => a.address));
+                const addresses = await resolve(host);
+                if (!addresses.length) return 'unknown';
+                all.push(...addresses.map(ipToNumber));
+            } catch {
+                return 'unknown';
+            }
         }
-        try {
-            this.controllerAddresses = [ipToNumber(host)];
-            return;
-        } catch {
-            // a host name
-        }
-        try {
-            const resolve = this.options.resolveHost ?? (async (name: string) => (await lookup(name, { all: true, family: 4 })).map((a) => a.address));
-            const addresses = await resolve(host);
-            this.controllerAddresses = addresses.length ? addresses.map(ipToNumber) : 'unknown';
-        } catch {
-            this.controllerAddresses = 'unknown';
-        }
+        return all;
     }
 
     private async snapshot(): Promise<Snapshot> {
@@ -193,7 +274,7 @@ export class OmadaNetworkController implements NetworkController {
                 ssids.push({ wlanId: wlan.wlanId, ssidId: s.ssidId, detail: await this.client.networkConfig.getSsidDetail(wlan.wlanId, s.ssidId, siteId) });
             }
         }
-        const clients = (await this.client.listClients(siteId)).map((c) => this.toClient(c as RawRecord, networks));
+        const clients = (await this.client.listClients(siteId)).map((c) => this.toClient(c as RawRecord, networks, ssids));
         const alwaysProfileId = (await this.client.accessControl.listTimeRanges(siteId)).find((p) => p.name === ALWAYS_PROFILE_NAME)?.profileId;
         const macGroups = await this.client.listMacGroups(siteId);
         const acls = (await this.client.networkConfig.listAcls('osg-acls', siteId)).sort((a, b) => Number(a.index ?? 0) - Number(b.index ?? 0));
@@ -233,24 +314,34 @@ export class OmadaNetworkController implements NetworkController {
     private isProtected(raw: RawRecord): boolean {
         if (raw.primary === true) return true;
         if (typeof raw.gatewaySubnet !== 'string') return false;
-        // Fail closed: if the controller's address is unknown, any routed network could be its own.
-        if (this.controllerAddresses === 'unknown') return true;
+        // Fail closed: if the controller's or this server's address is unknown, any routed network could be its own.
+        if (this.hostAddresses === 'unknown') return true;
         const subnet = raw.gatewaySubnet;
-        return this.controllerAddresses.some((address) => inSubnet(address, subnet));
+        return this.hostAddresses.some((address) => inSubnet(address, subnet));
     }
 
-    private toClient(raw: RawRecord, networks: Network[]): Client {
+    private toClient(raw: RawRecord, networks: Network[], ssids: SsidRaw[]): Client {
         // A device still waiting for DHCP reports no (or an empty) address.
         const ip = typeof raw.ip === 'string' && isIpv4(raw.ip) ? raw.ip : undefined;
+        const ssid = typeof raw.ssid === 'string' && raw.ssid ? raw.ssid : undefined;
         let network: Network | undefined;
-        if (typeof raw.vid === 'number') network = networks.find((n) => n.vlan === raw.vid);
+        // Wireless clients report vid 0 (the field is for wired ones; no network has VLAN 0).
+        if (typeof raw.vid === 'number' && raw.wireless !== true) network = networks.find((n) => n.vlan === raw.vid);
         if (!network && ip) network = networks.find((n) => n.gateway && inSubnet(ipToNumber(ip), n.gateway));
+        if (!network && ssid) {
+            // No address yet: the network its Wi-Fi puts it on, when that is a single one.
+            const found = ssids.filter((s) => s.detail.name === ssid);
+            const ids = found.length === 1 ? this.ssidNetworkIds(found[0].detail, networks) : [];
+            if (ids.length === 1) network = networks.find((n) => n.id === ids[0]);
+        }
+        const port = Number(raw.port);
         return {
             mac: formatMac(String(raw.mac)),
             ...(typeof raw.name === 'string' ? { name: raw.name } : {}),
             ...(ip ? { ip } : {}),
             ...(network ? { network: { id: network.id } } : {}),
-            ...(typeof raw.ssid === 'string' && raw.ssid ? { wifi: { name: raw.ssid } } : {}),
+            ...(ssid ? { wifi: { name: ssid } } : {}),
+            ...(raw.wireless !== true && typeof raw.switchMac === 'string' && Number.isInteger(port) && port > 0 ? { port: { device: { mac: formatMac(raw.switchMac) }, port } } : {}),
             online: raw.active !== false,
         };
     }
@@ -326,11 +417,15 @@ export class OmadaNetworkController implements NetworkController {
             .map((r) => ({ mac: formatMac(r.mac), ip: String(r.ip), network: { id: r.netId }, ...(r.description ? { description: String(r.description) } : {}) }));
     }
 
-    async listPortProfiles(): Promise<never> {
-        throw notYet('switch port profiles', '2.4.8');
+    async listPortProfiles(): Promise<PortProfile[]> {
+        return (await this.client.networkConfig.listPortProfiles(this.options.siteId)).map(toPortProfile);
     }
-    async listPorts(): Promise<never> {
-        throw notYet('switch ports', '2.4.8');
+
+    async listPorts(device?: PortRef['device']): Promise<Port[]> {
+        const snap = await this.snapshot();
+        const world = await this.portWorld(snap);
+        const switches = device ? [this.resolveSwitch(world, device)] : world.switches;
+        return switches.flatMap((sw) => sw.ports.map((p) => this.toPort(sw, p, snap)));
     }
     async listRules(): Promise<Rule[]> {
         const snap = await this.snapshot();
@@ -357,8 +452,244 @@ export class OmadaNetworkController implements NetworkController {
         }));
         return kind === 'address' ? address : kind === 'mac' ? mac : [...address, ...mac];
     }
-    async getMdnsRepeater(): Promise<never> {
-        throw notYet('the mDNS repeater', '2.4.8');
+    async getMdnsRepeater(): Promise<MdnsRepeater> {
+        return toMdns(await this.client.networkConfig.listMdnsRules(this.options.siteId)).repeater;
+    }
+
+    // ---- switch ports and the mDNS repeater (mapping in omadaPorts.ts) ------------------------
+
+    private async portWorld(snap: Snapshot): Promise<PortWorld> {
+        const adopted = await this.client.listDevices(snap.siteId);
+        const devices = adopted.filter((d) => d.type === 'switch');
+        if (!devices.length) return { switches: [] };
+        let topology: RawRecord | undefined;
+        try {
+            topology = await this.client.networkConfig.getTopology(snap.siteId);
+        } catch {
+            // Unknown topology: every port is protected (linkPorts undefined), listing still works.
+        }
+        const carrying = await this.carrying(snap.networks, snap.siteId);
+        const switches: SwitchRaw[] = [];
+        for (const d of devices) {
+            const mac = String(d.mac);
+            const detail = await this.client.networkConfig.getSwitch(mac, snap.siteId);
+            const ports = (detail.portList as RawRecord[] | undefined) ?? [];
+            let links = topology ? linkPorts(topology, mac, adopted.map((a) => String(a.mac))) : undefined;
+            // A link on a port the switch doesn't have: the topology is stale, so the real port is unknown.
+            if (links && [...links.keys()].some((n) => !ports.some((p) => Number(p.port) === n))) links = undefined;
+            const affected = affectedOf(carrying, mac);
+            switches.push({ mac, name: String(d.name ?? mac), ports, ...(links ? { links } : {}), ...(affected ? { affected } : {}) });
+        }
+        return { switches };
+    }
+
+    /** For each network, the devices whose ports carry it. */
+    private async carrying(networks: Network[], siteId: string): Promise<Carrying> {
+        const out: Carrying = [];
+        for (const n of networks) out.push({ id: n.id, devices: await this.client.networkConfig.listNetworkPorts(n.id, n.vlan, siteId) });
+        return out;
+    }
+
+    /** A switch by name, or by MAC (as { mac } or as its id). */
+    private resolveSwitch(world: PortWorld, device: PortRef['device']): SwitchRaw {
+        if ('name' in device) return resolve(world.switches.map((s) => ({ ...s, id: s.mac })), device, 'switch');
+        const wanted = 'mac' in device ? device.mac : device.id;
+        const found = normalizeMac(wanted) === '' ? undefined : world.switches.find((s) => normalizeMac(s.mac) === normalizeMac(wanted));
+        if (!found) throw new NetError('NOT_FOUND', `No switch with MAC '${wanted}'. Switches: ${world.switches.map((s) => `${s.name} (${s.mac})`).join(', ') || '(none)'}`);
+        return found;
+    }
+
+    /**
+     * Why a port can't be reassigned, or undefined. Never: an uplink, the port the controller
+     * or this server is on (allowLockout doesn't change that). When where they are can't be
+     * told (address unknown or not configured, or inside the site but not seen on it), ports
+     * with online devices are left alone; empty ports can still be assigned.
+     */
+    private portProtection(sw: SwitchRaw, raw: RawRecord, seen: Client[], clients: Client[], networks: Network[]): string | undefined {
+        if (!sw.links) return `the controller's topology doesn't show which port links switch '${sw.name}' to the network`;
+        const link = sw.links.get(Number(raw.port));
+        if (link) return link;
+        if (raw.lagPort === true) return 'it is part of a link aggregation (LAG); change it in the controller web UI';
+        const hosts = [
+            { who: 'the controller', addresses: this.controllerAddresses },
+            { who: 'this server', addresses: this.serverAddresses },
+        ];
+        const on = (c: Client, addresses: number[]) => c.ip !== undefined && addresses.includes(ipToNumber(c.ip));
+        for (const { who, addresses } of hosts) {
+            if (Array.isArray(addresses) && seen.some((c) => on(c, addresses))) return `${who} is on it`;
+        }
+        if (seen.length === 0) return undefined;
+        for (const { who, addresses } of hosts) {
+            if (addresses === 'unset') return `${who}'s address isn't configured (MCP_SERVER_ADDRESSES), so its port can't be told; ports with devices on them are left alone`;
+            if (addresses === 'unknown') return `${who}'s address can't be resolved, so its port can't be told; ports with devices on them are left alone`;
+            const inSite = (a: number) => networks.some((n) => n.gateway && inSubnet(a, n.gateway));
+            // Located only when seen on a switch port: on Wi-Fi or straight on the gateway, what it hangs off can't be told.
+            if (addresses.some((a) => inSite(a) && !clients.some((c) => c.port !== undefined && on(c, [a])))) {
+                return `${who} isn't seen on a switch port, so its port can't be told; ports with devices on them are left alone`;
+            }
+        }
+        return undefined;
+    }
+
+    private toPort(sw: SwitchRaw, raw: RawRecord, snap: Pick<Snapshot, 'clients' | 'networks'>): Port {
+        const port = Number(raw.port);
+        const seen = snap.clients.filter((c) => c.online && c.port && 'mac' in c.port.device && normalizeMac(c.port.device.mac) === normalizeMac(sw.mac) && c.port.port === port);
+        const protection = this.portProtection(sw, raw, seen, snap.clients, snap.networks);
+        const networks = sw.affected ? toPortNetworks(sw.affected, port) : undefined;
+        return {
+            device: { mac: formatMac(sw.mac) },
+            port,
+            ...(typeof raw.name === 'string' ? { name: raw.name } : {}),
+            ...(typeof raw.profileId === 'string' ? { profile: { id: raw.profileId } } : {}),
+            ...(networks ? { networks } : {}),
+            customSettings: raw.profileOverrideEnable === true,
+            seen,
+            uplink: sw.links?.has(port) === true,
+            ...(protection ? { protected: protection } : {}),
+        };
+    }
+
+    /**
+     * Gives a port its own networks (untagged + tagged); its other settings keep following its
+     * profile. What it carries before and after comes from each network's list of ports.
+     */
+    private async buildPortAssign(target: PortRef, wanted: PortNetworks, snap: Snapshot): Promise<Built> {
+        const world = await this.portWorld(snap);
+        const sw = this.resolveSwitch(world, target.device);
+        const raw = sw.ports.find((p) => Number(p.port) === target.port);
+        if (!raw) throw new NetError('NOT_FOUND', `Switch '${sw.name}' has no port ${target.port} (ports ${sw.ports.map((p) => p.port).join(', ')})`);
+        const where = `port ${target.port} on '${sw.name}'`;
+        const port = this.toPort(sw, raw, snap);
+        if (port.protected) throw new NetError('PROTECTED', `${where} can't be reassigned here: ${port.protected}`);
+        if (port.customSettings) {
+            throw new NetError('UNSUPPORTED', `${where} has its own settings (profile override); change its networks in the controller web UI`, { capability: 'ports.assign' });
+        }
+        if (wanted.untagged?.length) throw new NetError('UNSUPPORTED', 'Further untagged networks besides the native one are not offered here', { capability: 'ports.assign' });
+        if (!wanted.native) throw new NetError('INVALID', `${where} needs an untagged (native) network`);
+        const native = resolve(snap.networks, wanted.native, 'network');
+        const tagged = Array.isArray(wanted.tagged) ? [...new Set(wanted.tagged.map((r) => resolve(snap.networks, r, 'network')))] : wanted.tagged;
+        if (Array.isArray(tagged) && tagged.includes(native)) throw new NetError('INVALID', `'${native.name}' can't be both untagged and tagged on a port`);
+        const goal: PortNetworks = { native: { id: native.id }, tagged: Array.isArray(tagged) ? (tagged.length ? tagged.map((n) => ({ id: n.id })) : 'none') : tagged };
+        // What it carries now, as each network lists it ("all tagged" is every network but the native one).
+        const flat = (c: PortNetworks) => {
+            const nativeId = c.native && 'id' in c.native ? c.native.id : undefined;
+            const list = (refs: Ref[]) => refs.map((r) => ('id' in r ? r.id : r.name)).sort();
+            const taggedIds = c.tagged === 'all' ? snap.networks.map((n) => n.id).filter((id) => id !== nativeId) : c.tagged === 'none' ? [] : c.tagged.map((r) => ('id' in r ? r.id : r.name));
+            return JSON.stringify([nativeId, list(c.untagged ?? []), [...taggedIds].sort()]);
+        };
+        if (port.networks && flat(port.networks) === flat(goal)) throw new NetError('INVALID', `${where} already carries that (${describeNetworks(goal, snap.networks)})`);
+        const affected = cutOff(port.seen, port.networks, goal);
+        const body: RawRecord = {
+            // Both required by the controller; unchanged.
+            name: raw.name,
+            profileId: raw.profileId,
+            profileOverrideEnable: false,
+            profileVlanOverrideEnable: true,
+            nativeNetworkId: native.id,
+            networkTagsSetting: goal.tagged === 'all' ? TAGS.all : goal.tagged === 'none' ? TAGS.none : TAGS.custom,
+            tagNetworkIds: Array.isArray(goal.tagged) ? goal.tagged.map((r) => ('id' in r ? r.id : r.name)) : [],
+            untagNetworkIds: [],
+        };
+        const now = port.networks ? describeNetworks(port.networks, snap.networks) : 'unknown';
+        return {
+            steps: [{ action: 'update', object: 'omada.switchPort', name: `${sw.name} port ${target.port}`, detail: `${now} → ${describeNetworks(goal, snap.networks)}` }],
+            effects: [
+                `${where} carries ${describeNetworks(goal, snap.networks)}; its other settings keep following profile '${String(raw.profileName ?? raw.profileId ?? 'unknown')}'.`,
+                ...(affected.length ? [`Devices on it lose their network: ${affected.map((c) => c.name ?? c.mac).join(', ')}.`] : []),
+            ],
+            wouldLockOut: affected,
+            reads: { networks: true },
+            // Known here: a switch without known links has every port protected (refused above).
+            // In a fixed order: the same state listed differently by the controller is no change.
+            extra: {
+                switch: sw.mac,
+                ports: sw.ports.map((p) => pick(p, PORT_FIELDS)).sort((a, b) => Number(a.port) - Number(b.port)),
+                links: [...sw.links!].sort((a, b) => a[0] - b[0]),
+                // In the order of the networks, which the fingerprint already covers as listed.
+                carried: sw.affected ? [...sw.affected].map(([id, a]) => [id, canonical(a)]) : null,
+            },
+            execute: async (s) => {
+                await this.client.networkConfig.updateSwitchPort(sw.mac, target.port, body, s.siteId);
+                let after: Map<string, RawRecord> | undefined;
+                try {
+                    after = affectedOf(await this.carrying(s.networks, s.siteId), sw.mac);
+                } catch {
+                    return { applied: true, owned: [], warnings: ['The port is changed, but reading it back failed; check it with net_listPorts.'] };
+                }
+                const carried = after ? toPortNetworks(after, target.port) : undefined;
+                if (!carried || flat(carried) !== flat(goal)) {
+                    const shown = carried ? describeNetworks(carried, s.networks) : 'something that can\'t be told';
+                    throw new NetError('CONFLICT', `The controller accepted the change, but ${where} carries ${shown}; check it with net_listPorts.`);
+                }
+                return { applied: true, object: this.toPort({ ...sw, affected: after! }, raw, s), owned: [] };
+            },
+        };
+    }
+
+    private async buildMdnsSet(enabled: boolean, refs: Ref[] | undefined, snap: Snapshot): Promise<Built> {
+        const rulesRaw = await this.client.networkConfig.listMdnsRules(snap.siteId);
+        const { repeater, rule, networkIds: currentIds } = toMdns(rulesRaw);
+        if (repeater.foreign) throw new NetError('UNSUPPORTED', repeater.foreign.reason, { capability: 'mdnsRepeater' });
+        if (!rule) {
+            throw new NetError('UNSUPPORTED', 'There is no mDNS rule yet: create one in the controller web UI (Settings > Services > mDNS, type Gateway, with the services to repeat); after that it can be changed here.', {
+                capability: 'mdnsRepeater',
+            });
+        }
+        // The networks given, or the ones the rule keeps: each must exist and be routed.
+        const chosen = refs
+            ? [...new Set(refs.map((r) => resolve(snap.networks, r, 'network')))]
+            : currentIds.map((id) => {
+                  const found = snap.networks.find((n) => n.id === id);
+                  if (!found) throw new NetError('INVALID', `The mDNS rule repeats over a network that no longer exists (${id}); give the networks to repeat between`);
+                  return found;
+              });
+        const ids = chosen.map((n) => {
+            if (n.purpose !== 'normal') throw new NetError('INVALID', `'${n.name}' is switch-only; the gateway repeats mDNS only between routed networks`);
+            return n.id;
+        });
+        if (enabled && ids.length < 2) throw new NetError('INVALID', 'The mDNS repeater needs at least two networks to repeat between');
+        const same = ids.length === currentIds.length && ids.every((id) => currentIds.includes(id));
+        if (same && enabled === repeater.enabled) throw new NetError('INVALID', 'Nothing to change on the mDNS repeater');
+        const name = (id: string) => snap.networks.find((n) => n.id === id)?.name ?? id;
+        const changes = [
+            ...(enabled !== repeater.enabled ? [enabled ? 'switched on' : 'switched off'] : []),
+            ...(same ? [] : [`networks ${currentIds.map(name).join(', ') || '(none)'} → ${ids.map(name).join(', ')}`]),
+        ];
+        const body: RawRecord = {
+            name: rule.name,
+            status: enabled,
+            // The services the rule repeats are kept as they are (the controller requires them).
+            profileIds: rule.profileIds,
+            type: MDNS_GATEWAY,
+            osg: { serviceNetworks: ids, clientNetworks: ids },
+        };
+        return {
+            steps: [{ action: 'update', object: 'omada.mdnsRule', name: String(rule.name), detail: changes.join('; ') }],
+            effects: [
+                enabled
+                    ? `mDNS (Bonjour) announcements are repeated between ${ids.map(name).join(', ')}: devices there discover each other's services (AirPlay, Chromecast, HomeKit, printers). Discovery only: traffic still follows the rules. The services the rule repeats stay as set in the controller.`
+                    : 'mDNS announcements are no longer repeated between networks; devices only discover services on their own network.',
+            ],
+            wouldLockOut: [],
+            reads: { networks: true },
+            extra: { mdns: rulesRaw.map(canonical) },
+            execute: async (s) => {
+                await this.client.networkConfig.updateMdnsRule(String(rule.id), body, s.siteId);
+                let after: ReturnType<typeof toMdns>;
+                try {
+                    after = toMdns(await this.client.networkConfig.listMdnsRules(s.siteId));
+                } catch {
+                    return { applied: true, owned: [], warnings: ['The mDNS repeater is changed, but reading it back failed; check it with net_getMdnsRepeater.'] };
+                }
+                const stored = after.networkIds;
+                const services = (r: RawRecord | undefined) => [...new Set(((r?.profileIds as unknown[] | undefined) ?? []).map(String))].sort().join(',');
+                const sameRule = after.rule?.id === rule.id && after.rule?.name === rule.name && services(after.rule) === services(rule);
+                if (after.repeater.foreign || !sameRule || after.repeater.enabled !== enabled || stored.length !== ids.length || !ids.every((id) => stored.includes(id))) {
+                    throw new NetError('CONFLICT', 'The controller accepted the mDNS change but shows something else now; check it with net_getMdnsRepeater.');
+                }
+                return { applied: true, object: after.repeater, owned: [] };
+            },
+        };
     }
 
     // ---- plan / apply ------------------------------------------------------------------
@@ -389,13 +720,16 @@ export class OmadaNetworkController implements NetworkController {
 
     private async planWith(change: Change, snap: Snapshot): Promise<Plan> {
         const built = await this.build(change, snap);
+        const redacted = redactSecrets(change);
         const plan: Plan = {
-            change: redactSecrets(change),
+            change: redacted,
             vendor: 'omada',
             steps: built.steps,
             effects: built.effects,
             wouldLockOut: built.wouldLockOut,
-            basis: fingerprint(snap, built.reads),
+            // What was agreed to: this change (a basis can't vouch for another one) and the devices it
+            // cuts off (a different set at apply time is a CONFLICT, allowLockout or not).
+            basis: fingerprint(snap, built.reads, { change: redacted, extra: built.extra, lockOut: built.wouldLockOut.map((c) => normalizeMac(c.mac)).sort() }),
         };
         this.executors.set(plan, built.execute);
         return plan;
@@ -413,6 +747,12 @@ export class OmadaNetworkController implements NetworkController {
                 if (change.op === 'update') return await this.buildWifiUpdate(change.value.ref, change.value.set, change.passphrase, snap);
                 if (change.op === 'delete') return this.buildWifiDelete(change.ref, snap);
                 break;
+            case 'port':
+                return await this.buildPortAssign(change.port, change.networks, snap);
+            case 'portProfile':
+                throw unsupported('creating or deleting port profiles here (do it in the controller web UI)', 'ports.profiles');
+            case 'mdnsRepeater':
+                return await this.buildMdnsSet(change.enabled, change.networks, snap);
             case 'rule':
                 if (change.op === 'create') return this.buildRuleCreate(change.value, snap);
                 if (change.op === 'update') return this.buildRuleUpdate(change.value.ref, change.value.set, snap);
@@ -422,7 +762,7 @@ export class OmadaNetworkController implements NetworkController {
             default:
                 throw notYet(
                     `${change.kind} changes`,
-                    change.kind === 'group' ? 'a later release (use omada_createGroup / omada_deleteGroup)' : change.kind === 'reservation' ? 'a later release (use omada_setDhcpReservation)' : '2.4.8'
+                    change.kind === 'group' ? 'a later release (use omada_createGroup / omada_deleteGroup)' : 'a later release (use omada_setDhcpReservation)'
                 );
         }
         throw new NetError('INVALID', 'This change is not supported');
@@ -437,7 +777,8 @@ export class OmadaNetworkController implements NetworkController {
             ipGroups: snap.ipGroups,
             ipPortGroups: snap.ipPortGroups,
             ssids: snap.ssids.map((s) => ({ id: s.ssidId, name: String(s.detail.name) })),
-            controllerAddresses: this.controllerAddresses,
+            // This server's addresses too: a rule must not cut it off the internet either.
+            controllerAddresses: this.hostAddresses,
         };
     }
 
@@ -469,7 +810,7 @@ export class OmadaNetworkController implements NetworkController {
         const today = controllerPath(snap.acls, this.ruleWorld(snap));
         for (const state of states) {
             const risk = controllerRisk(today, controllerPath(state.acls, state.world));
-            if (risk) throw new NetError('PROTECTED', `This could cut the controller (and this server next to it) off the internet: ${risk}. Nothing was changed.`);
+            if (risk) throw new NetError('PROTECTED', `This could cut the controller or this server off the internet: ${risk}. Nothing was changed.`);
         }
     }
 
@@ -877,7 +1218,7 @@ export class OmadaNetworkController implements NetworkController {
         if (set.ipv6 === true && !current.ipv6) throw unsupported('switching IPv6 on (do it in the controller web UI)', 'networks.ipv6');
         const addressing = (set.vlan !== undefined && set.vlan !== current.vlan) || (set.gateway !== undefined && set.gateway !== current.gateway);
         if (current.protected && addressing) {
-            throw new NetError('PROTECTED', `'${current.name}' carries the controller or the primary network; its VLAN and gateway can't be changed here`);
+            throw new NetError('PROTECTED', `'${current.name}' carries the controller, this server or the primary network; its VLAN and gateway can't be changed here`);
         }
         const name = set.name !== undefined ? checkName(set.name, MAX_NETWORK_NAME, 'Network') : current.name;
         const vlan = set.vlan !== undefined ? checkVlan(set.vlan) : current.vlan;
@@ -955,7 +1296,7 @@ export class OmadaNetworkController implements NetworkController {
 
     private async buildNetworkDelete(ref: Ref, snap: Snapshot): Promise<Built> {
         const current = resolve(snap.networks, ref, 'network');
-        if (current.protected) throw new NetError('PROTECTED', `'${current.name}' carries the controller or the primary network and can't be deleted`);
+        if (current.protected) throw new NetError('PROTECTED', `'${current.name}' carries the controller, this server or the primary network and can't be deleted`);
         const users = await this.networkUsers(current, snap);
         if (users.length) throw new NetError('IN_USE', `'${current.name}' is used by ${users.join(', ')}; change those first`, { users });
         const affected = snap.clients.filter((c) => c.online && c.network && 'id' in c.network && c.network.id === current.id);
@@ -971,13 +1312,29 @@ export class OmadaNetworkController implements NetworkController {
         };
     }
 
-    /** Everything that still references a network: SSIDs, port profiles, DHCP reservations, ACL rules. */
+    /** Everything that still references a network: SSIDs, port profiles, switch ports carrying it untagged, DHCP reservations, ACL rules. */
     private async networkUsers(network: Network, snap: Snapshot): Promise<string[]> {
         const users: string[] = [];
         for (const s of snap.ssids) if (this.ssidNetworkIds(s.detail, snap.networks).includes(network.id)) users.push(`Wi-Fi '${String(s.detail.name)}'`);
         for (const p of await this.client.networkConfig.listLanProfiles(snap.siteId)) {
             const ids = [p.nativeNetworkId, ...((p.tagNetworkIds as string[] | undefined) ?? []), ...((p.untagNetworkIds as string[] | undefined) ?? [])];
             if (ids.includes(network.id)) users.push(`port profile '${String(p.name)}'`);
+        }
+        // Devices on a port that carries it untagged would be left without a network; a switch whose
+        // lists can't be read may have such a port (other devices, like the gateway, have no switch ports).
+        for (const d of await this.client.networkConfig.listNetworkPorts(network.id, network.vlan, snap.siteId)) {
+            if (d.type !== 'switch' && d.switchInfo === undefined) continue;
+            const name = `switch '${String(d.name ?? d.mac)}'`;
+            const a = affectedPortsOf(d);
+            if (!a) {
+                users.push(`${name} (which of its ports carry it can't be read)`);
+                continue;
+            }
+            const nums = (...keys: string[]) => [...new Set(keys.flatMap((k) => (a[k] as unknown[]).map(Number)))].sort((x, y) => x - y);
+            const ports = nums('nativePorts', 'untagPorts');
+            const lags = nums('nativeLags', 'untagLags');
+            const on = [...(ports.length ? [`ports ${ports.join(', ')}`] : []), ...(lags.length ? [`LAGs ${lags.join(', ')}`] : [])];
+            if (on.length) users.push(`${name} ${on.join(' and ')} (untagged)`);
         }
         for (const r of await this.client.accessControl.listDhcpReservations(snap.siteId)) if (r.netId === network.id) users.push(`DHCP reservation ${formatMac(r.mac)}`);
         for (const [kind, list] of [['gateway', 'osg-acls'], ['switch', 'osw-acls'], ['access point', 'eap-acls']] as const) {
@@ -1200,6 +1557,8 @@ interface Built {
     wouldLockOut: Client[];
     /** Which parts of the snapshot the plan depends on (the fingerprint covers only those). */
     reads: { networks?: boolean; ssids?: boolean; macGroups?: boolean; rules?: boolean };
+    /** Further reads the plan depends on (ports, mDNS rules), fingerprinted as they are. */
+    extra?: unknown;
     execute: Executor;
 }
 
@@ -1394,6 +1753,29 @@ function describeNetworkChanges(current: Network, next: { name: string; vlan: nu
     return out;
 }
 
+/**
+ * A controller record with its keys and every list sorted: the lists in port profiles and mDNS
+ * rules are sets (ids of networks, services...), so the same state listed in another order
+ * fingerprints the same.
+ */
+function canonical(value: unknown): unknown {
+    if (Array.isArray(value)) {
+        return value
+            .map(canonical)
+            .map((item) => [JSON.stringify(item), item] as const)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([, item]) => item);
+    }
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(
+            Object.entries(value)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([k, v]) => [k, canonical(v)])
+        );
+    }
+    return value;
+}
+
 function describeClients(clients: Client[]): string {
     return clients.map((c) => `${c.name ?? '?'} (${c.mac})`).join(', ');
 }
@@ -1402,13 +1784,14 @@ function describeClients(clients: Client[]): string {
  * Fingerprint of what a plan read, secrets stripped (the Wi-Fi password is never hashed:
  * a hash of a short secret leaks it to anyone who can guess).
  */
-function fingerprint(snap: Snapshot, reads: Built['reads']): string {
+function fingerprint(snap: Snapshot, reads: Built['reads'], extra?: unknown): string {
     const material = {
         networks: reads.networks ? snap.networksRaw : undefined,
         ssids: reads.ssids ? redactSecrets(snap.ssids) : undefined,
         // A MAC filter plan resolved a group by name: a renamed or replaced group must not slip through.
         macGroups: reads.macGroups ? snap.macGroups : undefined,
         rules: reads.rules ? { acls: snap.acls, otherAcls: snap.otherAcls, ipGroups: snap.ipGroups, ipPortGroups: snap.ipPortGroups } : undefined,
+        extra,
     };
     return createHash('sha256').update(JSON.stringify(material)).digest('hex').slice(0, 16);
 }

@@ -42,6 +42,8 @@ const envSchema = z
     omadaSiteId: z.string().min(1).optional(),
     omadaStrictSsl: createBooleanStringSchema(true),
     omadaTimeout: numericStringSchema,
+    // LAN address(es) of the machine this server runs on, comma-separated (its switch port is never reassigned)
+    serverAddresses: z.string().optional(),
 
     // Pre-registered REST actions for the invokeAction tool (optional; raw JSON,
     // parsed + validated by parseRestActions after the env parse)
@@ -194,6 +196,8 @@ export interface EnvironmentConfig {
   siteId?: string;
   omadaStrictSsl: boolean;
   requestTimeout?: number;
+  /** LAN addresses or host names of the machine this server runs on (MCP_SERVER_ADDRESSES); empty when not set. */
+  serverAddresses: string[];
 
   // AI Provider Configuration
   aiProvider: AIProviderType;
@@ -274,6 +278,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     omadaSiteId: env.OMADA_SITE_ID,
     omadaStrictSsl: env.OMADA_STRICT_SSL,
     omadaTimeout: env.OMADA_TIMEOUT,
+    serverAddresses: env.MCP_SERVER_ADDRESSES,
 
     // Pre-registered REST actions
     restActions: env.MCP_REST_ACTIONS,
@@ -376,6 +381,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     siteId: parsed.data.omadaSiteId,
     omadaStrictSsl: parsed.data.omadaStrictSsl,
     requestTimeout: parsed.data.omadaTimeout,
+    serverAddresses: (parsed.data.serverAddresses ?? '').split(',').map((a) => a.trim()).filter((a) => a !== ''),
 
     // Pre-registered REST actions (throws on malformed JSON — config typos fail loudly)
     restActions: parseRestActions(parsed.data.restActions),

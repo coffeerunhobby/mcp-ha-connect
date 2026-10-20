@@ -142,4 +142,53 @@ export class NetworkConfigOperations {
     public async reorderGatewayAcls(indexes: Record<string, number>, siteId?: string): Promise<void> {
         await this.send('POST', this.sitePath(siteId, '/acls/modifyIndex'), { type: 'gateway', indexes });
     }
+
+    // ---- switch ports, port profiles, topology, mDNS (net_ ports and mDNS repeater) -----
+    // Paths and bodies from TP-Link's Open API reference (northbound /v3/api-docs, 2026-10-20);
+    // the reads were checked on the live controller (6.3.0.45). `GET /switches/{mac}/ports`
+    // does not exist there (-1600): the ports come with the switch.
+
+    /** Switch info with its `portList` (port, name, profileId, profileOverrideEnable, lagPort). OperationId: getSwitchInfo */
+    public async getSwitch(switchMac: string, siteId?: string): Promise<RawRecord> {
+        const response = await this.request.get<OmadaApiResponse<RawRecord>>(this.sitePath(siteId, `/switches/${encodeURIComponent(switchMac)}`));
+        return this.request.ensureSuccess(response);
+    }
+
+    /** Port profiles with their VLAN mode (networkTagsSetting 0 allow all, 1 block all, 2 custom). OperationId: getOswLanProfileList (v2) */
+    public async listPortProfiles(siteId?: string): Promise<RawRecord[]> {
+        return await this.request.fetchPaginated<RawRecord>(this.sitePath(siteId, '/lan-profiles', 'v2'));
+    }
+
+    /**
+     * A port's settings; `name` and `profileId` are required (-39855 without the name). Live (6.3.0.45):
+     * `profileVlanOverrideEnable: true` + nativeNetworkId / networkTagsSetting / tagNetworkIds give the
+     * port its own networks. OperationId: modifySwitchPort
+     */
+    public async updateSwitchPort(switchMac: string, port: number, body: RawRecord, siteId?: string): Promise<void> {
+        await this.send('PATCH', this.sitePath(siteId, `/switches/${encodeURIComponent(switchMac)}/ports/${encodeURIComponent(String(port))}`), body);
+    }
+
+    /**
+     * The devices whose ports carry a network; a switch has `switchInfo.affectedPorts` {nativePorts,
+     * untagPorts, tagPorts, ...Lags}. OperationId: getGridVlanNetworkAffectedDevicePorts
+     */
+    public async listNetworkPorts(networkId: string, vlan: number, siteId?: string): Promise<RawRecord[]> {
+        return await this.request.fetchPaginated<RawRecord>(this.sitePath(siteId, `/networks/${encodeURIComponent(networkId)}/vlan/${encodeURIComponent(String(vlan))}/ports`));
+    }
+
+    /** Which device links to which port (topologyNodes: upperInfo, wiredUpLink; topologyEdges). OperationId: getTopology (v2) */
+    public async getTopology(siteId?: string): Promise<RawRecord> {
+        const response = await this.request.get<OmadaApiResponse<RawRecord>>(this.sitePath(siteId, '/topology', 'v2'));
+        return this.request.ensureSuccess(response);
+    }
+
+    /** mDNS rules: type 1 = gateway (osg.serviceNetworks / clientNetworks), type 0 = access points by VLAN. OperationId: getMdnsGrid */
+    public async listMdnsRules(siteId?: string): Promise<RawRecord[]> {
+        return await this.request.fetchPaginated<RawRecord>(this.sitePath(siteId, '/setting/service/mdns'));
+    }
+
+    /** Body: name, status, profileIds (all required), type, osg. OperationId: modifyMdns */
+    public async updateMdnsRule(ruleId: string, body: RawRecord, siteId?: string): Promise<void> {
+        await this.send('PATCH', this.sitePath(siteId, `/setting/service/mdns/${encodeURIComponent(ruleId)}`), body);
+    }
 }

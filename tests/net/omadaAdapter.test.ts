@@ -22,7 +22,7 @@ const SECRET = 'HouseWifiPassw0rd!';
 
 type Raw = Record<string, unknown>;
 
-function controller(controllerHost = '10.0.0.250', resolveHost?: (host: string) => Promise<string[]>) {
+function controller(controllerHost = '10.0.0.250', resolveHost?: (host: string) => Promise<string[]>, serverHosts?: string[]) {
     const state = {
         networks: [
             { id: 'net-default', name: 'Default', purpose: 1, vlan: 1, primary: true, interfaceIds: ['lan1', 'lan2'], gatewaySubnet: '10.0.0.1/24', dhcpSettingsVO: { enable: true, ipRangePool: [{ ipaddrStart: '10.0.0.100', ipaddrEnd: '10.0.0.200' }], ipRangeStart: 1, ipRangeEnd: 2, dhcpns: 'auto', leasetime: 120 }, lanNetworkIpv6Config: { proto: 3, enable: 1 }, igmpSnoopEnable: false, existRA: true },
@@ -41,6 +41,8 @@ function controller(controllerHost = '10.0.0.250', resolveHost?: (host: string) 
         reservations: [] as Raw[],
         acls: { 'osg-acls': [] as Raw[], 'osw-acls': [] as Raw[], 'eap-acls': [] as Raw[] } as Record<string, Raw[]>,
         lanProfiles: [] as Raw[],
+        /** Per network id: the devices whose ports carry it (switchInfo.affectedPorts). */
+        networkPorts: {} as Record<string, Raw[]>,
         timeRanges: [] as Array<{ profileId: string; name: string }>,
         /** IP groups (0) and IP-port groups (1). */
         groups: { 0: [{ groupId: 'ip-any', name: 'IPGroup_Any', buildIn: true, ipList: [{ ip: '0.0.0.0', mask: 0 }] }], 1: [] } as Record<number, Raw[]>,
@@ -103,6 +105,7 @@ function controller(controllerHost = '10.0.0.250', resolveHost?: (host: string) 
         networkConfig: {
             listLanNetworks: vi.fn(async () => structuredClone(state.networks)),
             listLanProfiles: vi.fn(async () => structuredClone(state.lanProfiles)),
+            listNetworkPorts: vi.fn(async (id: string) => structuredClone(state.networkPorts[id] ?? [])),
             listAcls: vi.fn(async (list: string) => {
                 if (list === 'osg-acls') failRead('listAcls');
                 return structuredClone(state.acls[list]);
@@ -144,7 +147,7 @@ function controller(controllerHost = '10.0.0.250', resolveHost?: (host: string) 
             listTimeRanges: vi.fn(async () => structuredClone(state.timeRanges)),
         },
     };
-    const net = new OmadaNetworkController(client as unknown as OmadaClient, { controllerHost, ...(resolveHost ? { resolveHost } : {}) });
+    const net = new OmadaNetworkController(client as unknown as OmadaClient, { controllerHost, ...(resolveHost ? { resolveHost } : {}), ...(serverHosts ? { serverHosts } : {}) });
     const apply = async (change: Change, allowLockout = false) => net.apply(await net.plan(change), { allowLockout });
     return { state, writes, net, apply };
 }
@@ -161,6 +164,7 @@ const newWifi = (over: Partial<Extract<Change, { op: 'create'; kind: 'wifi' }>['
     passphrase: { kind: 'temporary' },
 });
 const code = async (promise: Promise<unknown>) => promise.then(() => 'ok', (e) => (e instanceof NetError ? e.code : `not a NetError: ${String(e)}`));
+const message = async (promise: Promise<unknown>) => promise.then(() => 'ok', (e) => String((e as Error).message));
 
 describe('reading', () => {
     it('maps networks, marking the primary one and the controller\'s as protected', async () => {
@@ -441,14 +445,46 @@ describe('networks', () => {
         state.reservations.push({ mac: '02-00-00-00-00-09', ip: '10.0.1.9', netId: 'net-iot' });
         state.acls['osw-acls'].push({ description: 'Deny IoT to Home', sourceType: 0, sourceIds: ['net-iot'], destinationType: 0, destinationIds: ['net-default'] });
         state.lanProfiles.push({ name: 'IoT ports', nativeNetworkId: 'net-iot' });
+        // Ports 3 and 5 and LAG 1 carry IoT untagged, port 9 only tagged (fine to delete under); the gateway has no switch ports.
+        state.networkPorts['net-iot'] = [
+            { type: 'gateway', mac: 'GW', name: 'gateway-gw1' },
+            { type: 'switch', mac: 'SW', name: 'switch-sw1', switchInfo: { affectedPorts: { nativePorts: [5, 4], untagPorts: [3, 5], tagPorts: [9], nativeLags: [2], untagLags: [1], tagLags: [] } } },
+            { type: 'switch', mac: 'SW2', switchInfo: { affectedPorts: { nativePorts: [], untagPorts: [], tagPorts: [], nativeLags: [], untagLags: [], tagLags: [], tagPorts: [1, 2] } } },
+            { type: 'switch', mac: 'SW3', switchInfo: { affectedPorts: { nativePorts: [], untagPorts: [], tagPorts: [], nativeLags: [], untagLags: [], tagLags: [], untagLags: [3] } } },
+        ];
         state.ssids.push({ wlanId: 'wlan-1', ssidId: 'ssid-iot', detail: { name: 'iot-wifi', security: 0, band: 1, vlanSetting: { mode: 1, customConfig: { customMode: 0, lanNetworkVlanIds: { 'net-iot': [2] } } } } });
 
         const error = await net.plan({ op: 'delete', kind: 'network', ref: { name: 'IoT' } }).catch((e: NetError) => e);
 
         expect(error).toMatchObject({ code: 'IN_USE' });
-        expect((error as NetError).details.users).toEqual(["Wi-Fi 'iot-wifi'", "port profile 'IoT ports'", 'DHCP reservation 02-00-00-00-00-09', "switch rule 'Deny IoT to Home'"]);
+        expect((error as NetError).details.users).toEqual([
+            "Wi-Fi 'iot-wifi'",
+            "port profile 'IoT ports'",
+            "switch 'switch-sw1' ports 3, 4, 5 and LAGs 1, 2 (untagged)",
+            "switch 'SW3' LAGs 3 (untagged)",
+            'DHCP reservation 02-00-00-00-00-09',
+            "switch rule 'Deny IoT to Home'",
+        ]);
         expect(await code(apply({ op: 'delete', kind: 'network', ref: { name: 'Default' } }))).toBe('PROTECTED');
         expect(writes).toEqual([]);
+    });
+
+    it('refuses to delete a network while a switch\'s port lists for it can\'t be read, writing nothing', async () => {
+        for (const entry of [
+            { type: 'switch', mac: 'SW', name: 'switch-sw1' },
+            { type: 'switch', mac: 'SW', name: 'switch-sw1', switchInfo: { affectedPorts: 'all' } },
+            { type: 'switch', mac: 'SW', name: 'switch-sw1', switchInfo: { affectedPorts: { nativePorts: [], untagPorts: [], tagPorts: [] } } }, // no LAG lists
+            { type: 'switch', mac: 'SW', name: 'switch-sw1', switchInfo: { affectedPorts: { nativePorts: [], untagPorts: [], tagPorts: [], nativeLags: [], untagLags: [], tagLags: [], nativePorts: '5' } } },
+            { mac: 'SW', name: 'switch-sw1', switchInfo: {} }, // no type, but switch details
+        ]) {
+            const { state, writes, apply } = controller();
+            state.networkPorts['net-lab'] = [{ type: 'gateway', mac: 'GW', name: 'gateway-gw1' }, entry];
+
+            const error = await apply({ op: 'delete', kind: 'network', ref: { name: 'Engineering' } }).catch((e: NetError) => e);
+
+            expect(error).toMatchObject({ code: 'IN_USE', details: { users: ["switch 'switch-sw1' (which of its ports carry it can't be read)"] } });
+            expect(writes).toEqual([]);
+        }
     });
 
     it('refuses to delete any network an SSID maps to, not just the first', async () => {
@@ -741,6 +777,19 @@ describe('Wi-Fi', () => {
         await apply({ op: 'delete', kind: 'wifi', ref: { name: 'iot-wifi' } }, true);
         expect(writes).toEqual([{ op: 'deleteSsid', args: ['wlan-1', 'ssid-iot', 'site-1'] }]);
     });
+
+    it('refuses a plan whose devices to cut off changed before it is applied, even with allowLockout', async () => {
+        const { state, writes, net } = controller();
+        state.ssids.push({ wlanId: 'wlan-1', ssidId: 'ssid-iot', detail: { name: 'iot-wifi', security: 0, band: 1 } });
+        state.clients.push({ mac: '02:00:00:00:00:04', name: 'plug', ssid: 'iot-wifi', active: true });
+
+        const plan = await net.plan({ op: 'delete', kind: 'wifi', ref: { name: 'iot-wifi' } });
+        expect(plan.wouldLockOut.map((c) => c.name)).toEqual(['plug']);
+        state.clients.push({ mac: '02:00:00:00:00:05', name: 'camera', ssid: 'iot-wifi', active: true });
+
+        expect(await code(net.apply(plan, { allowLockout: true }))).toBe('CONFLICT');
+        expect(writes).toEqual([]);
+    });
 });
 
 describe('plan and apply', () => {
@@ -754,13 +803,12 @@ describe('plan and apply', () => {
         expect(writes).toEqual([]);
     });
 
-    it('reports later releases\' features as not yet available', async () => {
+    it('reports what the net_ tools do not do (yet) as unsupported', async () => {
         const { net } = controller();
 
-        expect(await code(net.listPorts())).toBe('UNSUPPORTED');
-        expect(await code(net.getMdnsRepeater())).toBe('UNSUPPORTED');
-        expect(await code(net.plan({ op: 'set', kind: 'mdnsRepeater', enabled: true, networks: [] }))).toBe('UNSUPPORTED');
         expect(await code(net.plan({ op: 'delete', kind: 'group', ref: { name: 'x' } }))).toBe('UNSUPPORTED');
+        expect(await code(net.plan({ op: 'delete', kind: 'reservation', mac: '02-00-00-00-00-01' }))).toBe('UNSUPPORTED');
+        expect(await code(net.plan({ op: 'delete', kind: 'portProfile', ref: { name: 'IoT' } }))).toBe('UNSUPPORTED');
         expect((await net.capabilities()).wifi.security).toEqual(['open', 'wpa2', 'wpa3']);
     });
 });
@@ -908,6 +956,36 @@ describe('rules', () => {
 
         expect(await code(net.plan(rule({ name: 'Kid offline', from: [{ addresses: ['10.0.0.23'] }], to: [{ internet: true }] })))).toBe('PROTECTED');
         expect(writes).toEqual([]);
+    });
+
+    it('protects this server\'s network like the controller\'s (MCP_SERVER_ADDRESSES): its VLAN, deleting it, and its internet access', async () => {
+        const { writes, net, apply } = controller('10.0.0.250', undefined, ['10.0.70.18']);
+
+        expect((await net.listNetworks()).map((n) => [n.name, n.protected])).toEqual([
+            ['Default', true],
+            ['IoT', false],
+            ['Engineering', true],
+        ]);
+        expect(await message(apply({ op: 'delete', kind: 'network', ref: { name: 'Engineering' } }))).toBe("'Engineering' carries the controller, this server or the primary network and can't be deleted");
+        expect(await code(net.plan({ op: 'update', kind: 'network', value: { ref: { name: 'Engineering' }, set: { vlan: 71 } } }))).toBe('PROTECTED');
+        expect(await code(net.plan(rule({ name: 'Lab offline', from: [{ network: { name: 'Engineering' } }], to: [{ internet: true }] })))).toBe('PROTECTED');
+        expect(await message(net.plan(rule({ name: 'Lab offline', from: [{ addresses: ['10.0.70.18'] }], to: [{ internet: true }] })))).toBe(
+            "This could cut the controller or this server off the internet: rule 'Lab offline' would then be in the way of its traffic. Nothing was changed."
+        );
+        expect(await code(net.plan(rule({ name: 'Lab offline', from: [{ addresses: ['10.0.70.23'] }], to: [{ internet: true }] })))).toBe('ok');
+        expect(writes).toEqual([]);
+    });
+
+    it('protects every routed network when this server\'s address can\'t be resolved; one outside the site, or none set, holds nothing back', async () => {
+        const unknown = controller('10.0.0.250', async () => [], ['mcp.home.test']);
+        expect((await unknown.net.listNetworks()).every((n) => n.protected)).toBe(true);
+        expect(await code(unknown.net.plan(rule({ name: 'Kid offline', from: [{ addresses: ['10.0.1.23'] }], to: [{ internet: true }] })))).toBe('PROTECTED');
+        expect(unknown.writes).toEqual([]);
+
+        for (const c of [controller('10.0.0.250', undefined, ['198.51.100.4']), controller('10.0.0.250', undefined, [])]) {
+            expect((await c.net.listNetworks()).map((n) => n.protected)).toEqual([true, false, false]);
+            expect(await code(c.net.plan(rule({ name: 'Lab offline', from: [{ network: { name: 'Engineering' } }], to: [{ internet: true }] })))).toBe('ok');
+        }
     });
 
     it('removes the group it made when the controller refuses the rule', async () => {

@@ -503,7 +503,7 @@ export class AccessControlOperations {
     private async refuseLanDestination(destinationType: number, destinationIds: string[], siteId: string): Promise<void> {
         const remedy =
             'Gateway ACLs made here only cover LAN to internet traffic, so a rule towards your own networks would never match anything. ' +
-            'Rules between networks come with the net_ rule tools (2.4.7); until then make them in the controller web UI (Gateway ACL, direction LAN -> LAN).';
+            'Rules between networks are made with net_createRule (stateful, LAN -> LAN), or in the controller web UI.';
         if (destinationType === DESTINATION_TYPES.network) {
             throw new Error(`A LAN network can't be the destination. ${remedy}`);
         }

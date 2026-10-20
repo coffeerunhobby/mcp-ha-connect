@@ -48,7 +48,7 @@ export interface RuleWorld {
     ipGroups: RawRecord[];
     ipPortGroups: RawRecord[];
     ssids: Array<{ id: string; name: string }>;
-    /** The controller's IPv4 addresses (numbers), or 'unknown' when its host name can't be resolved. */
+    /** The controller's and this server's IPv4 addresses (numbers), or 'unknown' when one can't be resolved. */
     controllerAddresses: number[] | 'unknown';
 }
 
@@ -570,9 +570,9 @@ function protectedSourceHit(source: Endpoint, world: RuleWorld): string | undefi
         const range = parseCidr(`${e.ip}/${e.mask}`);
         if (world.controllerAddresses === 'unknown') {
             const hit = protectedNets.find((n) => subnetsOverlap(`${e.ip}/${e.mask}`, n.gateway!));
-            if (hit) return `devices on '${hit.name}' (${e.ip}/${e.mask}; the controller's address is unknown, so it may be among them)`;
+            if (hit) return `devices on '${hit.name}' (${e.ip}/${e.mask}; the controller's or this server's address is unknown, so it may be among them)`;
         } else if (world.controllerAddresses.some((a) => a >= range.network && a <= range.broadcast)) {
-            return `the controller (${e.ip}/${e.mask} includes its address)`;
+            return `the controller or this server (${e.ip}/${e.mask} includes its address)`;
         }
     }
     return undefined;

@@ -6,7 +6,7 @@ export function registerListClientsTool(server: McpServer, client: OmadaClient):
     server.registerTool(
         'omada_listClients',
         {
-            description: 'List all connected clients (devices/users) in a site',
+            description: 'List all connected clients (devices/users) in a site. Wireless clients report vid 0; net_listClients gives each client\'s network and VLAN.',
             inputSchema: siteInputSchema,
         },
         wrapToolHandler('omada_listClients', async ({ siteId }) => toToolResult(await client.listClients(siteId)), Permission.QUERY)

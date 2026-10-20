@@ -5,18 +5,24 @@
  * applied, refused if the controller changed meanwhile or if online devices would be
  * cut off without allowLockout.
  *
- * 2.4.5: networks and Wi-Fi. 2.4.7: rules (and listing groups). Switch ports and mDNS in 2.4.8.
+ * 2.4.5: networks and Wi-Fi. 2.4.7: rules (and listing groups). 2.4.8: clients with their
+ * network, switch ports and port profiles, the mDNS repeater.
  */
 
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
-import { type Change, type NetworkController, type Plan, type Rule, type Selector } from '../../net/model.js';
+import { NetError, type Change, type Network, type NetworkController, type Plan, type PortNetworks, type PortRef, type Ref, type Rule, type Selector } from '../../net/model.js';
 import { Permission, toToolResult, wrapToolHandler } from '../common.js';
 
 const ref = (what: string) => z.string().min(1).describe(`${what} name or id`);
 const dryRun = z.boolean().optional().describe('Only show what would change (steps, effects, devices cut off); write nothing');
-const allowLockout = z.boolean().optional().describe('Apply even if online devices would be disconnected');
+const allowLockout = z.boolean().optional().describe('Apply even if online devices would be disconnected (needs the basis from the dry run)');
+const basis = z
+    .string()
+    .min(1)
+    .optional()
+    .describe('The basis a dry run returned: applying is refused if the controller, or the devices the change cuts off, changed since. Required with allowLockout');
 const band = z.enum(['2.4', '5', '6']);
 const dhcp = z.object({
     enabled: z.boolean(),
@@ -36,6 +42,7 @@ export const createNetworkSchema = z.object({
     ipv6: z.boolean().optional().describe('Default off'),
     isolated: z.boolean().optional().describe("Devices can't start connections to other networks"),
     dryRun,
+    basis,
 });
 export const updateNetworkSchema = z.object({
     network: ref('Network'),
@@ -46,9 +53,10 @@ export const updateNetworkSchema = z.object({
     ipv6: z.boolean().optional(),
     isolated: z.boolean().optional(),
     dryRun,
+    basis,
     allowLockout,
 });
-export const deleteNetworkSchema = z.object({ network: ref('Network'), dryRun, allowLockout });
+export const deleteNetworkSchema = z.object({ network: ref('Network'), dryRun, allowLockout, basis });
 export const createWifiSchema = z.object({
     name: z.string().min(1).max(32),
     network: ref('Network the Wi-Fi puts its devices on'),
@@ -60,6 +68,7 @@ export const createWifiSchema = z.object({
     fastRoaming: z.boolean().optional().describe('802.11r, default off'),
     macFilter: macFilter.optional().describe('Only (allow) or never (deny) the devices in a MAC group'),
     dryRun,
+    basis,
 });
 export const updateWifiSchema = z.object({
     wifi: ref('Wi-Fi network'),
@@ -74,9 +83,10 @@ export const updateWifiSchema = z.object({
     macFilter: macFilter.nullable().optional().describe('null switches the MAC filter off'),
     newTemporaryPassword: z.boolean().optional().describe('Replace the password with a random one nobody knows (set the real one in the controller web UI)'),
     dryRun,
+    basis,
     allowLockout,
 });
-export const deleteWifiSchema = z.object({ wifi: ref('Wi-Fi network'), dryRun, allowLockout });
+export const deleteWifiSchema = z.object({ wifi: ref('Wi-Fi network'), dryRun, allowLockout, basis });
 
 const selector = z.union([
     z.object({ network: ref('Network') }).strict(),
@@ -102,6 +112,7 @@ export const createRuleSchema = z.object({
     enabled: z.boolean().optional().describe('Default true'),
     position: position.optional().describe('Default: last'),
     dryRun,
+    basis,
 });
 export const updateRuleSchema = z.object({
     rule: ref('Rule'),
@@ -113,19 +124,51 @@ export const updateRuleSchema = z.object({
     enabled: z.boolean().optional(),
     position: position.optional(),
     dryRun,
+    basis,
 });
-export const deleteRuleSchema = z.object({ rule: ref('Rule'), dryRun });
-export const moveRuleSchema = z.object({ rule: ref('Rule'), position, dryRun });
+export const deleteRuleSchema = z.object({ rule: ref('Rule'), dryRun, basis });
+export const moveRuleSchema = z.object({ rule: ref('Rule'), position, dryRun, basis });
 export const listGroupsSchema = z.object({ kind: z.enum(['address', 'mac']).optional() });
+export const listClientsSchema = z.object({ network: ref('Only devices on this network').optional() });
+const switchRef = z.string().min(1).describe('Switch name or MAC');
+export const listPortsSchema = z.object({ switch: switchRef.optional().describe('Only this switch (name or MAC); default all') });
+export const assignPortSchema = z.object({
+    switch: switchRef,
+    port: z.number().int().min(1).describe('Port number'),
+    network: ref('Untagged network: what a plain device on the port is on'),
+    tagged: z
+        .union([z.enum(['all', 'none']), z.array(ref('Network')).min(1)])
+        .default('none')
+        .describe('Networks the port also carries tagged (for an access point, a switch or a VLAN-aware device): "all", "none" (default) or a list'),
+    dryRun,
+    basis,
+    allowLockout,
+});
+export const setMdnsSchema = z.object({
+    enabled: z.boolean(),
+    networks: z.array(ref('Network')).min(1).optional().describe('Networks to repeat between (at least two when enabled); default: the current ones'),
+    dryRun,
+    basis,
+});
 
 const NO_PASSWORD =
     ' Passwords are never taken or shown: a new or reset Wi-Fi network gets a random temporary password, and the owner sets the real one in the controller web UI.';
 const CONFIRM = ' Confirm with the user before applying (use dryRun first).';
 
-/** Plan, then apply unless dryRun. */
-async function run(controller: NetworkController, change: Change, options: { dryRun?: boolean; allowLockout?: boolean }) {
+/**
+ * Plan, then apply unless dryRun. Dry run and apply are separate calls (the server keeps no
+ * state between them), so the dry run hands out its basis and the apply checks it: devices are
+ * cut off (allowLockout) only when they are the ones the dry run showed.
+ */
+async function run(controller: NetworkController, change: Change, options: { dryRun?: boolean; allowLockout?: boolean; basis?: string }) {
+    if (options.allowLockout && !options.dryRun && !options.basis) {
+        throw new NetError('INVALID', 'allowLockout needs the basis from a dry run of this change, so that only the devices it showed are cut off. Run it with dryRun first.');
+    }
     const plan = await controller.plan(change);
     if (options.dryRun) return { dryRun: true, ...summary(plan) };
+    if (options.basis !== undefined && options.basis !== plan.basis) {
+        throw new NetError('CONFLICT', 'This is not the change the dry run was for, or the controller or the devices it cuts off changed since; nothing was written. Run the dry run of this change again.');
+    }
     const result = await controller.apply(plan, { allowLockout: options.allowLockout });
     return {
         applied: true,
@@ -143,7 +186,8 @@ function summary(plan: Plan) {
         steps: plan.steps,
         effects: plan.effects,
         wouldLockOut: plan.wouldLockOut.map((c) => ({ mac: c.mac, name: c.name })),
-        ...(plan.wouldLockOut.length ? { note: 'Applying needs allowLockout: these online devices would be disconnected.' } : {}),
+        basis: plan.basis,
+        ...(plan.wouldLockOut.length ? { note: 'Applying needs allowLockout and this basis: these online devices would be disconnected.' } : {}),
     };
 }
 
@@ -201,7 +245,7 @@ export function registerNetTools(server: McpServer, controller: NetworkControlle
         'net_updateNetwork',
         {
             description:
-                "Change a network: name, VLAN, gateway, DHCP, IPv6 off. Never changes the VLAN or gateway of the network the controller is on; changes that cut devices off need allowLockout." +
+                "Change a network: name, VLAN, gateway, DHCP, IPv6 off. Never changes the VLAN or gateway of the networks the controller and this server are on; changes that cut devices off need allowLockout." +
                 CONFIRM,
             inputSchema: updateNetworkSchema,
         },
@@ -235,7 +279,7 @@ export function registerNetTools(server: McpServer, controller: NetworkControlle
     server.registerTool(
         'net_deleteNetwork',
         {
-            description: 'Delete a network. Refused while a Wi-Fi network, port profile, DHCP reservation or rule uses it, and for the network the controller is on.' + CONFIRM,
+            description: 'Delete a network. Refused while a Wi-Fi network, port profile, switch port (untagged), DHCP reservation or rule uses it, and for the networks the controller and this server are on.' + CONFIRM,
             inputSchema: deleteNetworkSchema,
         },
         wrapToolHandler(
@@ -331,7 +375,8 @@ export function registerNetTools(server: McpServer, controller: NetworkControlle
         )
     );
     registerRuleTools(server, controller);
-    return 15;
+    registerPortTools(server, controller);
+    return 21;
 }
 
 const RULES =
@@ -430,6 +475,157 @@ function registerRuleTools(server: McpServer, controller: NetworkController): vo
             Permission.CONFIGURE
         )
     );
+}
+
+function registerPortTools(server: McpServer, controller: NetworkController): void {
+    server.registerTool(
+        'net_listClients',
+        {
+            description: 'List the online devices with the network (and VLAN) each is on, its Wi-Fi network or switch port. Answers "what is on VLAN 2?".',
+            inputSchema: listClientsSchema,
+        },
+        wrapToolHandler(
+            'net_listClients',
+            async (a: z.infer<typeof listClientsSchema>) => {
+                const networks = await controller.listNetworks();
+                const only = a.network === undefined ? undefined : findNetwork(networks, a.network);
+                const clients = (await controller.listClients()).filter((c) => !only || (c.network && 'id' in c.network && c.network.id === only.id));
+                return toToolResult(
+                    clients.map((c) => {
+                        const network = c.network && 'id' in c.network ? networks.find((n) => n.id === (c.network as { id: string }).id) : undefined;
+                        return {
+                            mac: c.mac,
+                            ...(c.name ? { name: c.name } : {}),
+                            ...(c.ip ? { ip: c.ip } : {}),
+                            network: network ? network.name : 'unknown',
+                            ...(network ? { vlan: network.vlan } : {}),
+                            ...(c.wifi ? { wifi: 'name' in c.wifi ? c.wifi.name : c.wifi.id } : {}),
+                            ...(c.port ? { port: c.port } : {}),
+                            online: c.online,
+                        };
+                    })
+                );
+            },
+            Permission.QUERY
+        )
+    );
+    server.registerTool(
+        'net_listPortProfiles',
+        {
+            description:
+                'List switch port profiles and, when a profile sets them, the networks a port following it carries (without networks: ports keep their own, see net_listPorts). Profiles are created in the controller web UI.',
+            inputSchema: z.object({}),
+        },
+        wrapToolHandler(
+            'net_listPortProfiles',
+            async () => {
+                const networks = await controller.listNetworks();
+                return toToolResult((await controller.listPortProfiles()).map((p) => ({ ...p, ...(p.networks ? { networks: namedNetworks(p.networks, networks) } : {}) })));
+            },
+            Permission.QUERY
+        )
+    );
+    server.registerTool(
+        'net_listPorts',
+        {
+            description:
+                'List switch ports: the networks each carries (untagged and tagged), its profile, the online devices on it, whether it is an uplink, and why it is protected when it is (uplinks and the ports the controller and this server are on are never changed).',
+            inputSchema: listPortsSchema,
+        },
+        wrapToolHandler(
+            'net_listPorts',
+            async (a: z.infer<typeof listPortsSchema>) => {
+                const profiles = await controller.listPortProfiles();
+                const networks = await controller.listNetworks();
+                const ports = await controller.listPorts(a.switch === undefined ? undefined : toSwitch(a.switch));
+                return toToolResult(
+                    ports.map((p) => ({
+                        ...p,
+                        ...(p.profile ? { profile: named(p.profile, profiles) } : {}),
+                        ...(p.networks ? { networks: namedNetworks(p.networks, networks) } : {}),
+                        seen: p.seen.map((c) => ({ mac: c.mac, ...(c.name ? { name: c.name } : {}), ...(c.ip ? { ip: c.ip } : {}) })),
+                    }))
+                );
+            },
+            Permission.QUERY
+        )
+    );
+    server.registerTool(
+        'net_assignPort',
+        {
+            description:
+                'Set the networks a switch port carries: its untagged network (e.g. a wired IoT device\'s port on "IoT") and optionally tagged ones; its other settings keep following its profile. Never for uplinks, the ports the controller and this server are on, link aggregation ports and ports with their own settings (net_listPorts says why a port is protected); devices that would lose their network need allowLockout.' +
+                CONFIRM,
+            inputSchema: assignPortSchema,
+        },
+        wrapToolHandler(
+            'net_assignPort',
+            async (a: z.infer<typeof assignPortSchema>) =>
+                toToolResult(
+                    await run(
+                        controller,
+                        { op: 'assign', kind: 'port', port: { device: toSwitch(a.switch), port: a.port }, networks: { native: { name: a.network }, tagged: Array.isArray(a.tagged) ? a.tagged.map((name) => ({ name })) : (a.tagged ?? 'none') } },
+                        a
+                    )
+                ),
+            Permission.CONFIGURE
+        )
+    );
+    server.registerTool(
+        'net_getMdnsRepeater',
+        { description: 'Whether mDNS (Bonjour) discovery is repeated between networks, and between which.', inputSchema: z.object({}) },
+        wrapToolHandler(
+            'net_getMdnsRepeater',
+            async () => {
+                const networks = await controller.listNetworks();
+                const repeater = await controller.getMdnsRepeater();
+                return toToolResult({ ...repeater, networks: repeater.networks.map((r) => named(r, networks)) });
+            },
+            Permission.QUERY
+        )
+    );
+    server.registerTool(
+        'net_setMdnsRepeater',
+        {
+            description:
+                'Switch the mDNS repeater on or off, or change the networks it repeats between (e.g. Home and IoT, so Home Assistant and phones discover IoT devices). Discovery only: traffic still follows the rules.' +
+                CONFIRM,
+            inputSchema: setMdnsSchema,
+        },
+        wrapToolHandler(
+            'net_setMdnsRepeater',
+            async (a: z.infer<typeof setMdnsSchema>) =>
+                toToolResult(await run(controller, { op: 'set', kind: 'mdnsRepeater', enabled: a.enabled, ...(a.networks ? { networks: a.networks.map((name) => ({ name })) } : {}) }, a)),
+            Permission.CONFIGURE
+        )
+    );
+}
+
+/** A network by id or name (case-insensitive). */
+function findNetwork(networks: Network[], wanted: string): Network {
+    const found = networks.find((n) => n.id === wanted) ?? networks.find((n) => n.name.toLowerCase() === wanted.trim().toLowerCase());
+    if (!found) throw new NetError('NOT_FOUND', `Network '${wanted}' not found. Available: ${networks.map((n) => n.name).join(', ') || '(none)'}`);
+    return found;
+}
+
+/** A reference with the name added, for reading. */
+function named(r: Ref, items: Array<{ id: string; name: string }>): Ref & { name?: string } {
+    const item = 'id' in r ? items.find((i) => i.id === r.id) : undefined;
+    return item ? { id: item.id, name: item.name } : r;
+}
+
+/** A port's or profile's networks with their names. */
+function namedNetworks(carried: PortNetworks, networks: Network[]) {
+    return {
+        ...(carried.native ? { native: named(carried.native, networks) } : {}),
+        ...(carried.untagged ? { untagged: carried.untagged.map((r) => named(r, networks)) } : {}),
+        tagged: Array.isArray(carried.tagged) ? carried.tagged.map((r) => named(r, networks)) : carried.tagged,
+    };
+}
+
+/** A MAC (12 hex digits, with or without separators) picks the switch by MAC, anything else by name. */
+function toSwitch(value: string): PortRef['device'] {
+    return /^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$|^[0-9a-f]{12}$/i.test(value.trim()) ? { mac: value.trim() } : { name: value };
 }
 
 function toSelectors(list: Array<z.infer<typeof selector>>): Selector[] {

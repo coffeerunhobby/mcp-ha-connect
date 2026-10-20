@@ -96,4 +96,54 @@ describe('gateway ACL and group endpoints', () => {
             await expect(write()).rejects.toBeInstanceOf(OmadaApiError);
         }
     });
+
+    it('reads a switch with its ports, the v2 port profiles and the v2 topology; MAC encoded', async () => {
+        const { ops, calls } = setup({ errorCode: 0, result: { mac: 'AA-BB', portList: [{ port: 1 }] } });
+
+        expect(await ops.getSwitch('AA-BB/x')).toEqual({ mac: 'AA-BB', portList: [{ port: 1 }] });
+        await ops.getTopology();
+
+        expect(calls.map((c) => [c.method, c.url])).toEqual([
+            ['GET', `${BASE}${SITE}/switches/AA-BB%2Fx`],
+            ['GET', `${BASE}/openapi/v2/c1/sites/site-1/topology`],
+        ]);
+    });
+
+    it('lists port profiles (v2), mDNS rules and the ports that carry a network page by page; ids encoded', async () => {
+        const { ops, calls } = setup({ errorCode: 0, result: { totalRows: 1, currentPage: 1, currentSize: 100, data: [{ id: 'p1' }] } });
+
+        expect(await ops.listPortProfiles()).toEqual([{ id: 'p1' }]);
+        expect(await ops.listMdnsRules()).toEqual([{ id: 'p1' }]);
+        expect(await ops.listNetworkPorts('n/1', 70)).toEqual([{ id: 'p1' }]);
+
+        expect(calls.map((c) => c.url.split('?')[0])).toEqual([
+            `${BASE}/openapi/v2/c1/sites/site-1/lan-profiles`,
+            `${BASE}${SITE}/setting/service/mdns`,
+            `${BASE}${SITE}/networks/n%2F1/vlan/70/ports`,
+        ]);
+    });
+
+    it('modifies a switch port and an mDNS rule (PATCH), path segments encoded', async () => {
+        const { ops, calls } = setup();
+        const rule = { name: 'Repeater', status: true, profileIds: ['buildIn-1'], type: 1, osg: { serviceNetworks: ['n1', 'n2'], clientNetworks: ['n1', 'n2'] } };
+
+        const port = { name: 'Port5', profileId: 'p1', profileVlanOverrideEnable: true, nativeNetworkId: 'n2', networkTagsSetting: 1, tagNetworkIds: [], untagNetworkIds: [] };
+        await ops.updateSwitchPort('AA-BB-CC-00-00-01/x', 5, port);
+        await ops.updateMdnsRule('m/1', rule);
+
+        expect(calls).toEqual([
+            { method: 'PATCH', url: `${BASE}${SITE}/switches/AA-BB-CC-00-00-01%2Fx/ports/5`, body: port },
+            { method: 'PATCH', url: `${BASE}${SITE}/setting/service/mdns/m%2F1`, body: rule },
+        ]);
+    });
+
+    it('passes a controller refusal of a port or mDNS write on as an error', async () => {
+        const { ops } = setup({ errorCode: -1001, msg: 'Invalid request parameters.' });
+
+        await expect(ops.updateSwitchPort('AA', 1, {})).rejects.toBeInstanceOf(OmadaApiError);
+        await expect(ops.listNetworkPorts('n1', 1)).rejects.toBeInstanceOf(OmadaApiError);
+        await expect(ops.updateMdnsRule('m1', {})).rejects.toBeInstanceOf(OmadaApiError);
+        await expect(ops.getSwitch('AA')).rejects.toBeInstanceOf(OmadaApiError);
+        await expect(ops.getTopology()).rejects.toBeInstanceOf(OmadaApiError);
+    });
 });

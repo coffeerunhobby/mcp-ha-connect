@@ -130,20 +130,50 @@ export interface PortRef {
     port: number;
 }
 
+/** The networks a port carries: untagged (native) and tagged. */
+export interface PortNetworks {
+    /** Untagged network (the port's PVID); absent when the port carries no untagged traffic. */
+    native?: Ref;
+    /** Further untagged networks besides the native one (rare). */
+    untagged?: Ref[];
+    tagged: Ref[] | 'all' | 'none';
+}
+
 export interface PortProfile {
     id: string;
     name: string;
-    /** Untagged network (the port's PVID). */
-    native: Ref;
-    tagged: Ref[] | 'all' | 'none';
+    /** What a port following the profile carries; absent when the profile sets no networks (ports keep their own). */
+    networks?: PortNetworks;
     isolation: boolean;
 }
 
 export interface Port extends PortRef {
+    name?: string;
     profile?: Ref;
-    /** What the port carries right now (clients, an access point, the gateway uplink...). */
+    /** The networks the port carries right now. */
+    networks?: PortNetworks;
+    /** The port has its own settings instead of following its profile (Omada: profile override). */
+    customSettings?: boolean;
+    /** Online devices on the port right now. */
     seen: Client[];
+    /** The port links the switch to the network or to another network device (gateway, switch, access point). */
     uplink: boolean;
+    /** Why the port can't be reassigned through the tools (uplink, the controller's port...), when it can't. */
+    protected?: string;
+}
+
+// ---- mDNS repeater -------------------------------------------------------------------
+
+/**
+ * Repeats mDNS (Bonjour) announcements between networks, so devices discover each other's
+ * services (AirPlay, Chromecast, HomeKit, printers) across VLANs. Discovery only: traffic
+ * still follows the rules.
+ */
+export interface MdnsRepeater {
+    enabled: boolean;
+    networks: Ref[];
+    /** Set when the controller's mDNS setup is more than the model can express (then it can't be changed here). */
+    foreign?: { reason: string };
 }
 
 // ---- groups and rules -----------------------------------------------------------------
@@ -237,7 +267,7 @@ export type Change =
     | { op: 'delete'; kind: 'wifi'; ref: Ref }
     | { op: 'create'; kind: 'portProfile'; value: CreateOf<PortProfile> }
     | { op: 'delete'; kind: 'portProfile'; ref: Ref }
-    | { op: 'assign'; kind: 'port'; port: PortRef; profile: Ref }
+    | { op: 'assign'; kind: 'port'; port: PortRef; networks: PortNetworks }
     | { op: 'create'; kind: 'rule'; value: CreateOf<Rule> }
     | { op: 'update'; kind: 'rule'; value: UpdateOf<Rule> }
     | { op: 'delete'; kind: 'rule'; ref: Ref }
@@ -246,7 +276,7 @@ export type Change =
     | { op: 'delete'; kind: 'group'; ref: Ref }
     | { op: 'set'; kind: 'reservation'; value: Reservation }
     | { op: 'delete'; kind: 'reservation'; mac: Mac }
-    | { op: 'set'; kind: 'mdnsRepeater'; enabled: boolean; networks: Ref[] };
+    | { op: 'set'; kind: 'mdnsRepeater'; enabled: boolean; networks?: Ref[] };
 
 /** One vendor-level step of a plan, in the order it will run. Never contains secrets. */
 export interface Step {
@@ -272,7 +302,7 @@ export interface Plan {
 export interface ApplyResult {
     applied: true;
     /** The neutral object after the change (redacted), when there is one. */
-    object?: Network | Wifi | PortProfile | Rule | Group | Reservation;
+    object?: Network | Wifi | PortProfile | Port | Rule | Group | Reservation | MdnsRepeater;
     /** Vendor objects created for this change; tagged so delete() removes them all again. */
     owned: Array<{ object: string; id: string }>;
     /** The change is done, but a follow-up (e.g. cleanup) is not; each says what is left and what happens to it. */
@@ -331,7 +361,7 @@ export interface NetworkController {
     listGroups(kind?: Group['kind']): Promise<Group[]>;
     listReservations(): Promise<Reservation[]>;
     listClients(): Promise<Client[]>;
-    getMdnsRepeater(): Promise<{ enabled: boolean; networks: Ref[] }>;
+    getMdnsRepeater(): Promise<MdnsRepeater>;
 
     /** Read-only: validates, resolves refs, checks protection, in-use and lock-out. Throws NetError. */
     plan(change: Change): Promise<Plan>;

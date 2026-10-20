@@ -38,6 +38,8 @@ export interface OmadaClientOptions {
     siteId?: string;
     strictSsl: boolean;
     requestTimeout?: number;
+    /** LAN addresses or host names of the machine this server runs on (MCP_SERVER_ADDRESSES). */
+    serverAddresses?: string[];
 }
 
 /**
@@ -72,9 +74,13 @@ export class OmadaClient {
     /** Host name or address of the controller (from baseUrl), e.g. for protecting its network. */
     public readonly controllerHost: string;
 
+    /** Where this server runs (MCP_SERVER_ADDRESSES), e.g. for protecting its switch port; empty when not configured. */
+    public readonly serverAddresses: string[];
+
     constructor(options: OmadaClientOptions) {
         this.omadacId = options.omadacId;
         this.controllerHost = new URL(options.baseUrl).hostname;
+        this.serverAddresses = options.serverAddresses ?? [];
 
         const timeout = options.requestTimeout ?? 30000;
 
