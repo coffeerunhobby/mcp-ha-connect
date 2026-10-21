@@ -44,14 +44,15 @@
     "url": "https://github.com/coffeerunhobby/mcp-ha-connect/issues"
   },
   "dependencies": {
+    "@modelcontextprotocol/node": "^2.1.1",
+    "@modelcontextprotocol/server": "^2.3.1",
     "undici": "^6.26.0",
     "ws": "^8.21.0",
-    "zod": "^4.6.5",
-    "@modelcontextprotocol/server": "^2.2.0",
-    "@modelcontextprotocol/node": "^2.1.0"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@amiceli/vitest-cucumber": "^6.2.0",
+    "@modelcontextprotocol/client": "^2.3.1",
     "@types/node": "^22.10.5",
     "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.19.1",
@@ -62,8 +63,7 @@
     "tsx": "^4.19.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.52.0",
-    "vitest": "^4.1.11",
-    "@modelcontextprotocol/client": "^2.2.0"
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": ">=20.0.0"
