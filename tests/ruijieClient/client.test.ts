@@ -184,6 +184,27 @@ describe('RuijieClient', () => {
         expect(await outcome(client().system('upgradeConfirm', { path: 'u', isPersist: true }))).toBe('unreachable true');
     });
 
+    it('takes an answer that breaks off or is cut short as unanswered (the request arrived), and a failed status without JSON as a refusal', async () => {
+        const outcome = async (p: Promise<unknown>) => p.then(() => 'ok', (e) => (e instanceof RuijieError ? `${e.kind} ${e.notSent} ${e.message}` : String(e)));
+        const answering = (body: () => Response) => {
+            vi.restoreAllMocks();
+            vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) =>
+                String(input).endsWith('/api/auth') ? new Response(JSON.stringify({ code: 0, data: { sid: SID, sn: 'SN1' } }), { headers: { 'set-cookie': 'SN1=c; path=/' } }) : body()
+            );
+        };
+        const breaking = (error: Error) => () =>
+            new Response(new ReadableStream({ start: (c) => { c.enqueue(new TextEncoder().encode('{"code":0,')); c.error(error); } }), { status: 200 });
+
+        answering(breaking(new TypeError('terminated')));
+        expect(await outcome(client().system('upgradeConfirm', { path: 'u' }))).toBe('unreachable false The Ruijie router is not reachable');
+        answering(breaking(Object.assign(new Error('t'), { name: 'TimeoutError' })));
+        expect(await outcome(client().system('upgradeConfirm', { path: 'u' }))).toBe('unreachable false The Ruijie router is timed out');
+        answering(() => new Response('{"code":0,"da', { status: 200 }));
+        expect(await outcome(client().system('upgradeConfirm', { path: 'u' }))).toBe("unreachable false The Ruijie router's answer was cut off");
+        answering(() => new Response('<html>', { status: 500 }));
+        expect(await outcome(client().system('upgradeConfirm', { path: 'u' }))).toBe('router false The Ruijie router answered HTTP 500 without JSON');
+    });
+
     it('reports a timeout as such', async () => {
         vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }));
         expect(await message(client().config('network'))).toBe('The Ruijie router is timed out');

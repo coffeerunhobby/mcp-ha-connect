@@ -217,10 +217,20 @@ export class RuijieClient {
             const reason = error instanceof Error && error.name === 'TimeoutError' ? 'timed out' : 'not reachable';
             throw new RuijieError(`The Ruijie router is ${reason}`, 'unreachable', failedBeforeSending(error));
         }
+        let raw: string;
+        try {
+            raw = await response.text();
+        } catch (error) {
+            // The answer broke off (e.g. the router restarted while sending it): the request did arrive.
+            const reason = error instanceof Error && error.name === 'TimeoutError' ? 'timed out' : 'not reachable';
+            throw new RuijieError(`The Ruijie router is ${reason}`, 'unreachable');
+        }
         let answer: RuijieAnswer;
         try {
-            answer = (await response.json()) as RuijieAnswer;
+            answer = JSON.parse(raw) as RuijieAnswer;
         } catch {
+            // A success status with a broken body is a cut-off answer, not a refusal.
+            if (response.ok) throw new RuijieError('The Ruijie router\'s answer was cut off', 'unreachable');
             throw new RuijieError(`The Ruijie router answered HTTP ${response.status} without JSON`);
         }
         const cookies = (response.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]);
