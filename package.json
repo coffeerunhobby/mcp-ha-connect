@@ -46,9 +46,9 @@
   "dependencies": {
     "@modelcontextprotocol/node": "^2.1.1",
     "@modelcontextprotocol/server": "^2.3.1",
-    "undici": "^6.26.0",
+    "undici": "^6.29.1",
     "ws": "^8.21.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@amiceli/vitest-cucumber": "^6.2.0",
