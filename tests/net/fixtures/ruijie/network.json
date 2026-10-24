@@ -1,0 +1,38 @@
+{
+ "code": 0,
+ "id": null,
+ "error": null,
+ "data": {
+  "version": "1.0.0",
+  "lanNum": "1",
+  "wan": [
+   {
+    "proto": "dhcp",
+    "pointDns": "",
+    "portId": "5",
+    "macaddr": "02:00:00:00:00:01",
+    "nat_ena": "1",
+    "special_line": "0"
+   }
+  ],
+  "wanNum": "1",
+  "lan": [
+   {
+    "proto": "static",
+    "ipaddr": "192.168.110.1",
+    "netmask": "255.255.255.0",
+    "vlanid": "233",
+    "ignore": "0",
+    "leasetime": "30",
+    "limit": "254",
+    "conflict": "false",
+    "macaddr": "02:00:00:00:00:02",
+    "ipstart": "192.168.110.1",
+    "lastaddr": "192.168.110.1"
+   }
+  ],
+  "configTime": "1792834136",
+  "currentTime": "1792834136",
+  "configId": "1792834136"
+ }
+}

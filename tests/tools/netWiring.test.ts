@@ -11,6 +11,7 @@ import { loadConfig } from '../../src/config.js';
 import { OmadaClient } from '../../src/omadaClient/index.js';
 import { registerAllTools } from '../../src/tools/index.js';
 import { defaultFactories } from '../../src/upstreams.js';
+import type { RuijieClient } from '../../src/ruijieClient/index.js';
 
 const adapter = vi.hoisted(() => ({ options: [] as unknown[] }));
 vi.mock('../../src/net/adapters/omada.js', () => ({
@@ -37,5 +38,15 @@ describe('net_ protection settings', () => {
         registerAllTools({ server: new McpServer({ name: 't', version: '0' }), omadaClient: client });
 
         expect(adapter.options).toEqual([{ controllerHost: 'omada.home.test', serverHosts: ['10.0.0.18'] }]);
+    });
+
+    it('registers the net_ tools for a Ruijie router alone (no Omada)', () => {
+        const names: string[] = [];
+        const server = { registerTool: vi.fn((name: string) => names.push(name)) } as unknown as McpServer;
+
+        registerAllTools({ server, ruijieClient: { host: '192.0.2.1' } as unknown as RuijieClient });
+
+        expect(names.filter((n) => n.startsWith('net_'))).toHaveLength(21);
+        expect(names.some((n) => n.startsWith('omada_'))).toBe(false);
     });
 });

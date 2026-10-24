@@ -1,0 +1,23 @@
+{
+ "code": 0,
+ "id": null,
+ "error": null,
+ "data": {
+  "list": [
+   {
+    "vlanid": "233",
+    "port": [
+     "-1",
+     "-1",
+     "-1",
+     "-1",
+     "0"
+    ]
+   }
+  ],
+  "version": "1.0.0",
+  "configTime": "1792834136",
+  "currentTime": "1792834136",
+  "configId": "1792834136"
+ }
+}

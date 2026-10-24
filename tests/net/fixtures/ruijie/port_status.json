@@ -1,0 +1,70 @@
+{
+ "code": 0,
+ "id": null,
+ "error": null,
+ "data": {
+  "count": "5",
+  "List": [
+   {
+    "name": "LAN",
+    "ipaddr": "192.168.110.1",
+    "poe_direct": "none",
+    "poe_enable": "0",
+    "escape": "1",
+    "panel_name": "LAN0",
+    "portId": "1",
+    "duplex": "full",
+    "status": "on",
+    "speed": "1000"
+   },
+   {
+    "name": "LAN",
+    "ipaddr": "192.168.110.1",
+    "poe_direct": "none",
+    "poe_enable": "0",
+    "escape": "0",
+    "panel_name": "LAN1",
+    "portId": "2",
+    "duplex": "NULL",
+    "status": "off",
+    "speed": "0"
+   },
+   {
+    "name": "LAN",
+    "ipaddr": "192.168.110.1",
+    "poe_direct": "none",
+    "poe_enable": "0",
+    "escape": "0",
+    "panel_name": "LAN2",
+    "portId": "3",
+    "duplex": "NULL",
+    "status": "off",
+    "speed": "0"
+   },
+   {
+    "name": "LAN",
+    "ipaddr": "192.168.110.1",
+    "poe_direct": "none",
+    "poe_enable": "0",
+    "escape": "0",
+    "panel_name": "LAN3/WAN1",
+    "portId": "4",
+    "duplex": "NULL",
+    "status": "off",
+    "speed": "0"
+   },
+   {
+    "name": "WAN",
+    "ipaddr": "198.51.100.147",
+    "poe_direct": "none",
+    "poe_enable": "0",
+    "escape": "0",
+    "panel_name": "WAN",
+    "portId": "5",
+    "duplex": "full",
+    "status": "on",
+    "speed": "1000"
+   }
+  ]
+ }
+}

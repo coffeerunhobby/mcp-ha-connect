@@ -36,7 +36,7 @@ const ACCOUNT_NAME = /^(user_?name|username|account)$/i;
 const ACCOUNT_SECTION = /(pppoe|l2tp|pptp|lte|manuallyconfig|apn|dialup|vpn)/i;
 
 /** Credentials inside URLs, e.g. /api/camera_proxy/camera.door?token=abc123 */
-const URL_SECRET = /([?&](?:access_token|token|key|password|secret)=)[^&#\s"]+/gi;
+const URL_SECRET = /([?&](?:access_token|token|key|password|secret|auth|sid)=)[^&#\s"]+/gi;
 
 export function isSecretName(name: string): boolean {
   return SECRET_NAME.test(name);

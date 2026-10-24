@@ -1,0 +1,18 @@
+{
+ "code": 0,
+ "id": null,
+ "error": null,
+ "data": {
+  "version": "1.0.0",
+  "configTime": "1792839076",
+  "dhcp_static": [
+   {
+    "name_uuid": "82D01CC886B604714F77",
+    "macaddr": "02:00:00:00:00:03",
+    "ipaddr": "192.168.110.2"
+   }
+  ],
+  "currentTime": "1792839076",
+  "configId": "1792839076"
+ }
+}

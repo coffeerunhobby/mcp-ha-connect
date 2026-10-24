@@ -8,6 +8,7 @@ import type { RegisteredTool } from '@modelcontextprotocol/server';
 import type { HaClient } from '../haClient/index.js';
 import type { LocalAIClient } from '../localAI/index.js';
 import type { OmadaClient } from '../omadaClient/index.js';
+import type { RuijieClient } from '../ruijieClient/index.js';
 import { registerAllTools } from '../tools/index.js';
 import { isToolVisibleTo } from '../tools/common.js';
 import type { OmadaRegistrationMode } from '../tools/omada/index.js';
@@ -21,6 +22,7 @@ import { VERSION } from '../version.js';
 export interface CreateServerOptions {
   haClient?: HaClient;
   omadaClient?: OmadaClient;
+  ruijieClient?: RuijieClient;
   aiClient?: LocalAIClient;
   /** Pre-registered REST actions for invokeAction (empty/undefined = tool not registered). */
   restActions?: Record<string, RestAction>;
@@ -38,7 +40,7 @@ export interface CreateServerOptions {
 }
 
 export function createServer(options: CreateServerOptions): McpServer {
-  const { haClient, omadaClient, aiClient, restActions, toolRegistrationMode, callerPermissions, ownerQuestions } = options;
+  const { haClient, omadaClient, ruijieClient, aiClient, restActions, toolRegistrationMode, callerPermissions, ownerQuestions } = options;
   logger.debug('Creating MCP server instance');
 
   // Generate instructions based on enabled plugins
@@ -77,6 +79,7 @@ export function createServer(options: CreateServerOptions): McpServer {
       server,
       haClient,
       omadaClient,
+      ruijieClient,
       aiClient,
       restActions,
       toolRegistrationMode,

@@ -107,7 +107,9 @@ describe('Auth Middleware', () => {
     });
 
     it('should reject expired token', () => {
-      const token = createJwt({ sub: 'user1', exp: Math.floor(Date.now() / 1000) - 60 }, SECRET);
+      // Well past the middleware's 60 s clock skew: exactly 60 s ago sat on the boundary and
+      // passed whenever the check ran at a whole second (a 1-in-1000 flake).
+      const token = createJwt({ sub: 'user1', exp: Math.floor(Date.now() / 1000) - 120 }, SECRET);
       mockReq.headers = { authorization: `Bearer ${token}` };
       const middleware = createAuthMiddleware({ method: 'bearer', secret: SECRET });
 

@@ -97,6 +97,18 @@ describe('loadConfig', () => {
     });
   });
 
+  it('reads the Ruijie router settings: off and strict by default, the base URL without its trailing slash', () => {
+    const base = { HA_URL: 'http://ha.test:8123', HA_TOKEN: 't' };
+    const off = loadConfig(base);
+    expect(off.ruijiePluginEnabled).toBe(false);
+    expect(off.ruijieStrictSsl).toBe(true);
+    expect(off.ruijieBaseUrl).toBeUndefined();
+
+    const on = loadConfig({ ...base, RUIJIE_PLUGIN_ENABLED: 'true', RUIJIE_BASE_URL: 'https://192.0.2.1/', RUIJIE_PASSWORD: 'pw', RUIJIE_STRICT_SSL: 'false', RUIJIE_TIMEOUT: '9000' });
+    expect(on).toMatchObject({ ruijiePluginEnabled: true, ruijieBaseUrl: 'https://192.0.2.1', ruijiePassword: 'pw', ruijieStrictSsl: false, ruijieTimeout: 9000 });
+    expect(() => loadConfig({ ...base, RUIJIE_BASE_URL: 'not a url' })).toThrow('RUIJIE_BASE_URL must be a valid URL');
+  });
+
   it('should remove trailing slash from baseUrl', () => {
     const env = {
       HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123/',

@@ -254,8 +254,10 @@ Lets the controller enforce a schedule itself (e.g. a curfew) instead of a daily
 ### Vendor-neutral Network Tools (21)
 
 The `net_` tools describe networks the same way for every controller vendor: one shared model, with an adapter per
-vendor (TP-Link Omada today; UniFi and MikroTik are planned). Each adapter says per feature whether it is native,
-built from several objects, or unsupported (`net_capabilities`), and refuses what it can't do instead of dropping it.
+vendor (TP-Link Omada, and Ruijie / Reyee routers read-only since 2.5.0; UniFi and MikroTik are planned). Each adapter
+says per feature whether it is native, built from several objects, or unsupported (`net_capabilities`), and refuses what
+it can't do instead of dropping it. With several controllers configured, every `net_` tool takes an optional
+`controller` (`omada` or `ruijie`); without it Omada answers.
 Every change is planned first: `dryRun` shows the steps, what they mean, which online devices would be cut off, and a
 `basis` (a fingerprint of the change and what it read). Passing that `basis` when applying refuses the change if it
 is another change, or the controller or those devices changed since; `allowLockout` (cutting devices off) requires it.
@@ -287,6 +289,16 @@ profiles are created in the controller web UI; `net_assignPort` sets a port's ow
 usually set none, and a port can't be put back on its profile's). The mDNS repeater is the controller's
 one gateway mDNS rule: create it once in the web UI (with the services to repeat), then change it here; access point
 mDNS rules, several rules or a one-way rule are shown as `foreign` and left to the web UI.
+
+On a Ruijie / Reyee router (2.5.0, read-only, mapped on a RG-EG105G-V3 with ReyeeOS 2.324) the `net_` list tools show
+its LAN networks, the devices it sees on its LAN right now (named by their address lease), DHCP reservations, its
+ports (the WAN port as the protected uplink) and its access-control rules; rules the model can't say faithfully (a
+source "anywhere", source ports, IPv6, user groups, schedules, only some connection states, an interface restriction the
+model can't carry, ports for TCP or UDP only) are shown as `foreign`.
+Every change is refused for now: reservations and rules come next, then networks. It talks to the router's local web
+API with its admin password; use `https://` (the router's own login page hides the password with a key that is
+shipped in the page, so only HTTPS really protects it). A refused login is never retried, because wrong passwords lock
+the router's login: the Ruijie tools then refuse until the setting is fixed and the server restarted.
 
 ### AI Tools (1)
 
@@ -484,6 +496,16 @@ Clients only see the tools they may use: `tools/list` is filtered by the caller'
 | `OMADA_STRICT_SSL` | `true` | Validate SSL certificates |
 | `OMADA_TIMEOUT` | `30000` | API request timeout (ms) |
 | `MCP_SERVER_ADDRESSES` | - | LAN address(es) or host name(s) of the machine this server runs on, comma-separated (for Docker: the host's LAN address). The `net_` tools protect it like the controller: never its switch port, its network's VLAN or gateway, or its internet access (rules). While unset, ports with devices on them are left alone |
+
+### Optional - Ruijie / Reyee Router
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RUIJIE_PLUGIN_ENABLED` | `false` | Enable the Ruijie router (its `net_` tools take `controller: "ruijie"`) |
+| `RUIJIE_BASE_URL` | - | The router's management address, e.g. `https://192.168.110.1` (use https: over plain http its password can be read on the wire) |
+| `RUIJIE_PASSWORD` | - | The router's admin password (the username is always `admin`). Never retried when refused: wrong passwords lock the router's login |
+| `RUIJIE_STRICT_SSL` | `true` | Validate the router's certificate; `false` accepts its self-signed one (this client only) |
+| `RUIJIE_TIMEOUT` | `15000` | Request timeout (ms) |
 
 ## Advanced Configuration Examples
 

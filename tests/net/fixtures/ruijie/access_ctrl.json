@@ -1,0 +1,33 @@
+{
+ "code": 0,
+ "id": null,
+ "error": null,
+ "data": {
+  "version": "1.0.0",
+  "list": [
+   {
+    "enable": "0",
+    "src": "lan",
+    "destPort": "",
+    "ruleName": "mcp-test",
+    "dest": "wan",
+    "netProto": "ipv4",
+    "mac": "",
+    "proto": "all",
+    "srcIP": "",
+    "srcPort": "",
+    "state": "0",
+    "type": "cycle",
+    "tmngtName": "所有时段",
+    "uuid": "AA54F74D39A22CFE181B",
+    "ruleid": "736CA2DBA7",
+    "destIP": "10.99.99.99",
+    "by": "ip",
+    "target": "DROP"
+   }
+  ],
+  "configId": "1792839105",
+  "configTime": "1792839105",
+  "currentTime": "1792839105"
+ }
+}

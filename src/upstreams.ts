@@ -1,5 +1,5 @@
 /**
- * Connects to the upstreams (Home Assistant, Omada, the local AI) at startup.
+ * Connects to the upstreams (Home Assistant, Omada, a Ruijie router, the local AI) at startup.
  *
  * An upstream that doesn't answer at startup is not fatal: its client is kept, its
  * tools stay registered (calls fail cleanly until it answers) and a background probe
@@ -8,7 +8,9 @@
  * during the 2026-10-17 NAS network outage) instead of serving /health and Omada.
  *
  * What stays fatal or disabling is configuration that can never work: a missing
- * HA_URL/HA_TOKEN or Omada setting, or an OMADA_SITE_ID the controller doesn't have.
+ * HA_URL/HA_TOKEN or Omada setting, or an OMADA_SITE_ID the controller doesn't have. A Ruijie
+ * router that refuses the login is never asked again (wrong passwords lock its login): its
+ * tools refuse until the setting is fixed and the server restarted.
  */
 
 import type { EnvironmentConfig } from './config.js';
@@ -16,6 +18,7 @@ import { HaClient } from './haClient/index.js';
 import { LocalAIClient } from './localAI/index.js';
 import { OmadaClient } from './omadaClient/index.js';
 import { checkConfiguredSite } from './omadaClient/site.js';
+import { RuijieClient, RuijieError } from './ruijieClient/index.js';
 import { logger } from './utils/logger.js';
 
 export interface BackoffOptions {
@@ -71,6 +74,7 @@ export function retryInBackground(
 export interface Upstreams {
   haClient?: HaClient;
   omadaClient?: OmadaClient;
+  ruijieClient?: RuijieClient;
   aiClient?: LocalAIClient;
   /** Stops the background probes (tests; the process otherwise just exits). */
   stop(): void;
@@ -80,6 +84,7 @@ export interface Upstreams {
 export interface UpstreamFactories {
   ha(config: EnvironmentConfig): HaClient;
   omada(config: EnvironmentConfig): OmadaClient;
+  ruijie(config: EnvironmentConfig): RuijieClient;
   ai(config: EnvironmentConfig): LocalAIClient;
 }
 
@@ -101,6 +106,13 @@ export const defaultFactories: UpstreamFactories = {
       strictSsl: config.omadaStrictSsl,
       requestTimeout: config.requestTimeout,
       serverAddresses: config.serverAddresses,
+    }),
+  ruijie: (config) =>
+    new RuijieClient({
+      baseUrl: config.ruijieBaseUrl!,
+      password: config.ruijiePassword!,
+      strictSsl: config.ruijieStrictSsl,
+      timeout: config.ruijieTimeout,
     }),
   ai: (config) => new LocalAIClient(config),
 };
@@ -195,6 +207,44 @@ export async function connectUpstreams(
     }
   } else {
     logger.info('Omada plugin disabled');
+  }
+
+  // Ruijie / Reyee router
+  if (config.ruijiePluginEnabled) {
+    if (config.ruijieBaseUrl && config.ruijiePassword) {
+      let ruijieClient: RuijieClient | undefined;
+      try {
+        ruijieClient = factories.ruijie(config);
+        const client = ruijieClient;
+        // A refused login is final (the client has switched itself off and logged why); only an
+        // unreachable router is tried again.
+        const check = async () => {
+          try {
+            const router = await client.check();
+            logger.info('Connected to Ruijie router', router);
+          } catch (error) {
+            if (error instanceof RuijieError && (error.kind === 'refused' || error.kind === 'disabled')) return;
+            throw error;
+          }
+        };
+        try {
+          await check();
+        } catch (error) {
+          logger.warn('Ruijie router not reachable; its net_ tools stay registered and work once it answers. Retrying in the background', {
+            error: errorMessage(error),
+          });
+          probes.push(retryInBackground('Ruijie router', check, backoff));
+        }
+      } catch (error) {
+        logger.warn('Ruijie client could not be created - Ruijie tools will be disabled', { error: errorMessage(error) });
+        ruijieClient = undefined;
+      }
+      upstreams.ruijieClient = ruijieClient;
+    } else {
+      logger.warn('Ruijie plugin enabled but required config not set (RUIJIE_BASE_URL, RUIJIE_PASSWORD)');
+    }
+  } else {
+    logger.info('Ruijie plugin disabled');
   }
 
   // Local AI

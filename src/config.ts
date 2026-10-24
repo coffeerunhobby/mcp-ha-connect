@@ -27,6 +27,7 @@ const envSchema = z
     haPluginEnabled: createBooleanStringSchema(false),
     aiPluginEnabled: createBooleanStringSchema(false),
     omadaPluginEnabled: createBooleanStringSchema(false),
+    ruijiePluginEnabled: createBooleanStringSchema(false),
 
     // Home Assistant Client Configuration (optional if using Omada only)
     haUrl: z.string().url({ message: 'HA_URL must be a valid URL' }).optional(),
@@ -44,6 +45,12 @@ const envSchema = z
     omadaTimeout: numericStringSchema,
     // LAN address(es) of the machine this server runs on, comma-separated (its switch port is never reassigned)
     serverAddresses: z.string().optional(),
+
+    // Ruijie / Reyee router (local eWeb API; optional)
+    ruijieBaseUrl: z.string().url({ message: 'RUIJIE_BASE_URL must be a valid URL' }).optional(),
+    ruijiePassword: z.string().min(1).optional(),
+    ruijieStrictSsl: createBooleanStringSchema(true),
+    ruijieTimeout: numericStringSchema,
 
     // Pre-registered REST actions for the invokeAction tool (optional; raw JSON,
     // parsed + validated by parseRestActions after the env parse)
@@ -181,6 +188,7 @@ export interface EnvironmentConfig {
   haPluginEnabled: boolean;
   aiPluginEnabled: boolean;
   omadaPluginEnabled: boolean;
+  ruijiePluginEnabled: boolean;
 
   // Home Assistant Client Configuration (optional if using Omada only)
   baseUrl?: string;
@@ -198,6 +206,12 @@ export interface EnvironmentConfig {
   requestTimeout?: number;
   /** LAN addresses or host names of the machine this server runs on (MCP_SERVER_ADDRESSES); empty when not set. */
   serverAddresses: string[];
+
+  // Ruijie / Reyee router (optional)
+  ruijieBaseUrl?: string;
+  ruijiePassword?: string;
+  ruijieStrictSsl: boolean;
+  ruijieTimeout?: number;
 
   // AI Provider Configuration
   aiProvider: AIProviderType;
@@ -263,6 +277,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     haPluginEnabled: env.HA_PLUGIN_ENABLED,
     aiPluginEnabled: env.AI_PLUGIN_ENABLED,
     omadaPluginEnabled: env.OMADA_PLUGIN_ENABLED,
+    ruijiePluginEnabled: env.RUIJIE_PLUGIN_ENABLED,
 
     // Home Assistant Client Configuration
     haUrl: env.HA_URL,
@@ -279,6 +294,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     omadaStrictSsl: env.OMADA_STRICT_SSL,
     omadaTimeout: env.OMADA_TIMEOUT,
     serverAddresses: env.MCP_SERVER_ADDRESSES,
+
+    // Ruijie / Reyee router
+    ruijieBaseUrl: env.RUIJIE_BASE_URL,
+    ruijiePassword: env.RUIJIE_PASSWORD,
+    ruijieStrictSsl: env.RUIJIE_STRICT_SSL,
+    ruijieTimeout: env.RUIJIE_TIMEOUT,
 
     // Pre-registered REST actions
     restActions: env.MCP_REST_ACTIONS,
@@ -366,6 +387,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     haPluginEnabled: parsed.data.haPluginEnabled,
     aiPluginEnabled: parsed.data.aiPluginEnabled,
     omadaPluginEnabled: parsed.data.omadaPluginEnabled,
+    ruijiePluginEnabled: parsed.data.ruijiePluginEnabled,
 
     // Home Assistant Client Configuration (optional)
     baseUrl: parsed.data.haUrl?.replace(/\/$/, ''),
@@ -382,6 +404,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     omadaStrictSsl: parsed.data.omadaStrictSsl,
     requestTimeout: parsed.data.omadaTimeout,
     serverAddresses: (parsed.data.serverAddresses ?? '').split(',').map((a) => a.trim()).filter((a) => a !== ''),
+
+    // Ruijie / Reyee router (optional)
+    ruijieBaseUrl: parsed.data.ruijieBaseUrl?.replace(/\/$/, ''),
+    ruijiePassword: parsed.data.ruijiePassword,
+    ruijieStrictSsl: parsed.data.ruijieStrictSsl,
+    ruijieTimeout: parsed.data.ruijieTimeout,
 
     // Pre-registered REST actions (throws on malformed JSON — config typos fail loudly)
     restActions: parseRestActions(parsed.data.restActions),

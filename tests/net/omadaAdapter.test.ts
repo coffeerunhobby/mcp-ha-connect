@@ -41,8 +41,13 @@ function controller(controllerHost = '10.0.0.250', resolveHost?: (host: string) 
         reservations: [] as Raw[],
         acls: { 'osg-acls': [] as Raw[], 'osw-acls': [] as Raw[], 'eap-acls': [] as Raw[] } as Record<string, Raw[]>,
         lanProfiles: [] as Raw[],
-        /** Per network id: the devices whose ports carry it (switchInfo.affectedPorts). */
-        networkPorts: {} as Record<string, Raw[]>,
+        /** Per network id: the devices whose ports carry it (switchInfo.affectedPorts); the gateway entry says whether it has Wi-Fi. */
+        networkPorts: { 'net-default': [{ type: 'gateway', mac: 'GW', name: 'gateway-gw1', gatewayInfo: { gatewayDetail: { wirelessRouter: false } } }] } as Record<string, Raw[]>,
+        /** Adopted devices: a gateway without a radio (like an ER605) and one access point. */
+        devices: [
+            { type: 'gateway', mac: 'GW', name: 'gateway-gw1' },
+            { type: 'ap', mac: 'AP1', name: 'eap' },
+        ] as Raw[],
         timeRanges: [] as Array<{ profileId: string; name: string }>,
         /** IP groups (0) and IP-port groups (1). */
         groups: { 0: [{ groupId: 'ip-any', name: 'IPGroup_Any', buildIn: true, ipList: [{ ip: '0.0.0.0', mask: 0 }] }], 1: [] } as Record<number, Raw[]>,
@@ -142,6 +147,7 @@ function controller(controllerHost = '10.0.0.250', resolveHost?: (host: string) 
             return structuredClone(state.clients);
         }),
         listMacGroups: vi.fn(async () => structuredClone(state.macGroups)),
+        listDevices: vi.fn(async () => structuredClone(state.devices)),
         accessControl: {
             listDhcpReservations: vi.fn(async () => structuredClone(state.reservations)),
             listTimeRanges: vi.fn(async () => structuredClone(state.timeRanges)),
@@ -507,6 +513,36 @@ describe('networks', () => {
 });
 
 describe('Wi-Fi', () => {
+    it('puts a new Wi-Fi network on the access points, and on the gateway only when it has Wi-Fi', async () => {
+        const wifiGateway = (s: ReturnType<typeof controller>['state']) => {
+            s.networkPorts['net-default'] = [{ type: 'gateway', mac: 'GW', gatewayInfo: { gatewayDetail: { wirelessRouter: true } } }];
+        };
+        const both = controller();
+        wifiGateway(both.state);
+        await both.apply(newWifi());
+        expect((both.writes[0].args[1] as Raw).deviceType).toBe(3);
+
+        const gatewayOnly = controller();
+        wifiGateway(gatewayOnly.state);
+        gatewayOnly.state.devices = gatewayOnly.state.devices.filter((d) => d.type !== 'ap');
+        await gatewayOnly.apply(newWifi());
+        expect((gatewayOnly.writes[0].args[1] as Raw).deviceType).toBe(2);
+
+        const neither = controller();
+        neither.state.devices = neither.state.devices.filter((d) => d.type !== 'ap');
+        expect(await message(neither.net.plan(newWifi()))).toBe('Nothing could broadcast this Wi-Fi network: the site has no access point and the gateway has no Wi-Fi');
+        expect(neither.writes).toEqual([]);
+    });
+
+    it('refuses to apply when what could broadcast the Wi-Fi changed after planning', async () => {
+        const { state, writes, net } = controller();
+        const plan = await net.plan(newWifi());
+        state.networkPorts['net-default'] = [{ type: 'gateway', mac: 'GW', gatewayInfo: { gatewayDetail: { wirelessRouter: true } } }];
+
+        expect(await code(net.apply(plan))).toBe('CONFLICT');
+        expect(writes).toEqual([]);
+    });
+
     it('creates an SSID tagged into the network\'s VLAN with a temporary password nobody sees', async () => {
         const { writes, net } = controller();
 
@@ -517,7 +553,7 @@ describe('Wi-Fi', () => {
         expect(writes[0]).toMatchObject({ op: 'createSsid', args: ['wlan-1', expect.any(Object), 'site-1'] });
         expect(body).toMatchObject({
             name: 'iot-wifi',
-            deviceType: 3,
+            deviceType: 1, // access points only: the gateway has no radio (not copied from home-wifi's 3)
             band: 1,
             security: 3,
             broadcast: true,

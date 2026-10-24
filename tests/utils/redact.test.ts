@@ -87,6 +87,12 @@ describe('redactSecrets', () => {
         expect(out.attributes.access_token).toBe(REDACTED);
     });
 
+    it('masks session ids in URLs (auth= and sid=, as Ruijie routers use)', () => {
+        expect(redactSecrets('POST https://192.0.2.1/cgi-bin/luci/api/cmd?auth=a1b2c3 failed')).toBe(`POST https://192.0.2.1/cgi-bin/luci/api/cmd?auth=${REDACTED} failed`);
+        expect(redactSecrets('/x?a=1&sid=zz9&b=2')).toBe(`/x?a=1&sid=${REDACTED}&b=2`);
+        expect(redactSecrets('/x?author=me')).toBe('/x?author=me');
+    });
+
     it('leaves empty secrets empty, so "is it set?" stays answerable', () => {
         expect(redactSecrets({ password: '', securityKey: 'x' })).toEqual({ password: '', securityKey: REDACTED });
     });

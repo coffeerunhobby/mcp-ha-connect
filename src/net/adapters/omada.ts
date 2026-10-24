@@ -1355,12 +1355,12 @@ export class OmadaNetworkController implements NetworkController {
         const network = wifiNetwork(snap.networks, value.network);
         const wlanId = snap.ssids[0]?.wlanId ?? (await this.client.networkConfig.listSsidSummaries(snap.siteId)).find((w) => w.wlanId !== PSEUDO_WLAN_ID)?.wlanId;
         if (!wlanId) throw new NetError('NOT_FOUND', 'No WLAN group to add the Wi-Fi network to');
-        const template = snap.ssids[0]?.detail;
         const macFilter = value.macFilter ? await this.macFilterBody(value.macFilter, snap) : undefined;
+        const deviceType = await this.wifiDeviceType(snap);
 
         const body: RawRecord = {
             name,
-            deviceType: typeof template?.deviceType === 'number' ? template.deviceType : 1,
+            deviceType,
             band: bandBits(checkBands(value.bands)),
             guestNetEnable: value.clientIsolation,
             broadcast: !value.hidden,
@@ -1389,6 +1389,8 @@ export class OmadaNetworkController implements NetworkController {
             ],
             wouldLockOut: [],
             reads: { networks: true, ssids: true, macGroups: macFilter !== undefined },
+            // Which devices broadcast it: a change (an access point added, another gateway) is a CONFLICT.
+            extra: { deviceType },
             execute: async (s) => {
                 await this.client.networkConfig.createSsid(wlanId, body, s.siteId);
                 const created = (await this.client.networkConfig.listSsidSummaries(s.siteId))
@@ -1407,6 +1409,25 @@ export class OmadaNetworkController implements NetworkController {
                 return { applied: true, object: this.toWifi({ wlanId: created.wlanId, ssidId: created.ssidId, detail }, s.networks, await this.client.listMacGroups(s.siteId), s.alwaysProfileId), owned: [] };
             },
         };
+    }
+
+    /**
+     * Which devices broadcast a new SSID (bit 0 = access points, bit 1 = the gateway): the access
+     * points when the site has any, the gateway only when it reports a radio (wirelessRouter).
+     * Never copied from another SSID: an SSID put on a gateway without Wi-Fi can't be saved in the
+     * web UI (live, ER605, 2026-10-21). The gateway's details come with a network's port list.
+     */
+    private async wifiDeviceType(snap: Snapshot): Promise<number> {
+        const devices = await this.client.listDevices(snap.siteId);
+        const hasAccessPoints = devices.some((d) => d.type === 'ap');
+        const first = snap.networks[0];
+        const entries = devices.some((d) => d.type === 'gateway') && first ? await this.client.networkConfig.listNetworkPorts(first.id, first.vlan, snap.siteId) : [];
+        const gatewayWifi = entries.some((e) => e.type === 'gateway' && ((e.gatewayInfo as RawRecord | undefined)?.gatewayDetail as RawRecord | undefined)?.wirelessRouter === true);
+        const deviceType = (hasAccessPoints ? 1 : 0) + (gatewayWifi ? 2 : 0);
+        if (deviceType === 0) {
+            throw new NetError('UNSUPPORTED', 'Nothing could broadcast this Wi-Fi network: the site has no access point and the gateway has no Wi-Fi', { capability: 'wifi.create' });
+        }
+        return deviceType;
     }
 
     private async buildWifiUpdate(ref: Ref, set: Partial<Omit<Wifi, 'id'>>, passphrase: PassphraseSource | undefined, snap: Snapshot): Promise<Built> {

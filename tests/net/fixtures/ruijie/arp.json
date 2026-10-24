@@ -1,0 +1,49 @@
+{
+ "code": 0,
+ "id": null,
+ "error": null,
+ "data": {
+  "arpList": [
+   {
+    "hardware": "02:00:00:00:00:04",
+    "intf": "br-wan",
+    "address": "198.51.100.118"
+   },
+   {
+    "hardware": "02:00:00:00:00:05",
+    "intf": "br-wan",
+    "address": "198.51.100.252"
+   },
+   {
+    "hardware": "02:00:00:00:00:06",
+    "intf": "br-wan",
+    "address": "198.51.100.18"
+   },
+   {
+    "hardware": "02:00:00:00:00:07",
+    "intf": "br-wan",
+    "address": "198.51.100.1"
+   },
+   {
+    "hardware": "02:00:00:00:00:08",
+    "intf": "br-wan",
+    "address": "198.51.100.107"
+   },
+   {
+    "hardware": "02:00:00:00:00:03",
+    "intf": "br-lan",
+    "address": "192.168.110.2"
+   },
+   {
+    "hardware": "02:00:00:00:00:09",
+    "intf": "br-wan",
+    "address": "198.51.100.40"
+   },
+   {
+    "hardware": "02:00:00:00:00:0a",
+    "intf": "br-wan",
+    "address": "198.51.100.117"
+   }
+  ]
+ }
+}

@@ -1,0 +1,30 @@
+{
+ "code": 0,
+ "id": null,
+ "error": null,
+ "data": {
+  "master_priority": "5457",
+  "hardware_version": "1.22",
+  "acEnable": "true",
+  "config_version": "1.0",
+  "modelFullName": "",
+  "manufacturer": "Ruijie Networks Co., Ltd",
+  "netAccessLicense": "",
+  "max_sta_num": "200",
+  "product_class": "EG105G-V3",
+  "productType": "egw",
+  "support_wifi": "0",
+  "max_ap_num": "32",
+  "product_id": "60010350",
+  "egEnable": "true",
+  "oui": "4C4968",
+  "ostype": "openwrt",
+  "sys_mac": "02:00:00:00:00:02",
+  "autoJoin": "true",
+  "model": "EG105G-V3",
+  "forwardMode": "ROUTER",
+  "software_version": "ReyeeOS 2.324.0.1521;EG_3.0(1)B11P324,Release(12152110)",
+  "wan_ip": "198.51.100.147",
+  "serial_num": "TESTSERIAL0001"
+ }
+}

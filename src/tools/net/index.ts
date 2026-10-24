@@ -6,8 +6,11 @@
  * cut off without allowLockout.
  *
  * 2.4.5: networks and Wi-Fi. 2.4.7: rules (and listing groups). 2.4.8: clients with their
- * network, switch ports and port profiles, the mDNS repeater.
+ * network, switch ports and port profiles, the mDNS repeater. 2.5.0: several controllers
+ * (Omada and Ruijie): every tool takes an optional `controller` (the vendor), default Omada.
  */
+
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
@@ -191,7 +194,66 @@ function summary(plan: Plan) {
     };
 }
 
-export function registerNetTools(server: McpServer, controller: NetworkController): number {
+/**
+ * A controller that hands every call to the one chosen for the current tool call. The choice
+ * lives in an AsyncLocalStorage, so parallel calls in one request each keep their own.
+ */
+function routedController(current: () => NetworkController): NetworkController {
+    return {
+        get vendor() {
+            return current().vendor;
+        },
+        get id() {
+            return current().id;
+        },
+        capabilities: () => current().capabilities(),
+        protectedResources: () => current().protectedResources(),
+        listNetworks: () => current().listNetworks(),
+        listWifi: () => current().listWifi(),
+        listPortProfiles: () => current().listPortProfiles(),
+        listPorts: (device) => current().listPorts(device),
+        listRules: () => current().listRules(),
+        listGroups: (kind) => current().listGroups(kind),
+        listReservations: () => current().listReservations(),
+        listClients: () => current().listClients(),
+        getMdnsRepeater: () => current().getMdnsRepeater(),
+        plan: (change) => current().plan(change),
+        apply: (plan, options) => current().apply(plan, options),
+    };
+}
+
+/**
+ * Registers the net_* tools for one or more controllers (one per vendor). Each tool takes an
+ * optional `controller` (the vendor name, checked by its schema); without it, Omada answers
+ * when configured, else the first controller.
+ */
+export function registerNetTools(target: McpServer, controllers: NetworkController | NetworkController[]): number {
+    // One controller per vendor: a second one of the same vendor is never chosen.
+    const configured = Array.isArray(controllers) ? controllers : [controllers];
+    if (!configured.length) return 0;
+    const fallback = configured.find((c) => c.vendor === 'omada') ?? configured[0];
+    const vendors = [...new Set(configured.map((c) => c.vendor))] as [string, ...string[]];
+    const chosen = new AsyncLocalStorage<NetworkController>();
+    const controller = routedController(() => chosen.getStore() ?? fallback);
+    // A value the schema let through without a controller behind it refuses every call (never Omada by accident).
+    const pick = (wanted: unknown): NetworkController =>
+        wanted === undefined
+            ? fallback
+            : (configured.find((c) => c.vendor === wanted) ??
+              routedController(() => {
+                  throw new NetError('NOT_FOUND', `No network controller '${String(wanted)}' is configured; configured: ${vendors.join(', ')}`);
+              }));
+    const choice = z
+        .enum(vendors)
+        .optional()
+        .describe(`Which network controller answers: ${vendors.join(' or ')} (default ${fallback.vendor})`);
+    type Handler = (args: Record<string, unknown> | undefined, extra: unknown) => unknown;
+    const server = {
+        registerTool: (name: string, config: { inputSchema: z.ZodObject<z.ZodRawShape> } & Record<string, unknown>, handler: Handler) =>
+            target.registerTool(name, { ...config, inputSchema: config.inputSchema.extend({ controller: choice }) } as never, ((args: Record<string, unknown> | undefined, extra: unknown) =>
+                chosen.run(pick(args?.controller), () => handler(args, extra))) as never),
+    } as unknown as McpServer;
+
     server.registerTool(
         'net_capabilities',
         { description: 'What the network controller can do: per feature native, emulated (built from several objects) or unsupported.', inputSchema: z.object({}) },

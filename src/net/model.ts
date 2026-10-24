@@ -28,7 +28,7 @@ export type Clock = string;
 export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 export type Day = (typeof DAYS)[number];
 
-export type Vendor = 'omada' | 'unifi' | 'mikrotik';
+export type Vendor = 'omada' | 'unifi' | 'mikrotik' | 'ruijie';
 
 // ---- schedules --------------------------------------------------------------------
 

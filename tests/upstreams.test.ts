@@ -10,6 +10,7 @@ import type { EnvironmentConfig } from '../src/config.js';
 import type { HaClient } from '../src/haClient/index.js';
 import type { LocalAIClient } from '../src/localAI/index.js';
 import type { OmadaClient } from '../src/omadaClient/index.js';
+import { RuijieError, type RuijieClient } from '../src/ruijieClient/index.js';
 import { connectUpstreams, DEFAULT_BACKOFF, OMADA_SITE_DISABLED_MESSAGE, retryInBackground, type UpstreamFactories, type Upstreams } from '../src/upstreams.js';
 import { logger } from '../src/utils/logger.js';
 
@@ -41,12 +42,14 @@ function fakes() {
   const ha = { checkApi: vi.fn(down) };
   const omada = { listSites: vi.fn(down), disable: vi.fn() };
   const ai = { checkHealth: vi.fn(async () => false), getProviderName: () => 'ollama' };
+  const ruijie = { check: vi.fn(async (): Promise<{ model: string; version: string }> => Promise.reject(new RuijieError('The Ruijie router is not reachable', 'unreachable'))) };
   const factories: UpstreamFactories = {
     ha: () => ha as unknown as HaClient,
     omada: () => omada as unknown as OmadaClient,
+    ruijie: () => ruijie as unknown as RuijieClient,
     ai: () => ai as unknown as LocalAIClient,
   };
-  return { ha, omada, ai, factories };
+  return { ha, omada, ai, ruijie, factories };
 }
 
 const logged = (level: 'info' | 'warn' | 'error', text: string) =>
@@ -193,6 +196,94 @@ describe('connectUpstreams', () => {
     expect(ha.checkApi).toHaveBeenCalledTimes(1);
     expect(omada.listSites).toHaveBeenCalledTimes(1);
     expect(ai.checkHealth).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('connectUpstreams: the Ruijie router', () => {
+  let upstreams: Upstreams | undefined;
+  const only = (over: Partial<EnvironmentConfig> = {}) =>
+    config({ haPluginEnabled: false, omadaPluginEnabled: false, aiPluginEnabled: false, ruijiePluginEnabled: true, ruijieBaseUrl: 'https://192.0.2.1', ruijiePassword: 'pw', ...over });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+  });
+  afterEach(() => {
+    upstreams?.stop();
+    upstreams = undefined;
+    vi.useRealTimers();
+  });
+
+  it('connects and logs the router model', async () => {
+    const { ruijie, factories } = fakes();
+    ruijie.check.mockResolvedValue({ model: 'EG105G-V3', version: 'ReyeeOS 2.324' });
+    upstreams = await connectUpstreams(only(), factories);
+
+    expect(upstreams.ruijieClient).toBeDefined();
+    expect(vi.mocked(logger.info)).toHaveBeenCalledWith('Connected to Ruijie router', { model: 'EG105G-V3', version: 'ReyeeOS 2.324' });
+  });
+
+  it('keeps the client when the router is unreachable and retries until it answers', async () => {
+    const { ruijie, factories } = fakes();
+    upstreams = await connectUpstreams(only(), factories);
+    expect(upstreams.ruijieClient).toBeDefined();
+    expect(logged('warn', 'Ruijie router not reachable')).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(DEFAULT_BACKOFF.initialMs);
+    expect(ruijie.check).toHaveBeenCalledTimes(2);
+    ruijie.check.mockResolvedValue({ model: 'EG105G-V3', version: 'v' });
+    await vi.advanceTimersByTimeAsync(2 * DEFAULT_BACKOFF.initialMs);
+    expect(ruijie.check).toHaveBeenCalledTimes(3);
+    expect(logged('info', 'Connected to Ruijie router')).toBe(true);
+    await vi.advanceTimersByTimeAsync(10 * DEFAULT_BACKOFF.maxMs);
+    expect(ruijie.check).toHaveBeenCalledTimes(3);
+  });
+
+  it('never asks again after a refused login, at startup or later (wrong passwords lock the router)', async () => {
+    const atStart = fakes();
+    atStart.ruijie.check.mockRejectedValue(new RuijieError('refused', 'refused'));
+    upstreams = await connectUpstreams(only(), atStart.factories);
+    expect(upstreams.ruijieClient).toBeDefined(); // its tools refuse with the reason
+    await vi.advanceTimersByTimeAsync(10 * DEFAULT_BACKOFF.maxMs);
+    expect(atStart.ruijie.check).toHaveBeenCalledTimes(1);
+    upstreams.stop();
+
+    const later = fakes();
+    upstreams = await connectUpstreams(only(), later.factories);
+    later.ruijie.check.mockRejectedValue(new RuijieError('refused', 'refused'));
+    await vi.advanceTimersByTimeAsync(DEFAULT_BACKOFF.initialMs);
+    expect(later.ruijie.check).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(10 * DEFAULT_BACKOFF.maxMs);
+    expect(later.ruijie.check).toHaveBeenCalledTimes(2);
+    upstreams.stop();
+
+    // switched off by a refusal elsewhere (a tool call): the probe stops too
+    const off = fakes();
+    upstreams = await connectUpstreams(only(), off.factories);
+    off.ruijie.check.mockRejectedValue(new RuijieError('off', 'disabled'));
+    await vi.advanceTimersByTimeAsync(DEFAULT_BACKOFF.initialMs);
+    await vi.advanceTimersByTimeAsync(10 * DEFAULT_BACKOFF.maxMs);
+    expect(off.ruijie.check).toHaveBeenCalledTimes(2);
+  });
+
+  it('builds no client when the plugin is off, its settings are missing, or the client can\'t be built', async () => {
+    const { factories } = fakes();
+    upstreams = await connectUpstreams(only({ ruijiePluginEnabled: false }), factories);
+    expect(upstreams.ruijieClient).toBeUndefined();
+    expect(logged('info', 'Ruijie plugin disabled')).toBe(true);
+
+    upstreams = await connectUpstreams(only({ ruijiePassword: undefined }), factories);
+    expect(upstreams.ruijieClient).toBeUndefined();
+    expect(logged('warn', 'RUIJIE_BASE_URL, RUIJIE_PASSWORD')).toBe(true);
+    upstreams = await connectUpstreams(only({ ruijieBaseUrl: undefined }), factories);
+    expect(upstreams.ruijieClient).toBeUndefined();
+
+    factories.ruijie = () => {
+      throw new Error('Invalid URL');
+    };
+    upstreams = await connectUpstreams(only(), factories);
+    expect(upstreams.ruijieClient).toBeUndefined();
+    expect(logged('warn', 'Ruijie client could not be created')).toBe(true);
   });
 });
 
