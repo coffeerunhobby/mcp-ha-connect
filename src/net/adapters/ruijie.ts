@@ -354,7 +354,7 @@ export class RuijieNetworkController implements NetworkController {
             groups: { address: 'unsupported', mac: 'unsupported' },
             reservations: 'unsupported',
             mdnsRepeater: 'unsupported',
-            firmware: 'native',
+            firmware: this.firmwareAllowed() ? 'native' : 'unsupported',
         };
     }
 
@@ -412,7 +412,7 @@ export class RuijieNetworkController implements NetworkController {
                 ...(text(info.model) ? { model: text(info.product_class) || text(info.model) } : {}),
                 current: offer.current || text(info.software_version) || 'unknown',
                 ...(offer.version ? { available: { version: offer.version, ...(offer.notes ? { notes: offer.notes } : {}), ...(offer.sizeBytes ? { sizeBytes: offer.sizeBytes } : {}) } } : {}),
-                upgradable: offer.version !== undefined && isRuijieDownload(offer.url),
+                upgradable: this.firmwareAllowed() && offer.version !== undefined && isRuijieDownload(offer.url),
             },
         ];
     }
@@ -444,8 +444,17 @@ export class RuijieNetworkController implements NetworkController {
         return { enabled: false, networks: [], foreign: { reason: 'This Ruijie router has no mDNS repeater the tools manage.' } };
     }
 
+    /** Firmware upgrades are on unless this server switched changes or upgrades off. */
+    private firmwareAllowed(): boolean {
+        return !this.client.readOnly && this.client.firmwareUpgrade !== false;
+    }
+
     async plan(change: Change): Promise<Plan> {
+        if (this.client.readOnly) throw new NetError('UNSUPPORTED', 'Changes to the Ruijie router are switched off on this server (RUIJIE_READ_ONLY=true)', { capability: change.kind });
         if (change.kind !== 'firmware') throw new NetError('UNSUPPORTED', READ_ONLY, { capability: change.kind });
+        if (this.client.firmwareUpgrade === false) {
+            throw new NetError('UNSUPPORTED', 'Firmware upgrades on the Ruijie router are switched off on this server (RUIJIE_FIRMWARE_UPGRADE=false)', { capability: 'firmware' });
+        }
         const { info, mac } = await this.router(change.device);
         // The basis names the router; without its MAC a dry run could vouch for another one.
         if (mac === 'unknown') throw new NetError('INVALID', "The router doesn't report its MAC address, so it can't be told which router a dry run was for; not upgraded");

@@ -83,7 +83,7 @@ npm install -g @coffeerunhobby/mcp-ha-connect
   "mcpServers": {
     "homeassistant": {
       "command": "node",
-      "args": ["/path/to/mcp-homeassistant/dist/index.js"],
+      "args": ["/path/to/mcp-ha-connect/dist/index.js"],
       "env": {
         "HA_URL": "http://homeassistant.local:8123",
         "HA_TOKEN": "your_ha_long_lived_access_token"
@@ -131,7 +131,8 @@ This bridges stdio to your remote MCP HTTP server - useful when you can't run Do
 
 ## HTTP Server Mode
 
-Start as standalone HTTP server for web applications or n8n:
+Start as standalone HTTP server for web applications or n8n (add `MCP_AUTH_METHOD=bearer` and a secret, below, before
+exposing it beyond your own machine; `/openapi.json` is served to LAN requests only, never through Cloudflare):
 
 ```bash
 MCP_SERVER_USE_HTTP=true \
@@ -145,8 +146,6 @@ npx @coffeerunhobby/mcp-ha-connect
 ### Docker Compose
 
 ```yaml
-version: '3.8'
-
 services:
   mcp-ha-connect:
     image: ghcr.io/coffeerunhobby/mcp-ha-connect:latest
@@ -195,7 +194,7 @@ Authorization: Bearer <your-jwt-token>
 | `READONLY` | Query entities and states |
 | `OPERATOR` | Query + Control devices + Notifications |
 | `CONTRIBUTOR` | Operator + Create/modify automations |
-| `ADMIN` | Full access except AI features |
+| `ADMIN` | All six permissions (QUERY, CONTROL, NOTIFY, CONFIGURE, AI, ADMIN) |
 | `SUPERUSER` | All permissions |
 
 ## n8n Integration
@@ -204,7 +203,7 @@ Authorization: Bearer <your-jwt-token>
 
 1. Add **MCP Client** node in n8n
 2. Configure connection:
-   - **SSE URL:** `http://your-server:3000/mcp`
+   - **URL:** `http://your-server:3000/mcp` (Streamable HTTP)
    - **Authentication:** Bearer Token with JWT (if enabled)
 3. Call tools like `getVersion`, `listEntities`, `getSystemLog`
 
@@ -236,5 +235,5 @@ Once configured, ask Claude:
 ## Next Steps
 
 - [Environment Variables](../README.md#environment-variables) - Full configuration reference
-- [Available Tools](../README.md#available-tools-60-total) - All 60 tools documented (35 Home Assistant + 24 Omada + 1 AI)
+- [Available Tools](../README.md#available-tools-112-total) - All 112 tools documented (Home Assistant, Omada, the vendor-neutral `net_` tools for Omada and Ruijie, AI, infrastructure)
 - [Changelog](CHANGELOG.md) - Version history

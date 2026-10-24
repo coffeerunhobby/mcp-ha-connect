@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { isValidBindAddress, isValidOrigin, isLoopbackAddress } from './utils/config-validations.js';
 import { parsePermissionsConfig, type PermissionsConfig } from './permissions/index.js';
+import { normalizeFingerprint } from './utils/tlsDispatcher.js';
 import { parseRestActions, type RestAction } from './tools/infra/actions.js';
 import { parseChatTools, type ChatToolsSlice } from './server/chatSlice.js';
 import { logger } from './utils/logger.js';
@@ -50,6 +51,12 @@ const envSchema = z
     ruijieBaseUrl: z.string().url({ message: 'RUIJIE_BASE_URL must be a valid URL' }).optional(),
     ruijiePassword: z.string().min(1).optional(),
     ruijieStrictSsl: createBooleanStringSchema(true),
+    ruijieCertSha256: z
+        .string()
+        .optional()
+        .refine((v) => v === undefined || normalizeFingerprint(v) !== undefined, { message: 'RUIJIE_CERT_SHA256 must be a SHA-256 fingerprint (64 hex digits, colons allowed)' }),
+    ruijieReadOnly: createBooleanStringSchema(false),
+    ruijieFirmwareUpgrade: createBooleanStringSchema(true),
     ruijieTimeout: numericStringSchema,
 
     // Pre-registered REST actions for the invokeAction tool (optional; raw JSON,
@@ -126,6 +133,9 @@ const envSchema = z
   // zod 4 removed refine()'s message-as-function form; superRefine reports the same
   // message and path, naming the first invalid origin.
   .superRefine((data, ctx) => {
+    if (data.ruijieCertSha256 !== undefined && !data.ruijieBaseUrl?.toLowerCase().startsWith('https:')) {
+      ctx.addIssue({ code: 'custom', message: 'RUIJIE_CERT_SHA256 needs an https:// RUIJIE_BASE_URL (a pin checks the TLS certificate)', path: ['ruijieCertSha256'] });
+    }
     const invalidOrigin = data.httpAllowedOrigins?.find((origin) => !isValidOrigin(origin));
     if (invalidOrigin !== undefined) {
       ctx.addIssue({
@@ -211,6 +221,12 @@ export interface EnvironmentConfig {
   ruijieBaseUrl?: string;
   ruijiePassword?: string;
   ruijieStrictSsl: boolean;
+  /** The router certificate's SHA-256 fingerprint: trusted exactly, instead of a CA (https only). */
+  ruijieCertSha256?: string;
+  /** Every change through the Ruijie adapter refused. */
+  ruijieReadOnly: boolean;
+  /** Whether net_upgradeFirmware may install firmware on the Ruijie router. */
+  ruijieFirmwareUpgrade: boolean;
   ruijieTimeout?: number;
 
   // AI Provider Configuration
@@ -299,6 +315,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     ruijieBaseUrl: env.RUIJIE_BASE_URL,
     ruijiePassword: env.RUIJIE_PASSWORD,
     ruijieStrictSsl: env.RUIJIE_STRICT_SSL,
+    ruijieCertSha256: env.RUIJIE_CERT_SHA256,
+    ruijieReadOnly: env.RUIJIE_READ_ONLY,
+    ruijieFirmwareUpgrade: env.RUIJIE_FIRMWARE_UPGRADE,
     ruijieTimeout: env.RUIJIE_TIMEOUT,
 
     // Pre-registered REST actions
@@ -409,6 +428,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     ruijieBaseUrl: parsed.data.ruijieBaseUrl?.replace(/\/$/, ''),
     ruijiePassword: parsed.data.ruijiePassword,
     ruijieStrictSsl: parsed.data.ruijieStrictSsl,
+    ruijieCertSha256: parsed.data.ruijieCertSha256 === undefined ? undefined : normalizeFingerprint(parsed.data.ruijieCertSha256),
+    ruijieReadOnly: parsed.data.ruijieReadOnly,
+    ruijieFirmwareUpgrade: parsed.data.ruijieFirmwareUpgrade,
     ruijieTimeout: parsed.data.ruijieTimeout,
 
     // Pre-registered REST actions (throws on malformed JSON — config typos fail loudly)

@@ -20,7 +20,7 @@
 import type { Dispatcher } from 'undici';
 
 import { logger } from '../utils/logger.js';
-import { createTlsDispatcher, tlsAwareFetch, type FetchInitWithDispatcher } from '../utils/tlsDispatcher.js';
+import { createPinnedDispatcher, createTlsDispatcher, PIN_MISMATCH, tlsAwareFetch, type FetchInitWithDispatcher } from '../utils/tlsDispatcher.js';
 
 import { checksumHeaders, encryptPassword } from './crypto.js';
 
@@ -31,6 +31,12 @@ export interface RuijieClientConfig {
     password: string;
     /** false: accept the router's self-signed certificate (this client only). */
     strictSsl?: boolean;
+    /** The router certificate's SHA-256 fingerprint: exactly that certificate is trusted (https only; replaces strictSsl). */
+    certSha256?: string;
+    /** true: every change through the tools is refused (RUIJIE_READ_ONLY). */
+    readOnly?: boolean;
+    /** false: firmware upgrades are refused (RUIJIE_FIRMWARE_UPGRADE). */
+    firmwareUpgrade?: boolean;
     /** Milliseconds per request (default 15000). */
     timeout?: number;
 }
@@ -71,6 +77,10 @@ export class RuijieClient {
     private readonly password: string;
     private readonly timeout: number;
     private readonly dispatcher?: Dispatcher;
+    /** Changes through the tools switched off (RUIJIE_READ_ONLY). */
+    readonly readOnly: boolean;
+    /** Firmware upgrades allowed (RUIJIE_FIRMWARE_UPGRADE). */
+    readonly firmwareUpgrade: boolean;
     private session?: Session;
     private loggingIn?: Promise<Session>;
     private disabledMessage?: string;
@@ -81,11 +91,18 @@ export class RuijieClient {
         this.host = url.hostname;
         this.password = config.password;
         this.timeout = config.timeout ?? 15_000;
-        this.dispatcher = createTlsDispatcher(config.strictSsl, config.baseUrl);
+        this.readOnly = config.readOnly ?? false;
+        this.firmwareUpgrade = config.firmwareUpgrade ?? true;
+        if (config.certSha256 !== undefined) {
+            if (url.protocol !== 'https:') throw new Error('A certificate pin (RUIJIE_CERT_SHA256) needs an https:// router address');
+            this.dispatcher = createPinnedDispatcher(config.certSha256);
+        } else {
+            this.dispatcher = createTlsDispatcher(config.strictSsl, config.baseUrl);
+        }
         if (url.protocol === 'http:') {
             // The login page's password encryption uses a key shipped in the page itself: over plain
             // HTTP anyone watching the traffic can read the password. Only HTTPS protects it.
-            logger.warn('RUIJIE_BASE_URL uses plain http: the router password can be read by anyone watching the traffic. Use https:// (RUIJIE_STRICT_SSL=false for its self-signed certificate) unless the connection already runs inside an encrypted tunnel.');
+            logger.warn('RUIJIE_BASE_URL uses plain http: the router password can be read by anyone watching the traffic. Use https:// with RUIJIE_CERT_SHA256 (the self-signed certificate of the router, pinned) unless the connection already runs inside an encrypted tunnel.');
         }
     }
 
@@ -214,6 +231,9 @@ export class RuijieClient {
             response = await tlsAwareFetch(this.baseUrl + path, init);
         } catch (error) {
             // Never the URL: it carries the session id.
+            if ((error instanceof Error ? (error.cause as { code?: unknown } | undefined)?.code : undefined) === PIN_MISMATCH) {
+                throw new RuijieError("The Ruijie router's certificate doesn't match RUIJIE_CERT_SHA256; nothing was sent to it", 'unreachable', true);
+            }
             const reason = error instanceof Error && error.name === 'TimeoutError' ? 'timed out' : 'not reachable';
             throw new RuijieError(`The Ruijie router is ${reason}`, 'unreachable', failedBeforeSending(error));
         }

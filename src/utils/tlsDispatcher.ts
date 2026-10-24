@@ -23,7 +23,9 @@
  * NAS crash-loop). `tlsAwareFetch` enforces the rule at one choke point.
  */
 
-import { Agent, fetch as undiciFetch, type Dispatcher } from 'undici';
+import { TLSSocket } from 'node:tls';
+
+import { Agent, buildConnector, fetch as undiciFetch, type Dispatcher } from 'undici';
 
 /**
  * `fetch` init augmented with undici's per-request dispatcher option, which is
@@ -53,6 +55,40 @@ export function createTlsDispatcher(strictSsl: boolean | undefined, baseUrl?: st
     return new Agent({ connect: { rejectUnauthorized: false } });
   }
   return undefined;
+}
+
+/** A SHA-256 certificate fingerprint as 64 lowercase hex digits (colons, spaces and case ignored), or undefined if it isn't one. */
+export function normalizeFingerprint(value: string): string | undefined {
+  const hex = value.replace(/[:\s]/g, '').toLowerCase();
+  return /^[0-9a-f]{64}$/.test(hex) ? hex : undefined;
+}
+
+/** The error a pinned connection fails with when the server shows another certificate (the request is never sent). */
+export const PIN_MISMATCH = 'ERR_TLS_CERT_PIN_MISMATCH';
+
+/**
+ * A dispatcher that trusts exactly one certificate, by its SHA-256 fingerprint, for a device
+ * with a self-signed certificate and no usable host name (e.g. a router's own HTTPS): the chain
+ * and host checks are replaced by an exact match, and any other certificate ends the connection
+ * right after the handshake, before a byte of the request is sent. TLS sessions are not reused,
+ * so every connection shows its certificate.
+ */
+export function createPinnedDispatcher(sha256: string): Dispatcher {
+  const pin = normalizeFingerprint(sha256);
+  if (!pin) throw new Error('A certificate pin must be a SHA-256 fingerprint (64 hex digits)');
+  const connect = buildConnector({ rejectUnauthorized: false, maxCachedSessions: 0 });
+  return new Agent({
+    connect: (options, callback) =>
+      connect(options, (error, socket) => {
+        if (error) return callback(error, null);
+        const shown = socket instanceof TLSSocket ? normalizeFingerprint(socket.getPeerCertificate().fingerprint256 ?? '') : undefined;
+        if (shown !== pin) {
+          socket.destroy();
+          return callback(Object.assign(new Error("The server's certificate doesn't match the pinned fingerprint"), { code: PIN_MISMATCH }), null);
+        }
+        return callback(null, socket);
+      }),
+  });
 }
 
 /**

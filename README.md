@@ -1,6 +1,6 @@
 # MCP-HA-Connect
 
-A production-ready Model Context Protocol (MCP) server for Home Assistant integration with AI assistants like Claude and LM Studio.
+A production-ready Model Context Protocol (MCP) server for Home Assistant integration with AI assistants like Claude and LM Studio, with network management for TP-Link Omada and Ruijie / Reyee routers through one vendor-neutral set of `net_` tools.
 
 [![npm version](https://img.shields.io/npm/v/%40coffeerunhobby%2Fmcp-ha-connect)](https://www.npmjs.com/package/@coffeerunhobby/mcp-ha-connect)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/coffeerunhobby/mcp-ha-connect/pkgs/container/mcp-ha-connect)
@@ -73,11 +73,24 @@ high-value questions an LLM can actually answer about your network:
 - **Client management** — list/inspect connected clients, traffic activity, and apply
   rate-limit profiles, with presence correlation against Home Assistant device trackers.
 
+### Vendor-neutral network management (`net_` tools)
+
+- **One model for every vendor** — networks (VLANs, DHCP), Wi-Fi, rules between networks, clients and the network
+  each is on, switch ports, the mDNS repeater and firmware, the same way on TP-Link Omada and Ruijie / Reyee routers.
+- **Safe changes** — every change has a dry run; anything that would cut devices off needs the dry run's `basis`
+  and `allowLockout`, and is refused if the network changed in between. The controller's and this server's own
+  connections are protected.
+- **Firmware** — what each device runs and is offered; on Ruijie, the upgrade itself (ADMIN only).
+
 > A discoverable resource-graph mode (`MCP_TOOL_REGISTRATION_MODE=graph`) exposes all of the
 > above through two tools — `omada_browse` + `omada_read` — keeping the tool-schema budget
 > small for low-context models. See the Omada tool tables below for the full eager surface.
 
-## Available Tools (83 Total)
+## Available Tools (112 Total)
+
+With every plugin on in the default eager mode: Home Assistant 38 (including the 3 owner-question tools, when
+`MCP_OWNER_QUESTIONS_ENABLED` is on), Omada 49, `net_` 23, AI 1 and `invokeAction` 1 (only with `MCP_REST_ACTIONS`).
+In graph mode the Omada reads collapse into `omada_browse` + `omada_read` (Omada 26, 89 in total).
 
 ### Home Assistant Tools (38)
 
@@ -299,8 +312,9 @@ source "anywhere", source ports, IPv6, user groups, schedules, only some connect
 model can't carry, ports for TCP or UDP only) are shown as `foreign`.
 Every change but a firmware upgrade (2.5.1: the version the router itself is offered, the same as its page's Online
 Upgrade) is refused for now: reservations and rules come next, then networks. It talks to the router's local web
-API with its admin password; use `https://` (the router's own login page hides the password with a key that is
-shipped in the page, so only HTTPS really protects it). A refused login is never retried, because wrong passwords lock
+API with its admin password; use `https://` with `RUIJIE_CERT_SHA256` (the router's own login page hides the password
+with a key that is shipped in the page, so only HTTPS really protects it, and the router's self-signed certificate is
+best pinned: the RG-EG105G-V3 ships OpenSSL's sample identity, valid until 2122, likely the same on every unit). A refused login is never retried, because wrong passwords lock
 the router's login: the Ruijie tools then refuse until the setting is fixed and the server restarted.
 
 ### AI Tools (1)
@@ -308,6 +322,12 @@ the router's login: the Ruijie tools then refuse until the setting is fixed and 
 | Tool | Description |
 |------|-------------|
 | `analyzeSensors` | Analyze sensor data using AI (Ollama) to detect issues and provide recommendations |
+
+### Infrastructure Tools (1)
+
+| Tool | Description |
+|------|-------------|
+| `invokeAction` | **ADMIN.** Fire one of the REST actions pre-registered in `MCP_REST_ACTIONS` (e.g. a deploy webhook), each with its own cooldown; registered only when that setting has actions. Not on the chat face |
 
 ### MCP Resources
 
@@ -321,8 +341,8 @@ the router's login: the Ruijie tools then refuse until the setting is fixed and 
 
 ## Prerequisites
 
-- **Node.js 20+** (tested with v20.19.6) - for npm/npx methods
-- **npm 10.8+** (tested with v10.8.2) - for npm/npx methods
+- **Node.js 20+** (CI tests Node 20, 22, 24 and 26; the Docker image runs Node 24) - for npm/npx methods
+- **npm 10.8+** - for npm/npx methods
 - **Docker** (optional) - for Docker method
 - Home Assistant instance with long-lived access token
 - Network access to your Home Assistant instance
@@ -373,7 +393,7 @@ the router's login: the Ruijie tools then refuse until the setting is fixed and 
 | `MCP_HTTP_ENABLE_HEALTHCHECK` | `true` | Enable health check endpoint |
 | `MCP_HTTP_HEALTHCHECK_PATH` | `/health` | Health check path |
 | `MCP_HTTP_ALLOW_CORS` | `true` | Enable CORS |
-| `MCP_HTTP_ALLOWED_ORIGINS` | `127.0.0.1,localhost` | Allowed CORS origins |
+| `MCP_HTTP_ALLOWED_ORIGINS` | `http://localhost:<port>,http://127.0.0.1:<port>` | Allowed origins (and hosts) for CORS and DNS-rebinding protection; list both the bare host and the `https://` form of a public domain |
 
 ### Optional - Chat face (OpenAPI/REST surface)
 
@@ -484,7 +504,7 @@ Clients only see the tools they may use: `tools/list` is filtered by the caller'
 | `AI_PLUGIN_ENABLED` | `true` | Enable AI plugin |
 | `AI_PROVIDER` | `ollama` | AI provider: `ollama`, `openai`, or `none` |
 | `AI_URL` | `http://localhost:11434` | AI server URL (Ollama) |
-| `AI_MODEL` | `llama2` | AI model name |
+| `AI_MODEL` | `qwen3:14b` | AI model name |
 | `AI_TIMEOUT` | `60000` | AI request timeout (ms) |
 
 ### Optional - Omada Network Controller
@@ -508,7 +528,10 @@ Clients only see the tools they may use: `tools/list` is filtered by the caller'
 | `RUIJIE_PLUGIN_ENABLED` | `false` | Enable the Ruijie router (its `net_` tools take `controller: "ruijie"`) |
 | `RUIJIE_BASE_URL` | - | The router's management address, e.g. `https://192.168.110.1` (use https: over plain http its password can be read on the wire) |
 | `RUIJIE_PASSWORD` | - | The router's admin password (the username is always `admin`). Never retried when refused: wrong passwords lock the router's login |
-| `RUIJIE_STRICT_SSL` | `true` | Validate the router's certificate; `false` accepts its self-signed one (this client only) |
+| `RUIJIE_CERT_SHA256` | - | **Recommended.** The router certificate's SHA-256 fingerprint (colons allowed): exactly that certificate is trusted instead of a CA, and any other ends the connection before the password is sent. Needs an `https://` address; replaces `RUIJIE_STRICT_SSL`. Get it with `openssl s_client -connect <router>:443 </dev/null \| openssl x509 -noout -fingerprint -sha256` |
+| `RUIJIE_STRICT_SSL` | `true` | Validate the router's certificate against the system CAs; `false` accepts any certificate (this client only). Routers ship a self-signed one: prefer `RUIJIE_CERT_SHA256` |
+| `RUIJIE_READ_ONLY` | `false` | `true`: every change through the tools is refused (reads only) |
+| `RUIJIE_FIRMWARE_UPGRADE` | `true` | `false`: firmware is still listed, but `net_upgradeFirmware` is refused |
 | `RUIJIE_TIMEOUT` | `15000` | Request timeout (ms) |
 
 ## Advanced Configuration Examples
@@ -526,7 +549,7 @@ Clients only see the tools they may use: `tools/list` is filtered by the caller'
         "HA_TOKEN": "your_token",
         "AI_PROVIDER": "ollama",
         "AI_URL": "http://ollama.10.0.0.17.nip.io:11434",
-        "AI_MODEL": "llama2"
+        "AI_MODEL": "qwen3:14b"
       }
     }
   }
@@ -639,8 +662,6 @@ docker run -d --name mcp-ha-connect \
 ### Mode 4: Docker Compose
 
 ```yaml
-version: '3.8'
-
 services:
   mcp-ha-connect:
     image: ghcr.io/coffeerunhobby/mcp-ha-connect:latest
@@ -862,7 +883,7 @@ Add host gateway:
 ### AI Analysis Not Working
 
 1. **Verify Ollama is running** - `curl http://your-ollama-url:11434/api/tags`
-2. **Check model is available** - Ensure model is pulled: `ollama pull llama2`
+2. **Check model is available** - Ensure the model in `AI_MODEL` (default `qwen3:14b`) is pulled: `ollama pull qwen3:14b`
 3. **Set AI_PROVIDER** - Must be set to `ollama` (not `none`)
 
 ## Development

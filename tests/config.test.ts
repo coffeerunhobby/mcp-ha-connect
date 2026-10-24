@@ -109,6 +109,21 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, RUIJIE_BASE_URL: 'not a url' })).toThrow('RUIJIE_BASE_URL must be a valid URL');
   });
 
+  it('reads the Ruijie certificate pin (https only) and the change switches: no pin, changes and firmware upgrades on by default', () => {
+    const base = { HA_URL: 'http://ha.test:8123', HA_TOKEN: 't', RUIJIE_BASE_URL: 'https://192.0.2.1' };
+    expect(loadConfig(base)).toMatchObject({ ruijieCertSha256: undefined, ruijieReadOnly: false, ruijieFirmwareUpgrade: true });
+
+    const pin = 'DD:1D' + ':5F'.repeat(30);
+    expect(loadConfig({ ...base, RUIJIE_CERT_SHA256: pin, RUIJIE_READ_ONLY: 'true', RUIJIE_FIRMWARE_UPGRADE: 'false' })).toMatchObject({
+      ruijieCertSha256: 'dd1d' + '5f'.repeat(30),
+      ruijieReadOnly: true,
+      ruijieFirmwareUpgrade: false,
+    });
+    expect(() => loadConfig({ ...base, RUIJIE_CERT_SHA256: 'dd1d' })).toThrow('RUIJIE_CERT_SHA256 must be a SHA-256 fingerprint');
+    expect(() => loadConfig({ ...base, RUIJIE_BASE_URL: 'http://192.0.2.1', RUIJIE_CERT_SHA256: pin })).toThrow('RUIJIE_CERT_SHA256 needs an https:// RUIJIE_BASE_URL');
+    expect(() => loadConfig({ HA_URL: 'http://ha.test:8123', HA_TOKEN: 't', RUIJIE_CERT_SHA256: pin })).toThrow('needs an https://');
+  });
+
   it('should remove trailing slash from baseUrl', () => {
     const env = {
       HA_URL: 'http://homeassistant.10.0.0.19.nip.io:8123/',

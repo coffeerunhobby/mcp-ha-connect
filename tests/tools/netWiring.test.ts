@@ -11,6 +11,7 @@ import { loadConfig } from '../../src/config.js';
 import { OmadaClient } from '../../src/omadaClient/index.js';
 import { registerAllTools } from '../../src/tools/index.js';
 import { defaultFactories } from '../../src/upstreams.js';
+import { RuijieClient as RealRuijieClient } from '../../src/ruijieClient/index.js';
 import type { RuijieClient } from '../../src/ruijieClient/index.js';
 
 const adapter = vi.hoisted(() => ({ options: [] as unknown[] }));
@@ -48,5 +49,16 @@ describe('net_ protection settings', () => {
 
         expect(names.filter((n) => n.startsWith('net_'))).toHaveLength(23);
         expect(names.some((n) => n.startsWith('omada_'))).toBe(false);
+    });
+
+    it('builds the Ruijie client with the pin and the switches from the settings', () => {
+        const env = { HA_URL: 'http://ha.test:8123', HA_TOKEN: 't', RUIJIE_BASE_URL: 'https://192.0.2.1', RUIJIE_PASSWORD: 'pw' };
+        const plain = defaultFactories.ruijie(loadConfig(env));
+        expect(plain).toBeInstanceOf(RealRuijieClient);
+        expect(plain).toMatchObject({ readOnly: false, firmwareUpgrade: true, host: '192.0.2.1' });
+        const pinned = defaultFactories.ruijie(loadConfig({ ...env, RUIJIE_CERT_SHA256: 'ab'.repeat(32), RUIJIE_READ_ONLY: 'true', RUIJIE_FIRMWARE_UPGRADE: 'false' }));
+        expect(pinned).toMatchObject({ readOnly: true, firmwareUpgrade: false });
+        expect((pinned as unknown as { dispatcher: unknown }).dispatcher).toBeDefined();
+        expect((plain as unknown as { dispatcher: unknown }).dispatcher).toBeUndefined();
     });
 });

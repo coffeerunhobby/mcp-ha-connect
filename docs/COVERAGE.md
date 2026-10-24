@@ -1,219 +1,52 @@
 # Test Coverage Report
 
-**Generated:** 2026-01-17
-**Tests:** 692 passed
-**Overall:** 61.14% statements, 54.14% branches, 56.47% functions, 62.52% lines
+**Generated:** 2026-10-24 (v2.5.2, `npm run test:coverage`)
+**Tests:** 1723 passed (91 files; integration tests excluded)
+**Overall:** 87.51% statements, 80.96% branches, 86.77% functions, 87.60% lines
+
+Regenerate with `npm run test:coverage` (per-file detail in `coverage/`). Line coverage is not the quality bar here:
+new code is mutation-checked (each guard changed or removed must fail a test) before release.
 
 ## Summary by Directory
 
 | Directory | Statements | Branches | Functions | Lines |
 |-----------|------------|----------|-----------|-------|
-| src | 85.00% | 93.61% | 78.57% | 86.11% |
-| src/haClient | 76.38% | 76.29% | 68.29% | 76.17% |
-| src/localAI | 100.00% | 100.00% | 100.00% | 100.00% |
-| src/localAI/providers | 100.00% | 83.33% | 100.00% | 100.00% |
-| src/permissions | 100.00% | 86.36% | 100.00% | 100.00% |
-| src/resources | 0.00% | 0.00% | 0.00% | 0.00% |
-| src/server | 93.22% | 82.75% | 100.00% | 93.10% |
-| src/tools | 95.16% | 76.19% | 100.00% | 95.16% |
-| src/tools/ai | 53.84% | 0.00% | 66.66% | 53.84% |
-| src/tools/homeassistant | 27.93% | 0.00% | 43.37% | 31.39% |
-| src/tools/omada | 9.47% | 0.00% | 0.00% | 9.47% |
-| src/tools/utils | 100.00% | 100.00% | 100.00% | 100.00% |
-| src/types | 0.00% | 0.00% | 0.00% | 0.00% |
-| src/types/homeassistant | 83.33% | 100.00% | 75.00% | 83.33% |
-| src/utils | 98.64% | 100.00% | 100.00% | 98.52% |
+| scripts/ci | 72.4% | 57.9% | 70.0% | 72.5% |
+| src | 95.7% | 95.8% | 90.2% | 96.6% |
+| src/haClient | 80.7% | 75.6% | 75.3% | 80.6% |
+| src/localAI | 100.0% | 100.0% | 100.0% | 100.0% |
+| src/localAI/providers | 100.0% | 83.3% | 100.0% | 100.0% |
+| src/net | 86.2% | 87.7% | 100.0% | 95.6% |
+| src/net/adapters | 95.3% | 88.8% | 96.8% | 96.9% |
+| src/omadaClient | 79.3% | 72.6% | 75.7% | 77.4% |
+| src/ownerQuestions | 94.7% | 83.3% | 100.0% | 96.7% |
+| src/permissions | 100.0% | 95.5% | 100.0% | 100.0% |
+| src/resources | 100.0% | 90.0% | 100.0% | 100.0% |
+| src/ruijieClient | 100.0% | 93.3% | 100.0% | 100.0% |
+| src/server | 70.3% | 62.3% | 69.4% | 70.5% |
+| src/tools | 98.9% | 92.5% | 100.0% | 98.9% |
+| src/tools/ai | 100.0% | 100.0% | 100.0% | 100.0% |
+| src/tools/homeassistant | 89.2% | 72.1% | 97.9% | 93.9% |
+| src/tools/infra | 100.0% | 97.6% | 100.0% | 100.0% |
+| src/tools/net | 93.9% | 77.3% | 92.6% | 94.3% |
+| src/tools/omada | 93.2% | 73.4% | 86.8% | 93.1% |
+| src/tools/utils | 100.0% | 100.0% | 100.0% | 100.0% |
+| src/types | — | — | — | — |
+| src/types/ai | — | — | — | — |
+| src/types/homeassistant | 84.6% | — | 80.0% | 84.6% |
+| src/types/omada | — | — | — | — |
+| src/utils | 96.8% | 96.2% | 100.0% | 98.2% |
 
-## Detailed Coverage
+## Files under 60% line coverage (20+ lines)
 
-### src/
+- `src/omadaClient/index.ts` - 19.7%
+- `src/omadaClient/device.ts` - 25.0%
+- `src/omadaClient/client.ts` - 37.2%
+- `src/haClient/devices.ts` - 41.7%
+- `src/server/eventSubscription.ts` - 43.1%
+- `src/omadaClient/network.ts` - 56.6%
+- `src/server/http.ts` - 56.7%
 
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| config.ts | 84.61% | 93.61% | 78.57% | 85.71% | 106-107,116,323 |
-| version.ts | 100.00% | 100.00% | 100.00% | 100.00% | |
+## Integration Tests
 
-### src/haClient/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| automations.ts | 69.64% | 63.15% | 85.71% | 69.64% | 197,206,220-227 |
-| calendars.ts | 90.47% | 83.33% | 100.00% | 90.00% | 86-87 |
-| config.ts | 100.00% | 100.00% | 100.00% | 100.00% | |
-| devices.ts | 41.66% | 21.42% | 41.46% | 41.66% | 337-439,478-643 |
-| entities.ts | 100.00% | 95.23% | 100.00% | 100.00% | 116 |
-| history.ts | 100.00% | 90.00% | 100.00% | 100.00% | 34 |
-| index.ts | 68.29% | 100.00% | 56.66% | 68.29% | 167-230,294-315 |
-| request.ts | 100.00% | 95.65% | 100.00% | 100.00% | 107 |
-| services.ts | 100.00% | 100.00% | 100.00% | 100.00% | |
-| states.ts | 100.00% | 100.00% | 100.00% | 100.00% | |
-| updates.ts | 100.00% | 78.57% | 100.00% | 100.00% | 36,42 |
-
-### src/localAI/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| index.ts | 100.00% | 100.00% | 100.00% | 100.00% | |
-| prompts.ts | 100.00% | 100.00% | 100.00% | 100.00% | |
-
-### src/localAI/providers/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| base.ts | 100.00% | 87.50% | 100.00% | 100.00% | 90 |
-| ollama.ts | 100.00% | 75.00% | 100.00% | 100.00% | 61 |
-| openai.ts | 100.00% | 83.33% | 100.00% | 100.00% | 69 |
-
-### src/permissions/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| index.ts | 100.00% | 86.36% | 100.00% | 100.00% | 46,51,61 |
-
-### src/resources/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| index.ts | 0.00% | 0.00% | 0.00% | 0.00% | 16-213 |
-
-### src/server/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| auth.ts | 91.11% | 81.48% | 100.00% | 90.90% | 126-129 |
-| common.ts | 100.00% | 100.00% | 100.00% | 100.00% | |
-| stdio.ts | 100.00% | 100.00% | 100.00% | 100.00% | |
-
-### src/tools/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| common.ts | 98.00% | 76.47% | 100.00% | 98.00% | 39 |
-| index.ts | 83.33% | 75.00% | 100.00% | 83.33% | 40-41 |
-
-### src/tools/ai/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| analyzeSensors.ts | 14.28% | 0.00% | 50.00% | 14.28% | 20-30 |
-| index.ts | 100.00% | 100.00% | 100.00% | 100.00% | |
-
-### src/tools/homeassistant/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| automationControls.ts | 33.33% | 100.00% | 50.00% | 33.33% | 35,48-49,62-63 |
-| calendar.ts | 10.00% | 0.00% | 25.00% | 10.52% | 20-21,45-85 |
-| callService.ts | 20.00% | 0.00% | 50.00% | 20.00% | 18-22 |
-| controlClimate.ts | 6.66% | 0.00% | 50.00% | 6.66% | 20-62 |
-| controlCover.ts | 11.11% | 0.00% | 50.00% | 11.11% | 20-42 |
-| controlFan.ts | 6.66% | 0.00% | 50.00% | 8.33% | 20-38 |
-| controlLight.ts | 8.33% | 0.00% | 50.00% | 12.50% | 20-32 |
-| controlMediaPlayer.ts | 11.11% | 0.00% | 50.00% | 11.11% | 20-44 |
-| createAutomation.ts | 20.00% | 0.00% | 50.00% | 20.00% | 21-32 |
-| deleteAutomation.ts | 33.33% | 100.00% | 50.00% | 33.33% | 20-21 |
-| entityAction.ts | 16.66% | 0.00% | 50.00% | 16.66% | 20-29 |
-| getAllSensors.ts | 33.33% | 100.00% | 50.00% | 33.33% | 17-18 |
-| getAutomationTrace.ts | 33.33% | 0.00% | 50.00% | 33.33% | 20-21 |
-| getDomainSummary.ts | 33.33% | 100.00% | 50.00% | 33.33% | 17-18 |
-| getEntitiesByDomain.ts | 33.33% | 100.00% | 50.00% | 33.33% | 17-18 |
-| getHistory.ts | 33.33% | 0.00% | 50.00% | 33.33% | 20-21 |
-| getState.ts | 20.00% | 0.00% | 50.00% | 20.00% | 17-21 |
-| getStates.ts | 33.33% | 100.00% | 50.00% | 33.33% | 17-18 |
-| getVersion.ts | 33.33% | 100.00% | 50.00% | 33.33% | 17-18 |
-| index.ts | 100.00% | 100.00% | 100.00% | 100.00% | |
-| listAutomations.ts | 16.66% | 0.00% | 33.33% | 20.00% | 20-24 |
-| listEntities.ts | 33.33% | 100.00% | 50.00% | 33.33% | 20-21 |
-| listPersons.ts | 11.11% | 0.00% | 20.00% | 16.66% | 26-38 |
-| sceneAndScript.ts | 33.33% | 100.00% | 50.00% | 33.33% | 21-26,39-45 |
-| searchEntities.ts | 33.33% | 100.00% | 50.00% | 33.33% | 19-20 |
-| sendNotification.ts | 2.94% | 0.00% | 25.00% | 4.16% | 89-106,128-172 |
-| systemTools.ts | 33.33% | 0.00% | 50.00% | 33.33% | 20-21,34-35,48-49 |
-| triggerAutomation.ts | 33.33% | 100.00% | 50.00% | 33.33% | 20-21 |
-
-### src/tools/omada/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| disableClientRateLimit.ts | 0.00% | 100.00% | 0.00% | 0.00% | 7-18 |
-| getClient.ts | 0.00% | 100.00% | 0.00% | 0.00% | 7-13 |
-| getDevice.ts | 0.00% | 100.00% | 0.00% | 0.00% | 7-13 |
-| getFirewallSetting.ts | 0.00% | 100.00% | 0.00% | 0.00% | 7-13 |
-| getInternetInfo.ts | 0.00% | 100.00% | 0.00% | 0.00% | 7-13 |
-| getLanNetworkList.ts | 0.00% | 100.00% | 0.00% | 0.00% | 7-13 |
-| getLanProfileList.ts | 0.00% | 100.00% | 0.00% | 0.00% | 7-13 |
-| getPortForwardingStatus.ts | 33.33% | 0.00% | 0.00% | 33.33% | 15-21 |
-| getRateLimitProfiles.ts | 0.00% | 100.00% | 0.00% | 0.00% | 7-13 |
-| getSsidDetail.ts | 33.33% | 100.00% | 0.00% | 33.33% | 14-20 |
-| getSsidList.ts | 33.33% | 100.00% | 0.00% | 33.33% | 13-19 |
-| getSwitchStackDetail.ts | 0.00% | 100.00% | 0.00% | 0.00% | 7-13 |
-| getThreatList.ts | 25.00% | 100.00% | 0.00% | 25.00% | 20-39 |
-| getWlanGroupList.ts | 0.00% | 100.00% | 0.00% | 0.00% | 7-13 |
-| index.ts | 0.00% | 100.00% | 0.00% | 0.00% | 35-81 |
-| listClients.ts | 0.00% | 100.00% | 0.00% | 0.00% | 7-13 |
-| listClientsActivity.ts | 33.33% | 100.00% | 0.00% | 33.33% | 14-20 |
-| listClientsPastConnections.ts | 33.33% | 100.00% | 0.00% | 33.33% | 22-28 |
-| listDevices.ts | 0.00% | 100.00% | 0.00% | 0.00% | 7-13 |
-| listDevicesStats.ts | 33.33% | 100.00% | 0.00% | 33.33% | 19-25 |
-| listMostActiveClients.ts | 0.00% | 100.00% | 0.00% | 0.00% | 7-13 |
-| listSites.ts | 33.33% | 100.00% | 0.00% | 33.33% | 10-16 |
-| searchDevices.ts | 33.33% | 100.00% | 0.00% | 33.33% | 12-18 |
-| setClientRateLimit.ts | 0.00% | 100.00% | 0.00% | 0.00% | 8-21 |
-| setClientRateLimitProfile.ts | 0.00% | 100.00% | 0.00% | 0.00% | 8-20 |
-
-### src/tools/utils/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| pagination-schema.ts | 100.00% | 100.00% | 100.00% | 100.00% | |
-
-### src/types/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| index.ts | 0.00% | 0.00% | 0.00% | 0.00% | |
-
-### src/types/ai/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| index.ts | 0.00% | 0.00% | 0.00% | 0.00% | |
-
-### src/types/homeassistant/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| errors.ts | 83.33% | 100.00% | 75.00% | 83.33% | 30-31 |
-| index.ts | 0.00% | 0.00% | 0.00% | 0.00% | |
-
-### src/types/omada/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| index.ts | 0.00% | 0.00% | 0.00% | 0.00% | |
-
-### src/utils/
-
-| File | Statements | Branches | Functions | Lines | Uncovered |
-|------|------------|----------|-----------|-------|-----------|
-| validations.ts | 100.00% | 100.00% | 100.00% | 100.00% | |
-| jwt.ts | 95.45% | 100.00% | 100.00% | 95.45% | 52 |
-| logger.ts | 100.00% | 100.00% | 100.00% | 100.00% | |
-
-## Coverage Gaps
-
-### High Priority (0% coverage)
-- `src/resources/index.ts` - MCP resources
-- `src/tools/omada/` - Most Omada tools (unit tests needed)
-- `src/types/` - Type re-exports (low priority)
-
-### Medium Priority (<50% coverage)
-- `src/haClient/devices.ts` - 41.66%
-- `src/tools/homeassistant/` - Most tools 6-33%
-- `src/tools/ai/analyzeSensors.ts` - 14.28%
-
-### Integration Tests
-- HomeAssistant: 21 tests
-- Omada: 19 tests
-- AI: 4 tests
-- **Total integration: 44 tests**
+`tests/integration/` (needs a live `.env`; `npm run test:integration`) is not counted above.

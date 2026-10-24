@@ -23,7 +23,7 @@ const OFFERED = 'ReyeeOS 2.430.1.2128;EG_3.0(1)B11P430,Release(13212809)';
 const CURRENT = 'ReyeeOS 2.324.0.1521;EG_3.0(1)B11P324,Release(12152110)';
 const URL_TAR = ((VERSION.new as Raw).firmwareList as Raw[])[0].downloadUrlTar as string;
 
-function controller(over: { version?: Raw; upgrade?: () => unknown } = {}) {
+function controller(over: { version?: Raw; upgrade?: () => unknown; readOnly?: boolean; firmwareUpgrade?: boolean } = {}) {
     const state = { version: over.version ?? structuredClone(VERSION) };
     const calls: Array<[string, unknown]> = [];
     const answers: Record<string, Raw> = {
@@ -34,6 +34,8 @@ function controller(over: { version?: Raw; upgrade?: () => unknown } = {}) {
     };
     const client = {
         host: '192.168.110.1',
+        ...(over.readOnly !== undefined ? { readOnly: over.readOnly } : {}),
+        ...(over.firmwareUpgrade !== undefined ? { firmwareUpgrade: over.firmwareUpgrade } : {}),
         config: async (module: string) => answers[`devConfig.get ${module}`],
         status: async (module: string) => answers[`devSta.get ${module}`],
         system: async (method: string, params?: unknown) => {
@@ -231,5 +233,34 @@ describe('upgrading the firmware', () => {
         expect(await code(net.apply(plan))).toBe('LOCKOUT');
         await net.apply(plan, { allowLockout: true });
         expect(upgrades(calls)).toHaveLength(1);
+    });
+});
+
+describe('switching changes off on this server (2.5.2)', () => {
+    it('RUIJIE_FIRMWARE_UPGRADE=false: firmware still listed, not upgradable, the upgrade refused before anything is read or sent', async () => {
+        const { net, calls } = controller({ firmwareUpgrade: false });
+        expect((await net.listFirmware())[0]).toMatchObject({ available: { version: OFFERED }, upgradable: false });
+        expect((await net.capabilities()).firmware).toBe('unsupported');
+        calls.length = 0;
+        await expect(net.plan(upgrade)).rejects.toMatchObject({ code: 'UNSUPPORTED', message: 'Firmware upgrades on the Ruijie router are switched off on this server (RUIJIE_FIRMWARE_UPGRADE=false)', details: { capability: 'firmware' } });
+        expect(calls).toEqual([]);
+    });
+
+    it('RUIJIE_READ_ONLY=true: every change refused, firmware included, reads unchanged', async () => {
+        const { net, calls } = controller({ readOnly: true });
+        expect((await net.listFirmware())[0].upgradable).toBe(false);
+        expect((await net.capabilities()).firmware).toBe('unsupported');
+        calls.length = 0;
+        for (const change of [upgrade, { op: 'delete', kind: 'reservation', mac: '02:00:00:00:00:03' } as Change]) {
+            await expect(net.plan(change)).rejects.toMatchObject({ code: 'UNSUPPORTED', message: 'Changes to the Ruijie router are switched off on this server (RUIJIE_READ_ONLY=true)', details: { capability: change.kind } });
+        }
+        expect(calls).toEqual([]);
+        expect(await net.listNetworks()).not.toEqual([]);
+    });
+
+    it('both on (the defaults): upgradable as before', async () => {
+        const { net } = controller({ readOnly: false, firmwareUpgrade: true });
+        expect((await net.listFirmware())[0].upgradable).toBe(true);
+        expect(await code(net.plan(upgrade))).toBe('ok');
     });
 });
