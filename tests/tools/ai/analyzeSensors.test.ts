@@ -63,35 +63,6 @@ describe('AI analyzeSensors Tool Handler', () => {
         expect.any(Function)
       );
     });
-
-    it('should register with optional AI client', () => {
-      registerAnalyzeSensorsTool(server, undefined);
-
-      expect(server.registerTool).toHaveBeenCalledWith(
-        'analyzeSensors',
-        expect.objectContaining({
-          description: expect.any(String),
-        }),
-        expect.any(Function)
-      );
-    });
-  });
-
-  describe('AI Client Not Configured', () => {
-    it('should return error when AI client is not provided', async () => {
-      registerAnalyzeSensorsTool(server, undefined);
-      const handler = server.handlers.get('analyzeSensors')!.handler;
-
-      const sensorData = {
-        'sensor.temperature': { state: '25', unit: '°C' },
-      };
-
-      const result = await handler({ sensors: sensorData }, mockExtra);
-      const parsed = parseResult(result) as { error: string; message: string };
-
-      expect(parsed.error).toBe('AI client not configured');
-      expect(parsed.message).toContain('AI_URL');
-    });
   });
 
   describe('Input Validation', () => {

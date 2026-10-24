@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/server';
 import { registerAllTools } from '../../src/tools/index.js';
+import type { LocalAIClient } from '../../src/localAI/index.js';
 
 // Mock HaClient
 const mockClient = {
@@ -57,6 +58,16 @@ describe('Tool Registration', () => {
 
     it('should work with optional aiClient', () => {
       expect(() => registerAllTools({ server, haClient: mockClient as any, aiClient: undefined })).not.toThrow();
+    });
+
+    it('registers analyzeSensors only when there is an AI client (AI_PLUGIN_ENABLED=false or AI_PROVIDER=none leaves none)', () => {
+      const names = (aiClient?: LocalAIClient) => {
+        const registered: string[] = [];
+        registerAllTools({ server: { registerTool: vi.fn((name: string) => registered.push(name)) } as unknown as McpServer, haClient: mockClient as any, aiClient });
+        return registered;
+      };
+      expect(names()).not.toContain('analyzeSensors');
+      expect(names({ analyzeSensors: vi.fn() } as unknown as LocalAIClient)).toContain('analyzeSensors');
     });
 
     it('should work without haClient (Omada-only mode)', () => {

@@ -65,7 +65,7 @@ export function registerAllTools(options: RegisterToolsOptions): void {
   // Vendor-neutral net_* tools, through every configured adapter (same in eager and graph mode).
   totalTools += registerNetTools(server, netControllers);
 
-  // AI tools (always register, but may be disabled if no aiClient)
+  // AI tools (only with an AI client)
   const aiToolCount = registerAITools(server, aiClient);
   totalTools += aiToolCount;
 

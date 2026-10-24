@@ -319,6 +319,8 @@ the router's login: the Ruijie tools then refuse until the setting is fixed and 
 
 ### AI Tools (1)
 
+Registered only with `AI_PLUGIN_ENABLED=true` and an `AI_PROVIDER` other than `none`.
+
 | Tool | Description |
 |------|-------------|
 | `analyzeSensors` | Analyze sensor data using AI (Ollama) to detect issues and provide recommendations |
@@ -370,7 +372,7 @@ the router's login: the Ruijie tools then refuse until the setting is fixed and 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HA_PLUGIN_ENABLED` | `true` | Enable Home Assistant plugin |
+| `HA_PLUGIN_ENABLED` | `false` | Enable Home Assistant plugin |
 | `HA_STRICT_SSL` | `true` | Validate SSL certificates |
 | `HA_TIMEOUT` | `30000` | API request timeout (ms) |
 
@@ -501,7 +503,7 @@ Clients only see the tools they may use: `tools/list` is filtered by the caller'
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AI_PLUGIN_ENABLED` | `true` | Enable AI plugin |
+| `AI_PLUGIN_ENABLED` | `false` | Enable AI plugin (`analyzeSensors` is registered only when it is on and `AI_PROVIDER` isn't `none`) |
 | `AI_PROVIDER` | `ollama` | AI provider: `ollama`, `openai`, or `none` |
 | `AI_URL` | `http://localhost:11434` | AI server URL (Ollama) |
 | `AI_MODEL` | `qwen3:14b` | AI model name |
@@ -884,7 +886,7 @@ Add host gateway:
 
 1. **Verify Ollama is running** - `curl http://your-ollama-url:11434/api/tags`
 2. **Check model is available** - Ensure the model in `AI_MODEL` (default `qwen3:14b`) is pulled: `ollama pull qwen3:14b`
-3. **Set AI_PROVIDER** - Must be set to `ollama` (not `none`)
+3. **Set AI_PLUGIN_ENABLED and AI_PROVIDER** - `AI_PLUGIN_ENABLED=true` and `AI_PROVIDER=ollama` (not `none`); otherwise `analyzeSensors` isn't registered at all
 
 ## Development
 
