@@ -378,7 +378,8 @@ the router's login: the Ruijie tools then refuse until the setting is fixed and 
 ### Optional - Chat face (OpenAPI/REST surface)
 
 The server also serves an OpenAPI/REST face (`/openapi.json` + `/api/*`) for chat UIs
-like Open WebUI. By default it exposes the classic 8 Home Assistant tools. Tools marked
+like Open WebUI. `/openapi.json` needs no token, so it is served on the LAN only: a request that came through
+Cloudflare (it carries `CF-Connecting-IP` or `CF-Ray`) gets a 404, so point the chat UI at the server's LAN address. By default it exposes the classic 8 Home Assistant tools. Tools marked
 chat-eligible in code can be activated per category with read/write granularity:
 
 | Variable | Default | Description |

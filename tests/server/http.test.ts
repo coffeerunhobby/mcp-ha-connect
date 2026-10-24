@@ -13,7 +13,9 @@ import {
   addRestApiCors,
   isRestApiCorsPath,
   isStatelessMcpGet,
+  handleOpenApiRequest,
 } from '../../src/server/http.js';
+import { LEGACY_BINDINGS } from '../../src/server/chatFace.js';
 
 // Mock dependencies
 vi.mock('node:http');
@@ -556,6 +558,37 @@ describe('HTTP Server', () => {
 
     it('does not reject an undefined method (let the transport answer it)', () => {
       expect(isStatelessMcpGet(false, undefined)).toBe(false);
+    });
+  });
+
+  describe('/openapi.json on the LAN only', () => {
+    const request = (headers: Record<string, string>) => ({ headers, method: 'GET' }) as unknown as IncomingMessage;
+    const response = () => {
+      const res = { statusCode: 0, body: '', setHeader: vi.fn(), end: vi.fn((b: string) => { res.body = b; }) };
+      return res;
+    };
+
+    it('serves the spec on the LAN, with the host it was asked by', () => {
+      const res = response();
+      handleOpenApiRequest(request({ host: '192.168.0.18:3000' }), res as unknown as ServerResponse, '0.0.0.0:3000', LEGACY_BINDINGS);
+      expect(res.statusCode).toBe(200);
+      const spec = JSON.parse(res.body) as { info: { version: string }; servers: Array<{ url: string }> };
+      expect(spec.info.version).toBe(VERSION);
+      expect(spec.servers[0].url).toBe('http://192.168.0.18:3000');
+
+      const bare = response();
+      handleOpenApiRequest(request({}), bare as unknown as ServerResponse, '0.0.0.0:3000', LEGACY_BINDINGS);
+      expect((JSON.parse(bare.body) as { servers: Array<{ url: string }> }).servers[0].url).toBe('http://0.0.0.0:3000');
+    });
+
+    it('answers a request Cloudflare forwarded with a plain 404, no version and no tools', () => {
+      for (const headers of [{ 'cf-connecting-ip': '198.51.100.7' }, { 'cf-ray': '8f0000000000-OTP' }, { 'cf-connecting-ip': '198.51.100.7', 'cf-ray': 'x', 'x-forwarded-proto': 'https' }]) {
+        const res = response();
+        handleOpenApiRequest(request({ host: 'mcp.example.com', ...headers }), res as unknown as ServerResponse, '0.0.0.0:3000', LEGACY_BINDINGS);
+        expect(res.statusCode).toBe(404);
+        expect(JSON.parse(res.body)).toEqual({ error: 'Not found' });
+        expect(res.setHeader).not.toHaveBeenCalledWith('Access-Control-Allow-Origin', expect.anything());
+      }
     });
   });
 });

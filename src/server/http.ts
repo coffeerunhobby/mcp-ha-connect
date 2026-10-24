@@ -262,6 +262,30 @@ export function resolveForwardedProto(headerValue: string | string[] | undefined
   return proto === 'https' ? 'https' : 'http';
 }
 
+/** Whether Cloudflare forwarded the request (it adds these to every request it passes on). */
+export function isTunnelledRequest(req: IncomingMessage): boolean {
+  return req.headers['cf-connecting-ip'] !== undefined || req.headers['cf-ray'] !== undefined;
+}
+
+/**
+ * `/openapi.json` is unauthenticated (Open WebUI fetches it on the LAN), so it is served on
+ * the LAN only: through the public Cloudflare hostname it would hand anyone the version and
+ * the chat-face tool map. A tunnelled request gets a plain 404, as for an unknown path.
+ */
+export function handleOpenApiRequest(req: IncomingMessage, res: ServerResponse, fallbackHost: string, bindings: ChatBinding[]): void {
+  if (isTunnelledRequest(req)) {
+    sendJson(res, 404, { error: 'Not found' });
+    return;
+  }
+  addRestApiCors(req, res);
+  // Honor X-Forwarded-Proto (set by reverse proxies) so the advertised server URL is https
+  // when the endpoint is TLS-terminated upstream. Without this, an https Open WebUI page is
+  // handed an http:// server URL and the browser blocks tool calls as mixed content
+  // ("NetworkError when attempting to fetch resource").
+  const scheme = resolveForwardedProto(req.headers['x-forwarded-proto']);
+  sendJson(res, 200, buildOpenApiSpec(`${scheme}://${req.headers.host ?? fallbackHost}`, bindings));
+}
+
 /**
  * Generate OpenAPI spec for Open WebUI compatibility (legacy entry point).
  *
@@ -467,14 +491,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
 
       // OpenAPI spec endpoint for Open WebUI compatibility
       if (req.method === 'GET' && url === '/openapi.json') {
-        addRestApiCors(req, res);
-        // Honor X-Forwarded-Proto (set by Cloudflare / reverse proxies) so the advertised
-        // server URL is https when the public endpoint is TLS-terminated upstream. Without
-        // this, an https Open WebUI page is handed an http:// server URL and the browser
-        // blocks tool calls as mixed content ("NetworkError when attempting to fetch resource").
-        const scheme = resolveForwardedProto(req.headers['x-forwarded-proto']);
-        const baseUrl = `${scheme}://${req.headers.host ?? `${bindAddr}:${port}`}`;
-        sendJson(res, 200, buildOpenApiSpec(baseUrl, chatBindings));
+        handleOpenApiRequest(req, res, `${bindAddr}:${port}`, chatBindings);
         return;
       }
 
