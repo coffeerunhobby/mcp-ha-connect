@@ -7,11 +7,14 @@
 
 import { readFileSync } from 'node:fs';
 
-import { describe, it, expect } from 'vitest';
+import type { McpServer } from '@modelcontextprotocol/server';
+import { describe, it, expect, vi } from 'vitest';
 
 import { RuijieNetworkController, isRuijieDownload, toOffer } from '../../src/net/adapters/ruijie.js';
 import { NetError, type Change, type Plan } from '../../src/net/model.js';
+import { Permission } from '../../src/permissions/index.js';
 import { RuijieError, type RuijieClient } from '../../src/ruijieClient/index.js';
+import { registerNetTools } from '../../src/tools/net/index.js';
 
 type Raw = Record<string, unknown>;
 const fixture = (name: string): Raw => (JSON.parse(readFileSync(new URL(`./fixtures/ruijie/${name}.json`, import.meta.url), 'utf8')) as { data: Raw }).data;
@@ -150,13 +153,14 @@ describe('upgrading the firmware', () => {
         expect(upgrades(other.calls)).toEqual([]);
     });
 
-    it('takes a router that stops answering right after the request as restarting, and passes other refusals on', async () => {
-        const restarting = controller({ upgrade: () => Promise.reject(new RuijieError('The Ruijie router is not reachable', 'unreachable')) });
-        expect(await restarting.net.apply(await restarting.net.plan(upgrade), { allowLockout: true })).toEqual({
-            applied: true,
-            owned: [],
-            warnings: ['The router stopped answering right after the upgrade was sent, as it does when it restarts into it; check net_listFirmware in about five minutes.'],
-        });
+    it('never reports an unanswered upgrade as done: unknown when it may have arrived, a plain failure when it was not sent', async () => {
+        const unanswered = controller({ upgrade: () => Promise.reject(new RuijieError('The Ruijie router timed out', 'unreachable')) });
+        await expect(unanswered.net.apply(await unanswered.net.plan(upgrade), { allowLockout: true })).rejects.toThrow(
+            'The router stopped answering while the upgrade request was being sent: it may be restarting into the upgrade, or the request may not have arrived. Check net_listFirmware in about five minutes before trying again.'
+        );
+
+        const notSent = controller({ upgrade: () => Promise.reject(new RuijieError('The Ruijie router is not reachable', 'unreachable', true)) });
+        await expect(notSent.net.apply(await notSent.net.plan(upgrade), { allowLockout: true })).rejects.toThrow(/^The Ruijie router is not reachable$/);
 
         const refused = controller({ upgrade: () => Promise.reject(new RuijieError('The Ruijie router refused system upgradeConfirm (code 5)')) });
         await expect(refused.net.apply(await refused.net.plan(upgrade), { allowLockout: true })).rejects.toThrow('refused system upgradeConfirm');
@@ -178,6 +182,42 @@ describe('upgrading the firmware', () => {
         expect(await code(net.apply({ change: { op: 'delete', kind: 'reservation', mac: 'x' } } as Plan))).toBe('UNSUPPORTED');
         expect(upgrades(calls)).toEqual([]);
         expect(elsewhere.calls.filter(([m]) => m === 'upgradeConfirm')).toEqual([]);
+    });
+
+    it('names the router in the basis: another router behind the same address is a CONFLICT, one without a MAC is refused', async () => {
+        const swapped = controller();
+        const plan = await swapped.net.plan(upgrade);
+        const info = swapped.answers['devSta.get sysinfo'];
+        info.sys_mac = '02:00:00:00:00:99';
+        expect(await code(swapped.net.apply(plan, { allowLockout: true }))).toBe('CONFLICT');
+        expect(upgrades(swapped.calls)).toEqual([]);
+
+        delete info.sys_mac;
+        await expect(swapped.net.plan(upgrade)).rejects.toMatchObject({ code: 'INVALID', message: expect.stringContaining("doesn't report its MAC address") });
+    });
+
+    it('always needs allowLockout and the basis, even when no device is seen on the LAN', async () => {
+        const nobody = controller();
+        (nobody.answers['devSta.get arp'].arpList as Raw[]).length = 0;
+        const plan = await nobody.net.plan(upgrade);
+        expect(plan.wouldLockOut).toEqual([]);
+        await expect(nobody.net.apply(plan)).rejects.toMatchObject({ code: 'LOCKOUT', message: "The upgrade would make the router unreachable while it restarts. Nothing was changed; repeat with allowLockout and the dry run's basis if that is intended." });
+
+        const handlers = new Map<string, (args: unknown, extra: unknown) => Promise<{ content: { text: string }[]; isError?: boolean }>>();
+        registerNetTools({ registerTool: vi.fn((name: string, _c: unknown, h: never) => handlers.set(name, h)) } as unknown as McpServer, nobody.net);
+        const tool = (args: Raw) => handlers.get('net_upgradeFirmware')!(args, { sessionId: 's', http: { authInfo: { extra: { permissions: Permission.ADMIN } } } });
+
+        for (const args of [{}, { allowLockout: true }, { basis: plan.basis }]) {
+            const answer = await tool(args);
+            expect(answer.isError).toBe(true);
+            expect(answer.content[0].text).toContain('run it with dryRun first');
+        }
+        expect(upgrades(nobody.calls)).toEqual([]);
+
+        const dry = JSON.parse((await tool({ dryRun: true })).content[0].text) as { basis: string };
+        expect(dry.basis).toBe(plan.basis);
+        expect((await tool({ allowLockout: true, basis: dry.basis })).isError).toBeFalsy();
+        expect(upgrades(nobody.calls)).toHaveLength(1);
     });
 
     it('leaves out the size when the router doesn\'t give it, and keeps working after a refused apply', async () => {

@@ -447,6 +447,8 @@ export class RuijieNetworkController implements NetworkController {
     async plan(change: Change): Promise<Plan> {
         if (change.kind !== 'firmware') throw new NetError('UNSUPPORTED', READ_ONLY, { capability: change.kind });
         const { info, mac } = await this.router(change.device);
+        // The basis names the router; without its MAC a dry run could vouch for another one.
+        if (mac === 'unknown') throw new NetError('INVALID', "The router doesn't report its MAC address, so it can't be told which router a dry run was for; not upgraded");
         const offer = await this.offer();
         if (!offer.version) throw new NetError('INVALID', `The router already runs the newest firmware it is offered (${offer.current || 'unknown'})`);
         if (!isRuijieDownload(offer.url)) {
@@ -468,7 +470,7 @@ export class RuijieNetworkController implements NetworkController {
             ],
             wouldLockOut: clients,
             basis: createHash('sha256')
-                .update(JSON.stringify({ change, current: offer.current, version: offer.version, url, md5: offer.md5 ?? null, lockOut: clients.map((c) => c.mac).sort() }))
+                .update(JSON.stringify({ change, controller: this.id, router: mac, current: offer.current, version: offer.version, url, md5: offer.md5 ?? null, lockOut: clients.map((c) => c.mac).sort() }))
                 .digest('hex')
                 .slice(0, 16),
         };
@@ -476,9 +478,12 @@ export class RuijieNetworkController implements NetworkController {
             try {
                 await this.client.system('upgradeConfirm', { path: url, isPersist: true });
             } catch (error) {
-                // The router may go down while answering: it is restarting into the upgrade.
-                if (error instanceof RuijieError && error.kind === 'unreachable') {
-                    return { applied: true, owned: [], warnings: ['The router stopped answering right after the upgrade was sent, as it does when it restarts into it; check net_listFirmware in about five minutes.'] };
+                // Sent but unanswered: it may be restarting into the upgrade, or the request may not have arrived.
+                if (error instanceof RuijieError && error.kind === 'unreachable' && !error.notSent) {
+                    throw new RuijieError(
+                        'The router stopped answering while the upgrade request was being sent: it may be restarting into the upgrade, or the request may not have arrived. Check net_listFirmware in about five minutes before trying again.',
+                        'unreachable'
+                    );
                 }
                 throw error;
             }
@@ -497,8 +502,10 @@ export class RuijieNetworkController implements NetworkController {
             // Planned again right before writing: anything changed since is a CONFLICT.
             const fresh = await this.plan(plan.change);
             if (fresh.basis !== plan.basis) throw new NetError('CONFLICT', 'The router changed after this change was planned; nothing was written. Plan it again.');
-            if (fresh.wouldLockOut.length > 0 && !options.allowLockout) {
-                throw new NetError('LOCKOUT', `This would cut off ${fresh.wouldLockOut.length} online device(s) while the router restarts. Nothing was changed; repeat with allowLockout if that is intended.`, {
+            // The router restarts whoever is online, so an upgrade always needs allowLockout (and so the dry run's basis).
+            if (!options.allowLockout) {
+                const who = fresh.wouldLockOut.length ? `cut off ${fresh.wouldLockOut.length} online device(s) and ` : '';
+                throw new NetError('LOCKOUT', `The upgrade would ${who}make the router unreachable while it restarts. Nothing was changed; repeat with allowLockout and the dry run's basis if that is intended.`, {
                     clients: fresh.wouldLockOut,
                 });
             }

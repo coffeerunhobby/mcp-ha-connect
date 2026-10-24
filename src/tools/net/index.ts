@@ -713,7 +713,13 @@ function registerFirmwareTools(server: McpServer, controller: NetworkController)
         },
         wrapToolHandler(
             'net_upgradeFirmware',
-            async (a: z.infer<typeof upgradeFirmwareSchema>) => toToolResult(await run(controller, { op: 'upgrade', kind: 'firmware', ...(a.device ? { device: toSwitch(a.device) } : {}) }, a)),
+            async (a: z.infer<typeof upgradeFirmwareSchema>) => {
+                // A restart cuts everyone off, even when no device is seen online: always the dry run first.
+                if (!a.dryRun && (!a.allowLockout || !a.basis)) {
+                    throw new NetError('INVALID', "An upgrade restarts the device: run it with dryRun first, then apply with allowLockout and the dry run's basis.");
+                }
+                return toToolResult(await run(controller, { op: 'upgrade', kind: 'firmware', ...(a.device ? { device: toSwitch(a.device) } : {}) }, a));
+            },
             Permission.ADMIN
         )
     );

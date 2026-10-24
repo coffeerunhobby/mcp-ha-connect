@@ -146,6 +146,44 @@ describe('RuijieClient', () => {
         expect(await c.config('network')).toEqual({ ok: true });
     });
 
+    it('tells a request that certainly never reached the router from one that may have', async () => {
+        const failing = (error: unknown) => {
+            vi.restoreAllMocks();
+            vi.spyOn(globalThis, 'fetch').mockRejectedValue(error);
+        };
+        const outcome = async (p: Promise<unknown>) => p.then(() => 'ok', (e) => (e instanceof RuijieError ? `${e.kind} ${e.notSent}` : String(e)));
+
+        for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EHOSTUNREACH', 'UND_ERR_CONNECT_TIMEOUT', 'CERT_HAS_EXPIRED', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'ERR_TLS_CERT_ALTNAME_INVALID']) {
+            vi.restoreAllMocks();
+            router();
+            const c = client();
+            await c.config('network');
+            failing(new TypeError('fetch failed', { cause: Object.assign(new Error('x'), { code }) }));
+            expect(await outcome(c.config('network'))).toBe('unreachable true');
+        }
+        for (const error of [new TypeError('fetch failed', { cause: Object.assign(new Error('x'), { code: 'ECONNRESET' }) }), new TypeError('fetch failed'), Object.assign(new Error('t'), { name: 'TimeoutError' })]) {
+            // logged in first, so only the call itself fails
+            vi.restoreAllMocks();
+            router();
+            const c = client();
+            await c.config('network');
+            failing(error);
+            expect(await outcome(c.config('network'))).toBe('unreachable false');
+        }
+
+        // The session was refused (code 2) and logging in again failed: the request was never accepted.
+        vi.restoreAllMocks();
+        let logins = 0;
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+            if (String(input).endsWith('/api/auth')) {
+                if (logins++ > 0) throw new TypeError('fetch failed');
+                return new Response(JSON.stringify({ code: 0, data: { sid: SID, sn: 'SN1' } }), { headers: { 'set-cookie': 'SN1=c; path=/' } });
+            }
+            return new Response(JSON.stringify({ code: 2, msg: '403 Forbidden, auth is not passed' }));
+        });
+        expect(await outcome(client().system('upgradeConfirm', { path: 'u', isPersist: true }))).toBe('unreachable true');
+    });
+
     it('reports a timeout as such', async () => {
         vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }));
         expect(await message(client().config('network'))).toBe('The Ruijie router is timed out');

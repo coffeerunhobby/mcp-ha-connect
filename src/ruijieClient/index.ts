@@ -39,11 +39,21 @@ export interface RuijieClientConfig {
 export class RuijieError extends Error {
     constructor(
         message: string,
-        readonly kind: 'refused' | 'unreachable' | 'router' | 'unknownModule' | 'disabled' = 'router'
+        readonly kind: 'refused' | 'unreachable' | 'router' | 'unknownModule' | 'disabled' = 'router',
+        /** For an unreachable router: true when the request certainly never reached it (no connection, or no session). */
+        readonly notSent = false
     ) {
         super(message);
         this.name = 'RuijieError';
     }
+}
+
+/** Connection failures that happen before a request is sent: refused, no route, no name, TLS rejected. */
+const NOT_SENT = /^(ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|UND_ERR_CONNECT_TIMEOUT|ERR_TLS_|ERR_SSL_|CERT_|UNABLE_TO_|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN)/;
+
+function failedBeforeSending(error: unknown): boolean {
+    const cause = error instanceof Error ? (error.cause as { code?: unknown } | undefined) : undefined;
+    return typeof cause?.code === 'string' && NOT_SENT.test(cause.code);
 }
 
 interface Session {
@@ -120,7 +130,14 @@ export class RuijieClient {
     /** One call with the session; a session the router no longer accepts is renewed once. */
     private async request<T>(endpoint: 'cmd' | 'system', payload: Record<string, unknown>, label: string, isChange: boolean): Promise<T> {
         for (let attempt = 0; ; attempt++) {
-            const session = await this.ensureSession();
+            let session: Session;
+            try {
+                session = await this.ensureSession();
+            } catch (error) {
+                // No session, so this request was never sent (after a code 2 the router refused the first try).
+                if (error instanceof RuijieError && error.kind === 'unreachable') throw new RuijieError(error.message, 'unreachable', true);
+                throw error;
+            }
             const body = JSON.stringify(payload);
             const answer = await this.post(`/cgi-bin/luci/api/${endpoint}?auth=${encodeURIComponent(session.sid)}`, body, session.cookie);
             if (answer.code === AUTH_NOT_PASSED && attempt === 0) {
@@ -198,7 +215,7 @@ export class RuijieClient {
         } catch (error) {
             // Never the URL: it carries the session id.
             const reason = error instanceof Error && error.name === 'TimeoutError' ? 'timed out' : 'not reachable';
-            throw new RuijieError(`The Ruijie router is ${reason}`, 'unreachable');
+            throw new RuijieError(`The Ruijie router is ${reason}`, 'unreachable', failedBeforeSending(error));
         }
         let answer: RuijieAnswer;
         try {
