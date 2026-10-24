@@ -147,6 +147,12 @@ export const assignPortSchema = z.object({
     basis,
     allowLockout,
 });
+export const upgradeFirmwareSchema = z.object({
+    device: z.string().min(1).optional().describe('The device (name or MAC); default: the controller\'s only upgradable device'),
+    dryRun,
+    basis,
+    allowLockout,
+});
 export const setMdnsSchema = z.object({
     enabled: z.boolean(),
     networks: z.array(ref('Network')).min(1).optional().describe('Networks to repeat between (at least two when enabled); default: the current ones'),
@@ -217,6 +223,7 @@ function routedController(current: () => NetworkController): NetworkController {
         listReservations: () => current().listReservations(),
         listClients: () => current().listClients(),
         getMdnsRepeater: () => current().getMdnsRepeater(),
+        listFirmware: () => current().listFirmware(),
         plan: (change) => current().plan(change),
         apply: (plan, options) => current().apply(plan, options),
     };
@@ -438,7 +445,8 @@ export function registerNetTools(target: McpServer, controllers: NetworkControll
     );
     registerRuleTools(server, controller);
     registerPortTools(server, controller);
-    return 21;
+    registerFirmwareTools(server, controller);
+    return 23;
 }
 
 const RULES =
@@ -686,6 +694,31 @@ function namedNetworks(carried: PortNetworks, networks: Network[]) {
 }
 
 /** A MAC (12 hex digits, with or without separators) picks the switch by MAC, anything else by name. */
+function registerFirmwareTools(server: McpServer, controller: NetworkController): void {
+    server.registerTool(
+        'net_listFirmware',
+        {
+            description: 'List the firmware of the network devices: what each runs and, when the vendor offers one, the newer version with its release notes and whether net_upgradeFirmware can install it.',
+            inputSchema: z.object({}),
+        },
+        wrapToolHandler('net_listFirmware', async () => toToolResult(await controller.listFirmware()), Permission.QUERY)
+    );
+    server.registerTool(
+        'net_upgradeFirmware',
+        {
+            description:
+                'Install the firmware version the vendor offers for a device (only from the vendor\'s own download server). The device restarts and keeps its settings; everything behind it is offline meanwhile, so applying needs allowLockout and the dry run\'s basis. Needs ADMIN.' +
+                CONFIRM,
+            inputSchema: upgradeFirmwareSchema,
+        },
+        wrapToolHandler(
+            'net_upgradeFirmware',
+            async (a: z.infer<typeof upgradeFirmwareSchema>) => toToolResult(await run(controller, { op: 'upgrade', kind: 'firmware', ...(a.device ? { device: toSwitch(a.device) } : {}) }, a)),
+            Permission.ADMIN
+        )
+    );
+}
+
 function toSwitch(value: string): PortRef['device'] {
     return /^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$|^[0-9a-f]{12}$/i.test(value.trim()) ? { mac: value.trim() } : { name: value };
 }

@@ -1777,3 +1777,24 @@ describe('rules: group ownership and references (eighth Codex review of 2.4.7)',
     });
 });
 
+
+describe('firmware (2.5.1)', () => {
+    it('lists what every device runs, as not upgradable through the tools', async () => {
+        const { net, state } = controller();
+        state.devices = [
+            { type: 'gateway', mac: '5C-E9-31-00-00-01', name: 'gateway-gw1', model: 'ER605 v2.0', firmwareVersion: '2.4.5 Build 20260721 Rel.81048' },
+            { type: 'ap', mac: 'a8:29:48:00:00:02' },
+        ];
+        expect(await net.listFirmware()).toEqual([
+            { device: { mac: '5C-E9-31-00-00-01' }, name: 'gateway-gw1', model: 'ER605 v2.0', current: '2.4.5 Build 20260721 Rel.81048', upgradable: false },
+            { device: { mac: 'A8-29-48-00-00-02' }, current: 'unknown', upgradable: false },
+        ]);
+        expect((await net.capabilities()).firmware).toBe('unsupported');
+    });
+
+    it('refuses an upgrade, writing nothing', async () => {
+        const { net, writes } = controller();
+        await expect(net.plan({ op: 'upgrade', kind: 'firmware' })).rejects.toMatchObject({ code: 'UNSUPPORTED', details: { capability: 'firmware' } });
+        expect(writes).toEqual([]);
+    });
+});

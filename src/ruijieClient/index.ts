@@ -104,31 +104,45 @@ export class RuijieClient {
         return this.disabledMessage;
     }
 
+    /** A module call on /api/cmd: devConfig.* (settings and changes) or devSta.* (live state). */
     async call<T>(method: string, module: string, data?: unknown): Promise<T> {
+        return await this.request<T>('cmd', { method, params: data === undefined ? { module } : { module, data } }, `${method} ${module}`, !method.endsWith('.get'));
+    }
+
+    /**
+     * A system call on /api/system, e.g. getVersion (the running and the offered firmware) or
+     * upgradeConfirm (install a firmware and restart).
+     */
+    async system<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+        return await this.request<T>('system', { method, params: params ?? {} }, `system ${method}`, method !== 'getVersion');
+    }
+
+    /** One call with the session; a session the router no longer accepts is renewed once. */
+    private async request<T>(endpoint: 'cmd' | 'system', payload: Record<string, unknown>, label: string, isChange: boolean): Promise<T> {
         for (let attempt = 0; ; attempt++) {
             const session = await this.ensureSession();
-            const body = JSON.stringify({ method, params: data === undefined ? { module } : { module, data } });
-            const answer = await this.post(`/cgi-bin/luci/api/cmd?auth=${encodeURIComponent(session.sid)}`, body, session.cookie);
+            const body = JSON.stringify(payload);
+            const answer = await this.post(`/cgi-bin/luci/api/${endpoint}?auth=${encodeURIComponent(session.sid)}`, body, session.cookie);
             if (answer.code === AUTH_NOT_PASSED && attempt === 0) {
                 // The session expired (or the router restarted): log in once more, repeat once.
                 if (this.session === session) this.session = undefined;
                 continue;
             }
-            if (answer.code !== 0) throw new RuijieError(`The Ruijie router refused ${method} ${module} (${codeOf(answer.code)})`);
+            if (answer.code !== 0) throw new RuijieError(`The Ruijie router refused ${label} (${codeOf(answer.code)})`);
             let result = parseData(answer.data);
             // Some modules answer with a second envelope inside data.
             if (isEnvelope(result)) {
-                if (result.code !== 0 && result.code !== '0') throw new RuijieError(`The Ruijie router refused ${method} ${module} (${codeOf(result.code)})`);
+                if (result.code !== 0 && result.code !== '0') throw new RuijieError(`The Ruijie router refused ${label} (${codeOf(result.code)})`);
                 result = parseData(result.data);
             }
             if (result && typeof result === 'object' && 'rcode' in result && 'rmsg' in result && 'modelNam' in result) {
-                throw new RuijieError(`The Ruijie router has no module '${module}' for ${method}`, 'unknownModule');
+                throw new RuijieError(`The Ruijie router has no ${label}`, 'unknownModule');
             }
             const rcode = result && typeof result === 'object' ? (result as Record<string, unknown>).rcode : undefined;
-            if (!method.endsWith('.get') && rcode !== undefined && rcode !== '00000000') {
-                throw new RuijieError(`The Ruijie router refused ${method} ${module} (r${codeOf(rcode)})`);
+            if (isChange && rcode !== undefined && rcode !== '00000000') {
+                throw new RuijieError(`The Ruijie router refused ${label} (r${codeOf(rcode)})`);
             }
-            logger.debug('Ruijie call', { method, module });
+            logger.debug('Ruijie call', { call: label });
             return result as T;
         }
     }

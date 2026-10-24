@@ -34,6 +34,7 @@ import {
     type Change,
     type Client,
     type Group,
+    type Firmware,
     type MdnsRepeater,
     type Network,
     type NetworkController,
@@ -223,6 +224,7 @@ export class OmadaNetworkController implements NetworkController {
             groups: { address: 'unsupported', mac: 'unsupported' },
             reservations: 'native',
             mdnsRepeater: 'native',
+            firmware: 'unsupported',
         };
     }
 
@@ -452,6 +454,21 @@ export class OmadaNetworkController implements NetworkController {
         }));
         return kind === 'address' ? address : kind === 'mac' ? mac : [...address, ...mac];
     }
+    /** The running firmware of every adopted device; whether a newer one exists isn't read here (the controller has to check first). */
+    async listFirmware(): Promise<Firmware[]> {
+        const devices = await this.client.listDevices(this.client.resolveSiteId(this.options.siteId));
+        return devices.map((d) => {
+            const raw = d as unknown as RawRecord;
+            return {
+                device: { mac: formatMac(String(raw.mac)) },
+                ...(typeof raw.name === 'string' ? { name: raw.name } : {}),
+                ...(typeof raw.model === 'string' ? { model: raw.model } : {}),
+                current: String(raw.firmwareVersion ?? 'unknown'),
+                upgradable: false,
+            };
+        });
+    }
+
     async getMdnsRepeater(): Promise<MdnsRepeater> {
         return toMdns(await this.client.networkConfig.listMdnsRules(this.options.siteId)).repeater;
     }
@@ -753,6 +770,9 @@ export class OmadaNetworkController implements NetworkController {
                 throw unsupported('creating or deleting port profiles here (do it in the controller web UI)', 'ports.profiles');
             case 'mdnsRepeater':
                 return await this.buildMdnsSet(change.enabled, change.networks, snap);
+            case 'firmware':
+                // The Open API can (start-online-upgrade), but it isn't live-tested here yet.
+                throw new NetError('UNSUPPORTED', 'Upgrading Omada firmware through the net_ tools is not available yet; use the controller web UI (Devices > upgrade).', { capability: 'firmware' });
             case 'rule':
                 if (change.op === 'create') return this.buildRuleCreate(change.value, snap);
                 if (change.op === 'update') return this.buildRuleUpdate(change.value.ref, change.value.set, snap);

@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 
 import { RuijieNetworkController, maskToPrefix, toClients, toNetwork, toRule } from '../../src/net/adapters/ruijie.js';
-import { NetError, type Network } from '../../src/net/model.js';
+import { NetError, type Network, type Plan } from '../../src/net/model.js';
 import type { RuijieClient } from '../../src/ruijieClient/index.js';
 
 type Raw = Record<string, unknown>;
@@ -255,7 +255,7 @@ describe('rules', () => {
 });
 
 describe('the rest of the model', () => {
-    it('reports every change as unsupported in 2.5.0 and refuses each one, writing nothing', async () => {
+    it('reports every change but firmware as unsupported and refuses each one, writing nothing', async () => {
         const { net, calls } = controller();
         const caps = await net.capabilities();
 
@@ -263,8 +263,9 @@ describe('the rest of the model', () => {
         expect(caps.reservations).toBe('unsupported');
         expect(caps.rules.between).toBe('unsupported');
         expect(caps.networks.create).toBe('unsupported');
+        expect(caps.firmware).toBe('native');
         await expect(net.plan({ op: 'delete', kind: 'reservation', mac: '02:00:00:00:00:03' })).rejects.toMatchObject({ code: 'UNSUPPORTED', details: { capability: 'reservation' } });
-        expect(await code(net.apply())).toBe('UNSUPPORTED');
+        expect(await code(net.apply({ change: { op: 'delete', kind: 'reservation', mac: '02:00:00:00:00:03' } } as Plan))).toBe('UNSUPPORTED');
         expect(calls).toEqual([]);
     });
 

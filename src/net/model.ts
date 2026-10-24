@@ -176,6 +176,20 @@ export interface MdnsRepeater {
     foreign?: { reason: string };
 }
 
+// ---- firmware --------------------------------------------------------------------------
+
+/** A network device's firmware: what runs now and, when the vendor tells, what is offered. */
+export interface Firmware {
+    device: Ref | { mac: Mac };
+    name?: string;
+    model?: string;
+    current: string;
+    /** A newer version the vendor offers; absent when there is none or the vendor doesn't say. */
+    available?: { version: string; notes?: string; sizeBytes?: number };
+    /** Whether `available` can be installed through the tools (net_upgradeFirmware). */
+    upgradable: boolean;
+}
+
 // ---- groups and rules -----------------------------------------------------------------
 
 export interface Group {
@@ -244,6 +258,8 @@ export interface Capabilities {
     groups: { address: Support; mac: Support };
     reservations: Support;
     mdnsRepeater: Support;
+    /** Installing the firmware the vendor offers (net_upgradeFirmware). */
+    firmware: Support;
 }
 
 /** Things no change may cut off: where the controller, this server and their uplinks live. */
@@ -276,7 +292,9 @@ export type Change =
     | { op: 'delete'; kind: 'group'; ref: Ref }
     | { op: 'set'; kind: 'reservation'; value: Reservation }
     | { op: 'delete'; kind: 'reservation'; mac: Mac }
-    | { op: 'set'; kind: 'mdnsRepeater'; enabled: boolean; networks?: Ref[] };
+    | { op: 'set'; kind: 'mdnsRepeater'; enabled: boolean; networks?: Ref[] }
+    /** Installs the version the vendor offers for one device (it restarts). */
+    | { op: 'upgrade'; kind: 'firmware'; device?: Ref | { mac: Mac } };
 
 /** One vendor-level step of a plan, in the order it will run. Never contains secrets. */
 export interface Step {
@@ -302,7 +320,7 @@ export interface Plan {
 export interface ApplyResult {
     applied: true;
     /** The neutral object after the change (redacted), when there is one. */
-    object?: Network | Wifi | PortProfile | Port | Rule | Group | Reservation | MdnsRepeater;
+    object?: Network | Wifi | PortProfile | Port | Rule | Group | Reservation | MdnsRepeater | Firmware;
     /** Vendor objects created for this change; tagged so delete() removes them all again. */
     owned: Array<{ object: string; id: string }>;
     /** The change is done, but a follow-up (e.g. cleanup) is not; each says what is left and what happens to it. */
@@ -362,6 +380,7 @@ export interface NetworkController {
     listReservations(): Promise<Reservation[]>;
     listClients(): Promise<Client[]>;
     getMdnsRepeater(): Promise<MdnsRepeater>;
+    listFirmware(): Promise<Firmware[]>;
 
     /** Read-only: validates, resolves refs, checks protection, in-use and lock-out. Throws NetError. */
     plan(change: Change): Promise<Plan>;

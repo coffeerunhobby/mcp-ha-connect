@@ -66,15 +66,33 @@ const as = (permissions: number) => ({ sessionId: 's', http: { authInfo: { extra
 const parse = (r: { content: { text: string }[] }) => JSON.parse(r.content[0].text);
 
 describe('net tools', () => {
-  it('registers twenty-one tools', () => {
+  it('registers twenty-three tools', () => {
     const { handlers, count } = setup();
 
-    expect(count).toBe(21);
+    expect(count).toBe(23);
     expect([...handlers.keys()]).toEqual([
       'net_capabilities', 'net_listNetworks', 'net_listWifi', 'net_createNetwork', 'net_updateNetwork', 'net_deleteNetwork', 'net_createWifi', 'net_updateWifi', 'net_deleteWifi',
       'net_listRules', 'net_listGroups', 'net_createRule', 'net_updateRule', 'net_deleteRule', 'net_moveRule',
       'net_listClients', 'net_listPortProfiles', 'net_listPorts', 'net_assignPort', 'net_getMdnsRepeater', 'net_setMdnsRepeater',
+      'net_listFirmware', 'net_upgradeFirmware',
     ]);
+  });
+
+  it('lists firmware with QUERY; upgrading needs ADMIN, and a device by MAC or name', async () => {
+    const { handlers, controller } = setup();
+    controller.listFirmware = vi.fn(async () => [{ device: { mac: '02-00-00-00-00-02' }, current: 'v1', upgradable: false }]);
+
+    expect(parse(await handlers.get('net_listFirmware')!({}, as(Permission.QUERY)))).toEqual([{ device: { mac: '02-00-00-00-00-02' }, current: 'v1', upgradable: false }]);
+    const denied = await handlers.get('net_upgradeFirmware')!({ dryRun: true }, as(Permission.CONFIGURE));
+    expect(denied.isError).toBe(true);
+    expect(controller.plan).not.toHaveBeenCalled();
+
+    await handlers.get('net_upgradeFirmware')!({ dryRun: true }, as(Permission.ADMIN));
+    expect(controller.plan).toHaveBeenLastCalledWith({ op: 'upgrade', kind: 'firmware' });
+    await handlers.get('net_upgradeFirmware')!({ device: '02:00:00:00:00:02', dryRun: true }, as(Permission.ADMIN));
+    expect(controller.plan).toHaveBeenLastCalledWith({ op: 'upgrade', kind: 'firmware', device: { mac: '02:00:00:00:00:02' } });
+    await handlers.get('net_upgradeFirmware')!({ device: 'router', dryRun: true }, as(Permission.ADMIN));
+    expect(controller.plan).toHaveBeenLastCalledWith({ op: 'upgrade', kind: 'firmware', device: { name: 'router' } });
   });
 
   it('lists with QUERY; writes need CONFIGURE', async () => {

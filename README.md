@@ -77,7 +77,7 @@ high-value questions an LLM can actually answer about your network:
 > above through two tools — `omada_browse` + `omada_read` — keeping the tool-schema budget
 > small for low-context models. See the Omada tool tables below for the full eager surface.
 
-## Available Tools (81 Total)
+## Available Tools (83 Total)
 
 ### Home Assistant Tools (38)
 
@@ -251,7 +251,7 @@ Lets the controller enforce a schedule itself (e.g. a curfew) instead of a daily
 | `omada_getSiteNtpStatus` | Get the site's NTP server configuration and status |
 | `omada_setSiteNtpServers` | Replace the site's NTP server list (needs `CONFIGURE`; `dryRun` previews the change) |
 
-### Vendor-neutral Network Tools (21)
+### Vendor-neutral Network Tools (23)
 
 The `net_` tools describe networks the same way for every controller vendor: one shared model, with an adapter per
 vendor (TP-Link Omada, and Ruijie / Reyee routers read-only since 2.5.0; UniFi and MikroTik are planned). Each adapter
@@ -279,6 +279,8 @@ one is set in the controller's web UI. Reads need `QUERY`, changes `CONFIGURE`.
 | `net_listPorts` | Switch ports: the networks each carries (untagged and tagged), its profile, the online devices on it, uplinks, and why a port is protected |
 | `net_assignPort` | Set the networks a switch port carries: its untagged network (e.g. a wired IoT device's port on "IoT") and optionally tagged ones (`all`, `none` or a list); its other settings keep following its profile. Uplinks (from the controller's topology: the switch's own uplink and every network device below it), the ports the controller and this server are on (`MCP_SERVER_ADDRESSES`), link aggregation ports and ports with their own settings are refused, whatever `allowLockout` says. While where the controller or this server is can't be told, ports with devices on them are left alone. Devices that would lose their network need `allowLockout` |
 | `net_getMdnsRepeater` / `net_setMdnsRepeater` | Whether mDNS (Bonjour) discovery is repeated between networks; switch it on or off, or change the networks (e.g. so Home Assistant discovers IoT devices). Discovery only: traffic still follows the rules |
+| `net_listFirmware` | The firmware each network device runs and, when the vendor offers one, the newer version with its release notes and whether `net_upgradeFirmware` can install it |
+| `net_upgradeFirmware` | **ADMIN.** Install the version the vendor offers for a device, only from the vendor's own download server; the device restarts keeping its settings, so everything behind it is offline for a few minutes (needs `allowLockout` and the dry run's `basis`). Ruijie routers only for now; on Omada firmware is listed, upgrades stay in the controller web UI |
 
 On Omada, a network isolation flag (use a block rule instead), a "guest" network type, switching IPv6 on, and WPA2/WPA3
 mixed mode are not available through the API and are refused. Rules are gateway ACLs (the gateway routes between the
@@ -295,7 +297,8 @@ its LAN networks, the devices it sees on its LAN right now (named by their addre
 ports (the WAN port as the protected uplink) and its access-control rules; rules the model can't say faithfully (a
 source "anywhere", source ports, IPv6, user groups, schedules, only some connection states, an interface restriction the
 model can't carry, ports for TCP or UDP only) are shown as `foreign`.
-Every change is refused for now: reservations and rules come next, then networks. It talks to the router's local web
+Every change but a firmware upgrade (2.5.1: the version the router itself is offered, the same as its page's Online
+Upgrade) is refused for now: reservations and rules come next, then networks. It talks to the router's local web
 API with its admin password; use `https://` (the router's own login page hides the password with a key that is
 shipped in the page, so only HTTPS really protects it). A refused login is never retried, because wrong passwords lock
 the router's login: the Ruijie tools then refuse until the setting is fixed and the server restarted.

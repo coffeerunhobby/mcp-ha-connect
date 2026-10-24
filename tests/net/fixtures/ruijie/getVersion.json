@@ -1,0 +1,19 @@
+{
+ "code": 0,
+ "data": {
+  "cur": "ReyeeOS 2.324.0.1521;EG_3.0(1)B11P324,Release(12152110)\n",
+  "new": {
+   "totalCount": 1,
+   "firmwareList": [
+    {
+     "versionCode": "ReyeeOS 2.430.1.2128;EG_3.0(1)B11P430,Release(13212809)",
+     "releaseNotes": "Resolved issue : \nDoS attacks target the cloud-based Portal authentication service in Myanmar.\nNew main changes :\n1. SD-WAN：real-time speed tests on SD-WAN links.\n2. ACL：expanded the maximum number of ACL entries (ACEs)  \n3. Network：WAN sub-interface configuration .\n4. Network: temporary quota in an existing WAN data plan\n5. Auth & Accounts: data plan expiration and quota exhaustion notifications, as well as rate-limiting policies\n6. Turbo Mode\n7. DNS: DNS blocklist and allowlist.\nNote: Above 1-6 features not supported by the RG-EG1XX series",
+     "downloadUrlTar": "http://devicecdn-eu.ruijienetworks.com/service/api/download/8ae7d78c8211a9114dd97860ca05f455_ReyeeOS2.430.1.2128_EG_3.0_1_B11P430,Release_13212809_.tar.gz",
+     "md5": "8ae7d78c8211a9114dd97860ca05f455",
+     "fileSize": 20877643,
+     "devType": "EG105G-V3"
+    }
+   ]
+  }
+ }
+}

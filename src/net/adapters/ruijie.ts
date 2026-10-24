@@ -1,8 +1,9 @@
 /**
  * Ruijie / Reyee adapter for the vendor-neutral network model (src/net/model.ts), through the
  * router's local eWeb API (src/ruijieClient). Mapped on a RG-EG105G-V3, ReyeeOS 2.324
- * (2026-10-24). 2.5.0 READS ONLY: every change is refused (UNSUPPORTED) until the write
- * phases (reservations and rules, then networks) are built and live-tested.
+ * (2026-10-24). It reads; the one change it makes (2.5.1) is a firmware upgrade to the version
+ * the router itself is offered (system getVersion / upgradeConfirm, the page's "Online Upgrade").
+ * Other changes are refused (UNSUPPORTED) until their write phases are built and live-tested.
  *
  * What is read, and how it maps:
  * - networks: devConfig.get network, `lan[]` (one entry per LAN interface: address, netmask,
@@ -22,8 +23,10 @@
  * user groups are address ranges and users, not the model's address groups) come later.
  */
 
+import { createHash } from 'node:crypto';
+
 import { formatMac, normalizeMac } from '../../omadaClient/client.js';
-import type { RuijieClient } from '../../ruijieClient/index.js';
+import { RuijieError, type RuijieClient } from '../../ruijieClient/index.js';
 import { inSubnet, ipToNumber, parseCidr, subnetsOverlap } from '../../utils/ipv4.js';
 import {
     NetError,
@@ -31,6 +34,7 @@ import {
     type Capabilities,
     type Change,
     type Client,
+    type Firmware,
     type Group,
     type MdnsRepeater,
     type Network,
@@ -50,7 +54,51 @@ type Raw = Record<string, unknown>;
 
 /** Ruijie's name for "all the time" in a rule's time setting (the default time group). */
 const ALL_TIME = new Set(['所有时段', 'everytime', 'All Time', '']);
-const READ_ONLY = 'The Ruijie adapter reads only in this version; changes through it (reservations and rules first, then networks) come in a later version.';
+const READ_ONLY = 'The Ruijie adapter makes no changes but firmware upgrades in this version; reservations and rules come next, then networks.';
+/**
+ * Firmware is only installed from Ruijie's own download servers (e.g. devicecdn-eu.ruijienetworks.com),
+ * at the address the router itself was offered. The router fetches it and checks it itself; the
+ * address Ruijie hands out is plain http (live, 2026-10-24), exactly what the page's Online Upgrade uses.
+ */
+const RUIJIE_DOWNLOADS = /(^|\.)ruijienetworks\.com$/i;
+
+/** What the router runs and what it is offered (system getVersion). */
+export interface FirmwareOffer {
+    current: string;
+    version?: string;
+    notes?: string;
+    sizeBytes?: number;
+    url?: string;
+    md5?: string;
+}
+
+/** The getVersion answer as an offer: only a version other than the running one counts as new. */
+export function toOffer(answer: Raw): FirmwareOffer {
+    const current = text(answer.cur).trim();
+    const offered = list((answer.new as Raw | undefined)?.firmwareList)[0];
+    const version = offered ? text(offered.versionCode).trim() : '';
+    if (!offered || !version || version === current) return { current };
+    const size = Number(text(offered.fileSize));
+    return {
+        current,
+        version,
+        ...(text(offered.releaseNotes).trim() ? { notes: text(offered.releaseNotes).trim() } : {}),
+        ...(size > 0 ? { sizeBytes: size } : {}),
+        url: text(offered.downloadUrlTar),
+        ...(text(offered.md5) ? { md5: text(offered.md5) } : {}),
+    };
+}
+
+/** Whether a download address is on Ruijie's own servers (nothing else is ever handed to the router). */
+export function isRuijieDownload(url: string | undefined): boolean {
+    if (!url) return false;
+    try {
+        const parsed = new URL(url);
+        return (parsed.protocol === 'https:' || parsed.protocol === 'http:') && !parsed.username && !parsed.password && RUIJIE_DOWNLOADS.test(parsed.hostname);
+    } catch {
+        return false;
+    }
+}
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : value === undefined || value === null ? '' : String(value));
 const list = (value: unknown): Raw[] => (Array.isArray(value) ? (value.filter((v) => v && typeof v === 'object') as Raw[]) : []);
@@ -285,6 +333,9 @@ export interface RuijieAdapterOptions {
 export class RuijieNetworkController implements NetworkController {
     readonly vendor = 'ruijie' as const;
     readonly id: string;
+    private readonly executors = new WeakMap<Plan, () => Promise<ApplyResult>>();
+    /** One change at a time. */
+    private queue: Promise<unknown> = Promise.resolve();
 
     constructor(
         private readonly client: RuijieClient,
@@ -303,6 +354,7 @@ export class RuijieNetworkController implements NetworkController {
             groups: { address: 'unsupported', mac: 'unsupported' },
             reservations: 'unsupported',
             mdnsRepeater: 'unsupported',
+            firmware: 'native',
         };
     }
 
@@ -327,18 +379,42 @@ export class RuijieNetworkController implements NetworkController {
         return [];
     }
 
-    async listPorts(device?: PortRef['device']): Promise<Port[]> {
+    /** The router's identity; a device given must be the router (by MAC, model or "router"). */
+    private async router(device?: PortRef['device']): Promise<{ info: Raw; mac: string }> {
         const info = await this.client.status<Raw>('sysinfo');
-        const routerMac = macOrUndefined(info.sys_mac) ?? 'unknown';
+        const mac = macOrUndefined(info.sys_mac) ?? 'unknown';
         if (device) {
             const wanted = 'mac' in device ? device.mac : 'id' in device ? device.id : device.name;
-            const names = [routerMac, text(info.model), text(info.product_class), 'router'].map((v) => v.toLowerCase());
-            if (normalizeMac(wanted) !== normalizeMac(routerMac) && !names.includes(wanted.trim().toLowerCase())) {
-                throw new NetError('NOT_FOUND', `This Ruijie router (${text(info.model) || 'router'}, ${routerMac}) is the only device here; '${wanted}' is not it`);
+            const names = [mac, text(info.model), text(info.product_class), 'router'].map((v) => v.toLowerCase());
+            if (normalizeMac(wanted) !== normalizeMac(mac) && !names.includes(wanted.trim().toLowerCase())) {
+                throw new NetError('NOT_FOUND', `This Ruijie router (${text(info.model) || 'router'}, ${mac}) is the only device here; '${wanted}' is not it`);
             }
         }
+        return { info, mac };
+    }
+
+    async listPorts(device?: PortRef['device']): Promise<Port[]> {
+        const { mac } = await this.router(device);
         const status = await this.client.status<Raw>('port_status');
-        return toPorts(list(status.List), routerMac);
+        return toPorts(list(status.List), mac);
+    }
+
+    private async offer(): Promise<FirmwareOffer> {
+        return toOffer(await this.client.system<Raw>('getVersion', { deviceType: 'self' }));
+    }
+
+    async listFirmware(): Promise<Firmware[]> {
+        const { info, mac } = await this.router();
+        const offer = await this.offer();
+        return [
+            {
+                device: { mac },
+                ...(text(info.model) ? { model: text(info.product_class) || text(info.model) } : {}),
+                current: offer.current || text(info.software_version) || 'unknown',
+                ...(offer.version ? { available: { version: offer.version, ...(offer.notes ? { notes: offer.notes } : {}), ...(offer.sizeBytes ? { sizeBytes: offer.sizeBytes } : {}) } } : {}),
+                upgradable: offer.version !== undefined && isRuijieDownload(offer.url),
+            },
+        ];
     }
 
     async listRules(): Promise<Rule[]> {
@@ -369,10 +445,66 @@ export class RuijieNetworkController implements NetworkController {
     }
 
     async plan(change: Change): Promise<Plan> {
-        throw new NetError('UNSUPPORTED', READ_ONLY, { capability: change.kind });
+        if (change.kind !== 'firmware') throw new NetError('UNSUPPORTED', READ_ONLY, { capability: change.kind });
+        const { info, mac } = await this.router(change.device);
+        const offer = await this.offer();
+        if (!offer.version) throw new NetError('INVALID', `The router already runs the newest firmware it is offered (${offer.current || 'unknown'})`);
+        if (!isRuijieDownload(offer.url)) {
+            throw new NetError('UNSUPPORTED', "The offered firmware doesn't come from Ruijie's download server; it is not installed through the tools", { capability: 'firmware' });
+        }
+        // Every device on the router's LAN loses its connection while it restarts.
+        const clients = await this.listClients();
+        const model = text(info.product_class) || text(info.model) || 'router';
+        const size = offer.sizeBytes ? ` (${Math.round(offer.sizeBytes / 1e6)} MB)` : '';
+        const url = offer.url!;
+        const plan: Plan = {
+            change,
+            vendor: 'ruijie',
+            steps: [{ action: 'update', object: 'ruijie.firmware', name: `${model} ${mac}`, detail: `${offer.current} → ${offer.version}` }],
+            effects: [
+                `The router downloads ${offer.version} from Ruijie${size} and installs it, keeping its settings.`,
+                'It restarts: for several minutes every device on its LAN is offline and the router can\'t be reached.',
+                ...(offer.notes ? [`Release notes: ${offer.notes.slice(0, 600)}`] : []),
+            ],
+            wouldLockOut: clients,
+            basis: createHash('sha256')
+                .update(JSON.stringify({ change, current: offer.current, version: offer.version, url, md5: offer.md5 ?? null, lockOut: clients.map((c) => c.mac).sort() }))
+                .digest('hex')
+                .slice(0, 16),
+        };
+        this.executors.set(plan, async () => {
+            try {
+                await this.client.system('upgradeConfirm', { path: url, isPersist: true });
+            } catch (error) {
+                // The router may go down while answering: it is restarting into the upgrade.
+                if (error instanceof RuijieError && error.kind === 'unreachable') {
+                    return { applied: true, owned: [], warnings: ['The router stopped answering right after the upgrade was sent, as it does when it restarts into it; check net_listFirmware in about five minutes.'] };
+                }
+                throw error;
+            }
+            return {
+                applied: true,
+                object: { device: { mac }, model, current: offer.current, available: { version: offer.version! }, upgradable: true },
+                owned: [],
+                warnings: ['The router is downloading and installing the firmware and will restart; check net_listFirmware in about five minutes.'],
+            };
+        });
+        return plan;
     }
 
-    async apply(): Promise<ApplyResult> {
-        throw new NetError('UNSUPPORTED', READ_ONLY);
+    async apply(plan: Plan, options: { allowLockout?: boolean } = {}): Promise<ApplyResult> {
+        const run = this.queue.then(async () => {
+            // Planned again right before writing: anything changed since is a CONFLICT.
+            const fresh = await this.plan(plan.change);
+            if (fresh.basis !== plan.basis) throw new NetError('CONFLICT', 'The router changed after this change was planned; nothing was written. Plan it again.');
+            if (fresh.wouldLockOut.length > 0 && !options.allowLockout) {
+                throw new NetError('LOCKOUT', `This would cut off ${fresh.wouldLockOut.length} online device(s) while the router restarts. Nothing was changed; repeat with allowLockout if that is intended.`, {
+                    clients: fresh.wouldLockOut,
+                });
+            }
+            return await this.executors.get(fresh)!();
+        });
+        this.queue = run.catch(() => undefined);
+        return await run;
     }
 }

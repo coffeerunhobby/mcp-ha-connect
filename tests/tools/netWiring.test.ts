@@ -46,7 +46,7 @@ describe('net_ protection settings', () => {
 
         registerAllTools({ server, ruijieClient: { host: '192.0.2.1' } as unknown as RuijieClient });
 
-        expect(names.filter((n) => n.startsWith('net_'))).toHaveLength(21);
+        expect(names.filter((n) => n.startsWith('net_'))).toHaveLength(23);
         expect(names.some((n) => n.startsWith('omada_'))).toBe(false);
     });
 });

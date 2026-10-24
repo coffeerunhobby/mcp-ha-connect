@@ -74,7 +74,7 @@ describe('net_ tools with several controllers', () => {
 
     it('lets every tool\'s schema take only the configured vendors', () => {
         const { schemas, count } = setup([fake('omada'), fake('ruijie')]);
-        expect(count).toBe(21);
+        expect(count).toBe(23);
         for (const [name, schema] of schemas) {
             expect(schema.shape.controller, name).toBeDefined();
             expect(schema.safeParse({ ...validArgs(name), controller: 'ruijie' }).success, name).toBe(true);
@@ -106,7 +106,7 @@ describe('net_ tools with several controllers', () => {
     it('still takes a single controller', async () => {
         const handlers = new Map<string, Handler>();
         const server = { registerTool: vi.fn((name: string, _c: unknown, h: Handler) => handlers.set(name, h)) } as unknown as McpServer;
-        expect(registerNetTools(server, fake('omada'))).toBe(21);
+        expect(registerNetTools(server, fake('omada'))).toBe(23);
         expect(parse(await handlers.get('net_listNetworks')!({}, as(Permission.QUERY)))[0].name).toBe('omada');
     });
 });

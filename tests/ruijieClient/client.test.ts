@@ -151,6 +151,18 @@ describe('RuijieClient', () => {
         expect(await message(client().config('network'))).toBe('The Ruijie router is timed out');
     });
 
+    it('sends system calls to /api/system with the session, and refuses a failed upgrade but not a version read', async () => {
+        const sent = router({ cmd: (b) => (b.method === 'getVersion' ? { code: 0, data: { cur: 'v1', rcode: '5' } } : { code: 0, data: { rcode: '10000001' } }) });
+        const c = client();
+
+        expect(await c.system('getVersion', { deviceType: 'self' })).toEqual({ cur: 'v1', rcode: '5' });
+        expect(sent[1].url).toBe(`https://192.0.2.1/cgi-bin/luci/api/system?auth=${SID}`);
+        expect(sent[1].body).toEqual({ method: 'getVersion', params: { deviceType: 'self' } });
+        expect(await message(c.system('upgradeConfirm', { path: 'u', isPersist: true }))).toBe('The Ruijie router refused system upgradeConfirm (rcode 10000001)');
+        await c.system('getVersion');
+        expect(sent.at(-1)!.body).toEqual({ method: 'getVersion', params: {} });
+    });
+
     it('tells an unknown module apart, and refuses errors, failed writes and answers without JSON', async () => {
         router({
             cmd: (b, n) =>
