@@ -138,7 +138,11 @@ jobs:
           if npm view "$PKG@$VER" version >/dev/null 2>&1; then
             echo "$PKG@$VER already on the registry — skipping (idempotent)"
           else
-            npm publish --provenance --access public
+            # A pre-release (X.Y.Z-rc.N) goes to the `next` dist-tag: `npm install` keeps getting the newest final release.
+            case "$VER" in
+              *-*) npm publish --provenance --access public --tag next ;;
+              *) npm publish --provenance --access public ;;
+            esac
           fi
           # Belt-and-braces: the tarball npm just packed must contain the entrypoint.
           npm pack --dry-run 2>&1 | grep -q 'dist/index.js' || { echo "FATAL: packed tarball missing dist/index.js"; exit 1; }
@@ -215,5 +219,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A pre-release tag (vX.Y.Z-rc.N) is marked as one and never becomes the latest release.
+          case "$GITHUB_REF_NAME" in
+            *-*) KIND=--prerelease ;;
+            *) KIND=--latest ;;
+          esac
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
-            gh release create "$GITHUB_REF_NAME" --latest --generate-notes --title "$GITHUB_REF_NAME"
+            gh release create "$GITHUB_REF_NAME" "$KIND" --generate-notes --title "$GITHUB_REF_NAME"
