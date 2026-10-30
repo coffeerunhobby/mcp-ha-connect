@@ -914,7 +914,13 @@ describe('reservations', () => {
         await expect(apply(reserve('02-00-00-00-00-09', '10.0.0.10'), true)).rejects.toMatchObject({ code: 'PROTECTED', message: '02-00-00-00-00-09 is this server: its address is never moved or released through the tools' });
         await expect(apply({ op: 'delete', kind: 'reservation', mac: '02-00-00-00-00-0A' })).rejects.toMatchObject({ code: 'PROTECTED', message: expect.stringContaining('is the controller') });
         await expect(apply(reserve('02-00-00-00-00-0A', '10.0.0.251'))).rejects.toMatchObject({ code: 'PROTECTED' });
+        // Nor is their address reserved for another device (while they are offline and unreserved, nothing else would stop it).
+        state.reservations = [];
+        await expect(apply(reserve('02-AA-BB-CC-DD-EE', '10.0.0.250'))).rejects.toMatchObject({ code: 'PROTECTED', message: "10.0.0.250 is the controller's address; it can't be reserved for another device" });
+        state.clients = state.clients.filter((c) => c.mac !== '02:00:00:00:00:09');
+        await expect(apply(reserve('02-AA-BB-CC-DD-EE', '10.0.0.9'))).rejects.toMatchObject({ code: 'PROTECTED', message: expect.stringContaining("is this server's address") });
         expect(writes).toEqual([]);
+        state.clients.push({ mac: '02:00:00:00:00:09', name: 'mcp', ip: '10.0.0.9', vid: 1, active: true });
         expect(await code(apply(reserve('02-00-00-00-00-09', '10.0.0.9')))).toBe('ok');
     });
 

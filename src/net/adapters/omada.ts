@@ -753,6 +753,13 @@ export class OmadaNetworkController implements NetworkController {
         }
         const checked = checkReservationSet(change.value, world, { descriptions: true });
         const device = online(checked.mac);
+        // Their address is theirs: reserved for anyone else, that device could take it at its next DHCP request.
+        const target = ipToNumber(checked.ip);
+        for (const [who, addresses] of [['the controller', this.controllerAddresses], ['this server', this.serverAddresses]] as const) {
+            if (Array.isArray(addresses) && addresses.includes(target) && device?.ip !== checked.ip) {
+                throw new NetError('PROTECTED', `${checked.ip} is ${who}'s address; it can't be reserved for another device`);
+            }
+        }
         // Pinning such a device to the address it has is fine; moving it is not.
         if ((checked.current && checked.current.ip !== checked.ip) || (device?.ip !== undefined && device.ip !== checked.ip)) guard(checked.mac, [checked.current?.ip, device?.ip]);
         const before = rawOf(checked.mac);
