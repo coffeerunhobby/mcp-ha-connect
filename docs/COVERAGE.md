@@ -1,8 +1,8 @@
 # Test Coverage Report
 
-**Generated:** 2026-10-24 (v2.5.2, `npm run test:coverage`)
-**Tests:** 1723 passed (91 files; integration tests excluded)
-**Overall:** 87.51% statements, 80.96% branches, 86.77% functions, 87.60% lines
+**Generated:** 2026-10-30 (v2.5.3, `npm run test:coverage`)
+**Tests:** 1722 passed (91 files; integration tests excluded)
+**Overall:** 87.54% statements, 80.98% branches, 86.77% functions, 87.64% lines
 
 Regenerate with `npm run test:coverage` (per-file detail in `coverage/`). Line coverage is not the quality bar here:
 new code is mutation-checked (each guard changed or removed must fail a test) before release.

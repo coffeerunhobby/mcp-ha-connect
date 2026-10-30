@@ -1,4 +1,4 @@
-### Unreleased
+### 2.5.3
 - **Fix — `analyzeSensors` was registered with the AI plugin off.** With `AI_PLUGIN_ENABLED=false` (or `AI_PROVIDER=none`) the tool was still listed and only answered "AI client not configured" when called, so a server without AI (the Ruijie-only Xpress box) offered a tool it can't run. It is now registered only with an AI client, like the other plugins' tools. Found by the helion agent.
 - **Security — no curl in the image.** The 2.5.2 image carried curl/libcurl 8.22.0 (CVE-2026-92392, high, and 23 more, fixed in 8.23.0), its only scanner findings. Nothing in the image uses curl (the server's HTTP is Node's own; the compose healthchecks use busybox `wget`), so it is no longer installed. A healthcheck that runs `curl` inside the container must switch to `wget -q --spider http://127.0.0.1:<port>/health`.
 - README: `HA_PLUGIN_ENABLED` and `AI_PLUGIN_ENABLED` default to `false` (the README said `true`); when `analyzeSensors` is registered.
