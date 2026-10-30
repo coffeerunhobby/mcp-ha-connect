@@ -764,7 +764,7 @@ export class OmadaNetworkController implements NetworkController {
                 else await this.client.networkConfig.createDhcpReservation(body, s.siteId);
                 const after = await this.readBack(s.siteId, checked.mac);
                 if (after === 'unread') return { applied: true, owned: [], warnings: [UNREAD] };
-                if (!after || after.ip !== checked.ip || !('id' in after.network) || after.network.id !== checked.network.id) {
+                if (!after || after.ip !== checked.ip || !('id' in after.network) || after.network.id !== checked.network.id || after.description !== checked.description) {
                     throw new NetError('CONFLICT', `The controller accepted the reservation but shows something else for ${checked.mac} now; check it with net_listReservations.`);
                 }
                 return { applied: true, object: after, owned: [] };

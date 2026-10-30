@@ -94,6 +94,7 @@ export function checkReservationSet(
     if (input.description !== undefined) {
         if (!options.descriptions) throw new NetError('UNSUPPORTED', "This controller doesn't keep a description with a reservation; leave it out", { capability: 'reservations.description' });
         description = input.description.trim();
+        if (!description) throw new NetError('INVALID', 'Give a description or leave it out (an empty one would not clear it)');
         if (description.length > MAX_RESERVATION_DESCRIPTION) throw new NetError('INVALID', `The description must be at most ${MAX_RESERVATION_DESCRIPTION} characters`);
     }
 

@@ -122,6 +122,8 @@ describe('setting a reservation', () => {
         expect(fail(() => set({ mac: '02-00-00-00-00-03', ip: '10.0.0.61', description: 'x' }, false))).toMatch(/^UNSUPPORTED: This controller doesn't keep a description/);
         expect(fail(() => set({ mac: '02-00-00-00-00-03', ip: '10.0.0.61', description: 'x'.repeat(129) }))).toBe('INVALID: The description must be at most 128 characters');
         expect(set({ mac: '02-00-00-00-00-03', ip: '10.0.0.61', description: 'x'.repeat(128) }).description).toHaveLength(128);
+        // Clearing it isn't something every controller stores reliably: refused up front, not reported as a conflict after writing.
+        expect(fail(() => set({ mac: '02-00-00-00-00-01', ip: '10.0.0.50', description: '  ' }))).toBe('INVALID: Give a description or leave it out (an empty one would not clear it)');
     });
 });
 

@@ -938,6 +938,14 @@ describe('reservations', () => {
         };
         expect(await code(kept.apply({ op: 'delete', kind: 'reservation', mac: '02-00-00-00-00-05' }))).toBe('CONFLICT');
 
+        // The address is stored, but the controller kept the old description.
+        const described = controller();
+        described.state.reservations.push(structuredClone(RESERVED));
+        described.state.beforeWrite = (op, args) => {
+            if (op === 'updateDhcpReservation') (args[1] as Raw).description = 'plug';
+        };
+        expect(await code(described.apply(reserve('02-00-00-00-00-05', '10.0.1.50', { description: 'kitchen plug' })))).toBe('CONFLICT');
+
         const unread = controller();
         // The snapshot, the plan and apply's re-plan read the reservations; the read after the write fails.
         unread.state.failRead = { op: 'listDhcpReservations', skip: 2 };
