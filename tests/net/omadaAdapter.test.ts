@@ -958,6 +958,16 @@ describe('reservations', () => {
         expect(writes).toEqual([]);
     });
 
+    it('a device the dry run moves, at another address by now, is a CONFLICT even with allowLockout', async () => {
+        const { state, writes, net } = controller();
+        const plan = await net.plan(reserve('02-00-00-00-00-01', '10.0.0.150'));
+        expect(plan.wouldLockOut.map((c) => c.ip)).toEqual(['10.0.0.101']);
+        state.clients[0].ip = '10.0.0.102';
+
+        expect(await code(net.apply(plan, { allowLockout: true }))).toBe('CONFLICT');
+        expect(writes).toEqual([]);
+    });
+
     it('reads every change back: something else stored is a CONFLICT, an unreadable answer a warning', async () => {
         const ignored = controller();
         ignored.state.beforeWrite = (op) => {

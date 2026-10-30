@@ -554,7 +554,7 @@ export class RuijieNetworkController implements NetworkController {
             effects,
             wouldLockOut,
             basis: createHash('sha256')
-                .update(JSON.stringify({ change, controller: this.id, router: routerMac, networks, entries, lockOut: wouldLockOut.map((c) => c.mac).sort() }))
+                .update(JSON.stringify({ change, controller: this.id, router: routerMac, networks, entries, lockOut: wouldLockOut.map((c) => `${c.mac}@${c.ip ?? ''}`).sort() }))
                 .digest('hex')
                 .slice(0, 16),
         };

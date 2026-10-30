@@ -131,6 +131,15 @@ describe('Ruijie reservations', () => {
         expect(writes).toEqual([]);
     });
 
+    it('a device the dry run moves, at another address by now, is a CONFLICT even with allowLockout', async () => {
+        const { net, writes, state } = controller();
+        const plan = await net.plan(reserve('02:00:00:00:00:03', '192.168.110.9'));
+        state.arp = { arpList: (state.arp.arpList as Raw[]).map((a) => (a.hardware === '02:00:00:00:00:03' ? { ...a, address: '192.168.110.3' } : a)) };
+
+        expect(await code(net.apply(plan, { allowLockout: true }))).toBe('CONFLICT');
+        expect(writes).toEqual([]);
+    });
+
     it('an answer that never came (sent) is "may or may not be stored"; one never sent is the router\'s own error', async () => {
         const lost = controller({
             write: () => {

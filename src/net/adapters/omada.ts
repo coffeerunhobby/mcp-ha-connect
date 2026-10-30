@@ -776,7 +776,8 @@ export class OmadaNetworkController implements NetworkController {
             effects: checked.effects,
             wouldLockOut: checked.wouldLockOut,
             reads: { networks: true },
-            extra,
+            // The devices it moves, with the address the dry run saw them at: one elsewhere by now is a CONFLICT.
+            extra: { ...extra, moving: checked.wouldLockOut.map((c) => `${normalizeMac(c.mac)}@${c.ip ?? ''}`).sort() },
             execute: async (s) => {
                 if (before) await this.client.networkConfig.updateDhcpReservation(formatMac(before.mac), body, s.siteId);
                 else await this.client.networkConfig.createDhcpReservation(body, s.siteId);
