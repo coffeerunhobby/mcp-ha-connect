@@ -29,7 +29,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 # apk upgrade: pick up Alpine security patches even when the node base tag lags
 # (the 2026-07 Trivy scan's 24 libssl/libcrypto CVEs were exactly this rot).
-RUN apk upgrade --no-cache && apk add --no-cache curl
+# No curl: nothing in the image calls it (healthchecks use busybox wget), and its
+# 24 CVEs (curl/libcurl 8.22.0, 2026-10) were the only findings on 2.5.2.
+RUN apk upgrade --no-cache
 COPY package*.json ./
 # Reproducible prod-only install from the lockfile (drops devDependencies), then
 # strip the package managers from the runtime image: nothing invokes npm/yarn after
