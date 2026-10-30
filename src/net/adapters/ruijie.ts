@@ -545,7 +545,7 @@ export class RuijieNetworkController implements NetworkController {
             write = entry
                 ? () => this.client.call('devConfig.update', 'dhcp_static', { new: { ...entry, ipaddr: checked.ip }, old: entry })
                 : () => this.client.call('devConfig.add', 'dhcp_static', { list: [{ macaddr: checked.mac.toLowerCase().replace(/-/g, ':'), ipaddr: checked.ip }] });
-            expect = (after) => after?.ip === checked.ip;
+            expect = (after) => after?.ip === checked.ip && 'id' in after.network && after.network.id === checked.network.id;
         }
         const plan: Plan = {
             change,

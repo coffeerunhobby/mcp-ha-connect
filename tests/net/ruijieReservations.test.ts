@@ -17,7 +17,7 @@ type Raw = Record<string, unknown>;
 const fixture = (name: string): Raw => (JSON.parse(readFileSync(new URL(`./fixtures/ruijie/${name}.json`, import.meta.url), 'utf8')) as { data: Raw }).data;
 
 /** The recordings: pc-1 (02:00:00:00:00:03) online at .2, reserved for .2; the LAN is 192.168.110.0/24. */
-function controller(over: { readOnly?: boolean; write?: (method: string, data: Raw) => unknown; readBack?: () => Raw } = {}) {
+function controller(over: { readOnly?: boolean; write?: (method: string, data: Raw) => unknown; readBack?: () => Raw; networkAfterWrite?: Raw } = {}) {
     const state = { entries: structuredClone(fixture('dhcp_static').dhcp_static) as Raw[], arp: fixture('arp'), lease: fixture('dhcp_lease'), reads: 0 };
     const writes: Array<[string, Raw]> = [];
     let next = 0;
@@ -25,7 +25,7 @@ function controller(over: { readOnly?: boolean; write?: (method: string, data: R
         host: '192.168.110.1',
         ...(over.readOnly !== undefined ? { readOnly: over.readOnly } : {}),
         config: async (module: string) => {
-            if (module === 'network') return fixture('network');
+            if (module === 'network') return over.networkAfterWrite && writes.length ? over.networkAfterWrite : fixture('network');
             if (module === 'dhcp_static') {
                 state.reads++;
                 if (over.readBack && writes.length) return over.readBack();
@@ -159,6 +159,11 @@ describe('Ruijie reservations', () => {
         expect(await code(other.apply(reserve('02-AA-BB-CC-DD-EE', '192.168.110.40')))).toBe('CONFLICT');
         const kept = controller({ write: () => ({ rcode: '00000000' }) });
         expect(await code(kept.apply({ op: 'delete', kind: 'reservation', mac: '02-00-00-00-00-03' }))).toBe('CONFLICT');
+
+        // The right address, but the router now puts it in another network: not what was planned.
+        const lan = fixture('network');
+        const moved = controller({ networkAfterWrite: { ...lan, lan: (lan.lan as Raw[]).map((l) => ({ ...l, vlanid: '20' })) } });
+        expect(await code(moved.apply(reserve('02-AA-BB-CC-DD-EE', '192.168.110.40')))).toBe('CONFLICT');
 
         const unread = controller({
             readBack: () => {

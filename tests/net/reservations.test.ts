@@ -87,6 +87,15 @@ describe('setting a reservation', () => {
         expect(fail(() => set({ mac: '02-00-00-00-00-03', ip: '10.0.0' }))).toMatch(/^INVALID: '10.0.0' is not an IPv4 address/);
     });
 
+    it('refuses an address that several networks hold (overlapping subnets), even with the network given', () => {
+        const overlapping = [...NETWORKS, { id: 'n-wide', name: 'Wide', purpose: 'normal' as const, vlan: 5, gateway: '10.0.0.129/25', ipv6: false, isolated: false, protected: false }];
+        const check = (network?: string) => checkReservationSet({ mac: '02-00-00-00-00-03', ip: '10.0.0.200', ...(network ? { network: { name: network } } : {}) }, { ...world, networks: overlapping }, { descriptions: true });
+        expect(fail(() => check())).toBe('INVALID: 10.0.0.200 is in several networks (Home 10.0.0.1/24, Wide 10.0.0.129/25); their subnets overlap, so it is refused');
+        expect(fail(() => check('Wide'))).toMatch(/^INVALID: 10.0.0.200 is in several networks/);
+        // An address only one of them holds is fine.
+        expect(fail(() => checkReservationSet({ mac: '02-00-00-00-00-03', ip: '10.0.0.20' }, { ...world, networks: overlapping }, { descriptions: true }))).toBe('ok');
+    });
+
     it('refuses the gateway, network and broadcast addresses', () => {
         expect(fail(() => set({ mac: '02-00-00-00-00-03', ip: '10.0.0.1' }))).toBe("INVALID: 10.0.0.1 is the gateway of 'Home'");
         expect(fail(() => set({ mac: '02-00-00-00-00-03', ip: '10.0.0.0' }))).toBe("INVALID: 10.0.0.0 is the network or broadcast address of 'Home'");

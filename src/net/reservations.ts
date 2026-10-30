@@ -69,18 +69,22 @@ export function checkReservationSet(
     } catch (error) {
         throw new NetError('INVALID', (error as Error).message);
     }
+    // Overlapping subnets would make "free" ambiguous: the checks below compare addresses, not networks.
+    const holding = world.networks.filter((n) => n.gateway && inSubnet(address, n.gateway));
+    if (holding.length > 1) {
+        throw new NetError('INVALID', `${ip} is in several networks (${holding.map((n) => `${n.name} ${n.gateway}`).join(', ')}); their subnets overlap, so it is refused`);
+    }
     let network: Network;
     if (input.network) {
         network = resolve(world.networks, input.network, 'network');
         if (!network.gateway) throw new NetError('INVALID', `'${network.name}' has no gateway (switch-only), so it hands out no addresses`);
         if (!inSubnet(address, network.gateway)) throw new NetError('INVALID', `${ip} is not in '${network.name}' (${network.gateway})`);
     } else {
-        const holding = world.networks.find((n) => n.gateway && inSubnet(address, n.gateway));
-        if (!holding) {
+        if (!holding.length) {
             const routed = world.networks.filter((n) => n.gateway).map((n) => `${n.name} ${n.gateway}`);
             throw new NetError('INVALID', `${ip} is in none of the networks (${routed.join(', ') || 'none'})`);
         }
-        network = holding;
+        network = holding[0];
     }
     const subnet = parseCidr(network.gateway!);
     if (address === subnet.network || address === subnet.broadcast) throw new NetError('INVALID', `${ip} is the network or broadcast address of '${network.name}'`);
