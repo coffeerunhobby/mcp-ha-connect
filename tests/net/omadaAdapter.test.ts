@@ -22,6 +22,8 @@ const SECRET = 'HouseWifiPassw0rd!';
 
 type Raw = Record<string, unknown>;
 
+const base = (...a: Parameters<typeof controller>) => controller(...a);
+
 function controller(controllerHost = '10.0.0.250', resolveHost?: (host: string) => Promise<string[]>, serverHosts?: string[]) {
     const state = {
         networks: [
@@ -860,6 +862,8 @@ describe('plan and apply', () => {
 // ---- DHCP reservations (2.5.4) ----------------------------------------------------------------
 
 describe('reservations', () => {
+    // Where this server is must be known for reservations to move (see the protection tests).
+    const controller = (controllerHost = '10.0.0.250', resolveHost?: (host: string) => Promise<string[]>, serverHosts: string[] = ['10.0.0.9']) => base(controllerHost, resolveHost, serverHosts);
     const reserve = (mac: string, ip: string, extra: Partial<Extract<Change, { kind: 'reservation'; op: 'set' }>['value']> = {}): Change => ({ op: 'set', kind: 'reservation', value: { mac, ip, ...extra } });
     const RESERVED = { netId: 'net-iot', mac: '02-00-00-00-00-05', ip: '10.0.1.50', description: 'plug', status: true, options: [{ code: 42 }] };
 
@@ -912,6 +916,25 @@ describe('reservations', () => {
         await expect(apply(reserve('02-00-00-00-00-0A', '10.0.0.251'))).rejects.toMatchObject({ code: 'PROTECTED' });
         expect(writes).toEqual([]);
         expect(await code(apply(reserve('02-00-00-00-00-09', '10.0.0.9')))).toBe('ok');
+    });
+
+    it('while where the controller or this server is can\'t be told, existing reservations are neither moved nor removed', async () => {
+        const unset = controller('10.0.0.250', undefined, []);
+        unset.state.reservations.push(structuredClone(RESERVED));
+        await expect(unset.apply(reserve('02-00-00-00-00-05', '10.0.1.51'))).rejects.toMatchObject({ code: 'PROTECTED', message: expect.stringContaining("this server's address isn't configured (MCP_SERVER_ADDRESSES)") });
+        await expect(unset.apply({ op: 'delete', kind: 'reservation', mac: '02-00-00-00-00-05' })).rejects.toMatchObject({ code: 'PROTECTED' });
+        // Moving an online device without a reservation is refused too; a new one for an offline device or a pin is fine.
+        await expect(unset.apply(reserve('02-00-00-00-00-01', '10.0.0.150'), true)).rejects.toMatchObject({ code: 'PROTECTED' });
+        expect(await code(unset.apply(reserve('02-00-00-00-00-01', '10.0.0.101')))).toBe('ok');
+        expect(await code(unset.apply(reserve('02-AA-BB-CC-DD-EE', '10.0.1.40')))).toBe('ok');
+
+        const unknown = controller('omada.home.test', async () => {
+            throw new Error('ENOTFOUND');
+        });
+        unknown.state.reservations.push(structuredClone(RESERVED));
+        await expect(unknown.apply(reserve('02-00-00-00-00-05', '10.0.1.51'))).rejects.toMatchObject({ code: 'PROTECTED', message: expect.stringContaining("the controller's address can't be resolved") });
+        expect(unset.writes.map((w) => w.op)).toEqual(['createDhcpReservation', 'createDhcpReservation']);
+        expect(unknown.writes).toEqual([]);
     });
 
     it('a reservation changed in the controller after the dry run is a CONFLICT', async () => {

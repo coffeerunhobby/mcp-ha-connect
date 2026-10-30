@@ -713,11 +713,21 @@ export class OmadaNetworkController implements NetworkController {
         const raw = await this.client.accessControl.listDhcpReservations(snap.siteId);
         const world = { networks: snap.networks, reservations: toReservations(raw), clients: snap.clients };
         const rawOf = (mac: string) => raw.find((r) => normalizeMac(r.mac) === normalizeMac(mac));
-        // The controller's and this server's own reservations are never moved or removed (where known).
+        // The controller's and this server's own reservations are never moved or removed; while where
+        // either is can't be told, no existing reservation is (like ports with devices on them).
         const guard = (mac: string, ips: Array<string | undefined>) => {
             const at = (addresses: number[] | 'unknown' | 'unset') => Array.isArray(addresses) && ips.some((ip) => ip !== undefined && addresses.includes(ipToNumber(ip)));
             const who = at(this.controllerAddresses) ? 'the controller' : at(this.serverAddresses) ? 'this server' : undefined;
             if (who) throw new NetError('PROTECTED', `${mac} is ${who}: its address is never moved or released through the tools`);
+            const blind =
+                this.controllerAddresses === 'unknown'
+                    ? "the controller's address can't be resolved"
+                    : this.serverAddresses === 'unknown'
+                      ? "this server's address can't be resolved"
+                      : this.serverAddresses === 'unset'
+                        ? "this server's address isn't configured (MCP_SERVER_ADDRESSES)"
+                        : undefined;
+            if (blind) throw new NetError('PROTECTED', `${blind}, so its reservation can't be told apart: existing reservations are not moved or removed (a new one, or pinning a device to the address it has, still works)`);
         };
         const online = (mac: string) => snap.clients.find((c) => c.online && normalizeMac(c.mac) === normalizeMac(mac));
         const extra = { reservations: raw.map(canonical) };

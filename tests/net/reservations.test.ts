@@ -85,6 +85,8 @@ describe('setting a reservation', () => {
         expect(fail(() => set({ mac: '02-00-00-00-00-03', ip: '10.0.0.70', network: { name: 'Switches' } }))).toMatch(/^INVALID: 'Switches' has no gateway/);
         expect(fail(() => set({ mac: '02-00-00-00-00-03', ip: '10.0.0.70', network: { name: 'Nope' } }))).toMatch(/^NOT_FOUND: /);
         expect(fail(() => set({ mac: '02-00-00-00-00-03', ip: '10.0.0' }))).toMatch(/^INVALID: '10.0.0' is not an IPv4 address/);
+        // Leading zeros would slip past the comparisons with the addresses in use.
+        expect(fail(() => set({ mac: '02-00-00-00-00-03', ip: '010.0.1.20' }))).toBe('INVALID: Write the address as 10.0.1.20');
     });
 
     it('refuses an address that several networks hold (overlapping subnets), even with the network given', () => {

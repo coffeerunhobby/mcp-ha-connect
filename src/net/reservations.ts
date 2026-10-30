@@ -69,6 +69,9 @@ export function checkReservationSet(
     } catch (error) {
         throw new NetError('INVALID', (error as Error).message);
     }
+    // Only the plain form: "010.0.1.9" would slip past the comparisons with the addresses in use.
+    const plain = [24, 16, 8, 0].map((shift) => Math.floor(address / 2 ** shift) % 256).join('.');
+    if (plain !== ip) throw new NetError('INVALID', `Write the address as ${plain}`);
     // Overlapping subnets would make "free" ambiguous: the checks below compare addresses, not networks.
     const holding = world.networks.filter((n) => n.gateway && inSubnet(address, n.gateway));
     if (holding.length > 1) {
