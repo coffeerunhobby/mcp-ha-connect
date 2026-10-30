@@ -719,14 +719,15 @@ export class OmadaNetworkController implements NetworkController {
             const at = (addresses: number[] | 'unknown' | 'unset') => Array.isArray(addresses) && ips.some((ip) => ip !== undefined && addresses.includes(ipToNumber(ip)));
             const who = at(this.controllerAddresses) ? 'the controller' : at(this.serverAddresses) ? 'this server' : undefined;
             if (who) throw new NetError('PROTECTED', `${mac} is ${who}: its address is never moved or released through the tools`);
-            const blind =
-                this.controllerAddresses === 'unknown'
-                    ? "the controller's address can't be resolved"
-                    : this.serverAddresses === 'unknown'
-                      ? "this server's address can't be resolved"
-                      : this.serverAddresses === 'unset'
-                        ? "this server's address isn't configured (MCP_SERVER_ADDRESSES)"
-                        : undefined;
+            const blind = !this.options.controllerHost
+                ? "the controller's address isn't known"
+                : this.controllerAddresses === 'unknown'
+                  ? "the controller's address can't be resolved"
+                  : this.serverAddresses === 'unknown'
+                    ? "this server's address can't be resolved"
+                    : this.serverAddresses === 'unset'
+                      ? "this server's address isn't configured (MCP_SERVER_ADDRESSES)"
+                      : undefined;
             if (blind) throw new NetError('PROTECTED', `${blind}, so its reservation can't be told apart: existing reservations are not moved or removed (a new one, or pinning a device to the address it has, still works)`);
         };
         const online = (mac: string) => snap.clients.find((c) => c.online && normalizeMac(c.mac) === normalizeMac(mac));

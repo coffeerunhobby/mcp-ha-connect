@@ -935,6 +935,12 @@ describe('reservations', () => {
         await expect(unknown.apply(reserve('02-00-00-00-00-05', '10.0.1.51'))).rejects.toMatchObject({ code: 'PROTECTED', message: expect.stringContaining("the controller's address can't be resolved") });
         expect(unset.writes.map((w) => w.op)).toEqual(['createDhcpReservation', 'createDhcpReservation']);
         expect(unknown.writes).toEqual([]);
+
+        // No controller address given at all: as blind as one that doesn't resolve.
+        const none = controller('');
+        none.state.reservations.push(structuredClone(RESERVED));
+        await expect(none.apply({ op: 'delete', kind: 'reservation', mac: '02-00-00-00-00-05' })).rejects.toMatchObject({ code: 'PROTECTED', message: expect.stringContaining("the controller's address isn't known") });
+        expect(none.writes).toEqual([]);
     });
 
     it('a reservation changed in the controller after the dry run is a CONFLICT', async () => {
