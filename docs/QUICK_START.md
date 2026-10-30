@@ -235,5 +235,5 @@ Once configured, ask Claude:
 ## Next Steps
 
 - [Environment Variables](../README.md#environment-variables) - Full configuration reference
-- [Available Tools](../README.md#available-tools-112-total) - All 112 tools documented (Home Assistant, Omada, the vendor-neutral `net_` tools for Omada and Ruijie, AI, infrastructure)
+- [Available Tools](../README.md#available-tools-115-total) - All 115 tools documented (Home Assistant, Omada, the vendor-neutral `net_` tools for Omada and Ruijie, AI, infrastructure)
 - [Changelog](CHANGELOG.md) - Version history

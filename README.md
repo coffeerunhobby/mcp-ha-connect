@@ -86,11 +86,11 @@ high-value questions an LLM can actually answer about your network:
 > above through two tools — `omada_browse` + `omada_read` — keeping the tool-schema budget
 > small for low-context models. See the Omada tool tables below for the full eager surface.
 
-## Available Tools (112 Total)
+## Available Tools (115 Total)
 
 With every plugin on in the default eager mode: Home Assistant 38 (including the 3 owner-question tools, when
-`MCP_OWNER_QUESTIONS_ENABLED` is on), Omada 49, `net_` 23, AI 1 and `invokeAction` 1 (only with `MCP_REST_ACTIONS`).
-In graph mode the Omada reads collapse into `omada_browse` + `omada_read` (Omada 26, 89 in total).
+`MCP_OWNER_QUESTIONS_ENABLED` is on), Omada 49, `net_` 26, AI 1 and `invokeAction` 1 (only with `MCP_REST_ACTIONS`).
+In graph mode the Omada reads collapse into `omada_browse` + `omada_read` (Omada 26, 92 in total).
 
 ### Home Assistant Tools (38)
 
@@ -264,10 +264,10 @@ Lets the controller enforce a schedule itself (e.g. a curfew) instead of a daily
 | `omada_getSiteNtpStatus` | Get the site's NTP server configuration and status |
 | `omada_setSiteNtpServers` | Replace the site's NTP server list (needs `CONFIGURE`; `dryRun` previews the change) |
 
-### Vendor-neutral Network Tools (23)
+### Vendor-neutral Network Tools (26)
 
 The `net_` tools describe networks the same way for every controller vendor: one shared model, with an adapter per
-vendor (TP-Link Omada, and Ruijie / Reyee routers read-only since 2.5.0; UniFi and MikroTik are planned). Each adapter
+vendor (TP-Link Omada, and Ruijie / Reyee routers since 2.5.0; UniFi and MikroTik are planned). Each adapter
 says per feature whether it is native, built from several objects, or unsupported (`net_capabilities`), and refuses what
 it can't do instead of dropping it. With several controllers configured, every `net_` tool takes an optional
 `controller` (`omada` or `ruijie`); without it Omada answers.
@@ -294,6 +294,8 @@ one is set in the controller's web UI. Reads need `QUERY`, changes `CONFIGURE`.
 | `net_getMdnsRepeater` / `net_setMdnsRepeater` | Whether mDNS (Bonjour) discovery is repeated between networks; switch it on or off, or change the networks (e.g. so Home Assistant discovers IoT devices). Discovery only: traffic still follows the rules |
 | `net_listFirmware` | The firmware each network device runs and, when the vendor offers one, the newer version with its release notes and whether `net_upgradeFirmware` can install it |
 | `net_upgradeFirmware` | **ADMIN.** Install the version the vendor offers for a device, only from the vendor's own download server; the device restarts keeping its settings, so everything behind it is offline for a few minutes (always needs a dry run first, then `allowLockout` and its `basis`). Ruijie routers only for now; on Omada firmware is listed, upgrades stay in the controller web UI |
+| `net_listReservations` | DHCP reservations: which device (MAC) always gets which address, on which network |
+| `net_setReservation` / `net_deleteReservation` | Reserve an address for a device (create, or change its reservation) or remove its reservation. The address must be a free host address in a routed network (the one given, or the one holding it): not the gateway, network or broadcast address, not reserved for or used right now by another device. An online device moved to another address loses its connections at its next DHCP renewal, so that needs `allowLockout`; a removed reservation changes nothing until the lease runs out. On Omada the reservations of the controller and this server (`MCP_SERVER_ADDRESSES`) are never moved or removed (pinning them to the address they have is fine). A description is kept on Omada; Ruijie keeps none (at most 300 reservations there) |
 
 On Omada, a network isolation flag (use a block rule instead), a "guest" network type, switching IPv6 on, and WPA2/WPA3
 mixed mode are not available through the API and are refused. Rules are gateway ACLs (the gateway routes between the
@@ -305,13 +307,14 @@ usually set none, and a port can't be put back on its profile's). The mDNS repea
 one gateway mDNS rule: create it once in the web UI (with the services to repeat), then change it here; access point
 mDNS rules, several rules or a one-way rule are shown as `foreign` and left to the web UI.
 
-On a Ruijie / Reyee router (2.5.0, read-only, mapped on a RG-EG105G-V3 with ReyeeOS 2.324) the `net_` list tools show
+On a Ruijie / Reyee router (2.5.0, mapped on a RG-EG105G-V3 with ReyeeOS 2.324) the `net_` list tools show
 its LAN networks, the devices it sees on its LAN right now (named by their address lease), DHCP reservations, its
 ports (the WAN port as the protected uplink) and its access-control rules; rules the model can't say faithfully (a
 source "anywhere", source ports, IPv6, user groups, schedules, only some connection states, an interface restriction the
 model can't carry, ports for TCP or UDP only) are shown as `foreign`.
-Every change but a firmware upgrade (2.5.1: the version the router itself is offered, the same as its page's Online
-Upgrade) is refused for now: reservations and rules come next, then networks. It talks to the router's local web
+It changes DHCP reservations (2.5.4, the same calls as its page) and the firmware (2.5.1: the version the router itself
+is offered, the same as its page's Online Upgrade); every other change is refused for now: rules come next, then
+networks. It talks to the router's local web
 API with its admin password; use `https://` with `RUIJIE_CERT_SHA256` (the router's own login page hides the password
 with a key that is shipped in the page, so only HTTPS really protects it, and the router's self-signed certificate is
 best pinned: the RG-EG105G-V3 ships OpenSSL's sample identity, valid until 2122, likely the same on every unit). A refused login is never retried, because wrong passwords lock

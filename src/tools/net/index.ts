@@ -8,6 +8,7 @@
  * 2.4.5: networks and Wi-Fi. 2.4.7: rules (and listing groups). 2.4.8: clients with their
  * network, switch ports and port profiles, the mDNS repeater. 2.5.0: several controllers
  * (Omada and Ruijie): every tool takes an optional `controller` (the vendor), default Omada.
+ * 2.5.1: firmware. 2.5.4: DHCP reservations.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -153,6 +154,17 @@ export const upgradeFirmwareSchema = z.object({
     basis,
     allowLockout,
 });
+const deviceMac = z.string().min(1).describe('Device MAC, e.g. "02-1A-2B-3C-4D-5E" (any separator)');
+export const setReservationSchema = z.object({
+    mac: deviceMac,
+    ip: z.string().min(1).describe('Address to reserve, e.g. "192.168.0.50": a free host address in a routed network'),
+    network: ref('Network').optional().describe('The network the address is in; default: the one holding it'),
+    description: z.string().max(128).optional().describe('Note kept with the reservation, where the controller keeps one (not on Ruijie)'),
+    dryRun,
+    basis,
+    allowLockout,
+});
+export const deleteReservationSchema = z.object({ mac: deviceMac, dryRun, basis });
 export const setMdnsSchema = z.object({
     enabled: z.boolean(),
     networks: z.array(ref('Network')).min(1).optional().describe('Networks to repeat between (at least two when enabled); default: the current ones'),
@@ -446,7 +458,8 @@ export function registerNetTools(target: McpServer, controllers: NetworkControll
     registerRuleTools(server, controller);
     registerPortTools(server, controller);
     registerFirmwareTools(server, controller);
-    return 23;
+    registerReservationTools(server, controller);
+    return 26;
 }
 
 const RULES =
@@ -721,6 +734,58 @@ function registerFirmwareTools(server: McpServer, controller: NetworkController)
                 return toToolResult(await run(controller, { op: 'upgrade', kind: 'firmware', ...(a.device ? { device: toSwitch(a.device) } : {}) }, a));
             },
             Permission.ADMIN
+        )
+    );
+}
+
+function registerReservationTools(server: McpServer, controller: NetworkController): void {
+    server.registerTool(
+        'net_listReservations',
+        { description: 'List DHCP reservations: which device (MAC) always gets which address, on which network.', inputSchema: z.object({}) },
+        wrapToolHandler(
+            'net_listReservations',
+            async () => {
+                const networks = await controller.listNetworks();
+                return toToolResult((await controller.listReservations()).map((r) => ({ ...r, network: named(r.network, networks) })));
+            },
+            Permission.QUERY
+        )
+    );
+    server.registerTool(
+        'net_setReservation',
+        {
+            description:
+                'Reserve an address for a device (create, or change its reservation): it always gets that address from DHCP. Refuses an address outside the routed networks, the gateway, or one reserved for or used by another device. An online device moved to another address loses its connections at its next DHCP renewal, so that needs allowLockout.' +
+                CONFIRM,
+            inputSchema: setReservationSchema,
+        },
+        wrapToolHandler(
+            'net_setReservation',
+            async (a: z.infer<typeof setReservationSchema>) =>
+                toToolResult(
+                    await run(
+                        controller,
+                        {
+                            op: 'set',
+                            kind: 'reservation',
+                            value: { mac: a.mac, ip: a.ip, ...(a.network !== undefined ? { network: { name: a.network } } : {}), ...(a.description !== undefined ? { description: a.description } : {}) },
+                        },
+                        a
+                    )
+                ),
+            Permission.CONFIGURE
+        )
+    );
+    server.registerTool(
+        'net_deleteReservation',
+        {
+            description: "Remove a device's DHCP reservation. It keeps its address until its lease runs out, then may get another one." + CONFIRM,
+            inputSchema: deleteReservationSchema,
+        },
+        wrapToolHandler(
+            'net_deleteReservation',
+            async (a: z.infer<typeof deleteReservationSchema>) => toToolResult(await run(controller, { op: 'delete', kind: 'reservation', mac: a.mac }, a)),
+            Permission.CONFIGURE
         )
     );
 }

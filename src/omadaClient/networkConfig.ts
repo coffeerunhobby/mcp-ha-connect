@@ -191,4 +191,19 @@ export class NetworkConfigOperations {
     public async updateMdnsRule(ruleId: string, body: RawRecord, siteId?: string): Promise<void> {
         await this.send('PATCH', this.sitePath(siteId, `/setting/service/mdns/${encodeURIComponent(ruleId)}`), body);
     }
+
+    // ---- DHCP reservations (net_ reservations; the same calls as omada_setDhcpReservation) -----
+
+    /** Body: netId, mac, ip, description, status, options. */
+    public async createDhcpReservation(body: RawRecord, siteId?: string): Promise<void> {
+        await this.send('POST', this.sitePath(siteId, '/setting/service/dhcp'), body);
+    }
+
+    public async updateDhcpReservation(mac: string, body: RawRecord, siteId?: string): Promise<void> {
+        await this.send('PATCH', this.sitePath(siteId, `/setting/service/dhcp/${encodeURIComponent(mac)}`), body);
+    }
+
+    public async deleteDhcpReservation(mac: string, siteId?: string): Promise<void> {
+        await this.send('DELETE', this.sitePath(siteId, `/setting/service/dhcp/${encodeURIComponent(mac)}`));
+    }
 }

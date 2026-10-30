@@ -76,6 +76,9 @@ export interface Reservation {
     description?: string;
 }
 
+/** A reservation to set: the network may be left out (then it is the routed network holding the address). */
+export type ReservationInput = Omit<Reservation, 'network'> & { network?: Ref };
+
 /** A device as seen right now; used for lock-out checks and "who is on this port/Wi-Fi". */
 export interface Client {
     mac: Mac;
@@ -290,7 +293,7 @@ export type Change =
     | { op: 'move'; kind: 'rule'; ref: Ref; position: number }
     | { op: 'create'; kind: 'group'; value: CreateOf<Group> }
     | { op: 'delete'; kind: 'group'; ref: Ref }
-    | { op: 'set'; kind: 'reservation'; value: Reservation }
+    | { op: 'set'; kind: 'reservation'; value: ReservationInput }
     | { op: 'delete'; kind: 'reservation'; mac: Mac }
     | { op: 'set'; kind: 'mdnsRepeater'; enabled: boolean; networks?: Ref[] }
     /** Installs the version the vendor offers for one device (it restarts). */

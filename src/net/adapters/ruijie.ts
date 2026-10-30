@@ -1,9 +1,10 @@
 /**
  * Ruijie / Reyee adapter for the vendor-neutral network model (src/net/model.ts), through the
  * router's local eWeb API (src/ruijieClient). Mapped on a RG-EG105G-V3, ReyeeOS 2.324
- * (2026-10-24). It reads; the one change it makes (2.5.1) is a firmware upgrade to the version
- * the router itself is offered (system getVersion / upgradeConfirm, the page's "Online Upgrade").
- * Other changes are refused (UNSUPPORTED) until their write phases are built and live-tested.
+ * (2026-10-24). It reads; the changes it makes are a firmware upgrade to the version the router
+ * itself is offered (2.5.1: system getVersion / upgradeConfirm, the page's "Online Upgrade") and
+ * DHCP reservations (2.5.4: devConfig add / update / del dhcp_static). Other changes are refused
+ * (UNSUPPORTED) until their write phases are built and live-tested.
  *
  * What is read, and how it maps:
  * - networks: devConfig.get network, `lan[]` (one entry per LAN interface: address, netmask,
@@ -13,7 +14,10 @@
  *   arp, interfaces "br-lan*", resolved MACs only), named by their address lease (devSta.get
  *   dhcp_lease) when they have one. A lease alone is no online device (a switched-off laptop
  *   keeps it until it expires); WAN-side ARP entries are the upstream network.
- * - reservations: devConfig.get dhcp_static.
+ * - reservations: devConfig.get dhcp_static (`{name_uuid, macaddr, ipaddr}`, at most 300). Written
+ *   like the page does: add `{list: [{macaddr, ipaddr}]}`, update `{new, old}` (the entry as read,
+ *   and with its new address), del `{macaddr: [...]}`. Names live elsewhere (the page's remark list),
+ *   so a reservation here has no description.
  * - ports: devSta.get port_status. The router doesn't say which device is on which port, so
  *   `seen` stays empty; the WAN port is the uplink and protected.
  * - rules: devConfig.get access_ctrl (evaluated in list order). Anything the model can't say
@@ -28,6 +32,7 @@ import { createHash } from 'node:crypto';
 import { formatMac, normalizeMac } from '../../omadaClient/client.js';
 import { RuijieError, type RuijieClient } from '../../ruijieClient/index.js';
 import { inSubnet, ipToNumber, parseCidr, subnetsOverlap } from '../../utils/ipv4.js';
+import { checkReservationDelete, checkReservationSet } from '../reservations.js';
 import {
     NetError,
     type ApplyResult,
@@ -54,7 +59,9 @@ type Raw = Record<string, unknown>;
 
 /** Ruijie's name for "all the time" in a rule's time setting (the default time group). */
 const ALL_TIME = new Set(['所有时段', 'everytime', 'All Time', '']);
-const READ_ONLY = 'The Ruijie adapter makes no changes but firmware upgrades in this version; reservations and rules come next, then networks.';
+const READ_ONLY = 'The Ruijie adapter changes only DHCP reservations and firmware in this version; rules come next, then networks.';
+/** The router keeps at most this many reservations (dhcp_static_scan answers max 300). */
+const MAX_RESERVATIONS = 300;
 /**
  * Firmware is only installed from Ruijie's own download servers (e.g. devicecdn-eu.ruijienetworks.com),
  * at the address the router itself was offered. The router fetches it and checks it itself; the
@@ -352,7 +359,7 @@ export class RuijieNetworkController implements NetworkController {
             ports: { profiles: 'unsupported', assign: 'unsupported' },
             rules: { between: 'unsupported', toInternet: 'unsupported', deviceMatch: 'unsupported', wifiMatch: 'unsupported', stateful: 'unsupported', schedule: 'unsupported' },
             groups: { address: 'unsupported', mac: 'unsupported' },
-            reservations: 'unsupported',
+            reservations: this.client.readOnly ? 'unsupported' : 'native',
             mdnsRepeater: 'unsupported',
             firmware: this.firmwareAllowed() ? 'native' : 'unsupported',
         };
@@ -451,6 +458,7 @@ export class RuijieNetworkController implements NetworkController {
 
     async plan(change: Change): Promise<Plan> {
         if (this.client.readOnly) throw new NetError('UNSUPPORTED', 'Changes to the Ruijie router are switched off on this server (RUIJIE_READ_ONLY=true)', { capability: change.kind });
+        if (change.kind === 'reservation') return await this.planReservation(change);
         if (change.kind !== 'firmware') throw new NetError('UNSUPPORTED', READ_ONLY, { capability: change.kind });
         if (this.client.firmwareUpgrade === false) {
             throw new NetError('UNSUPPORTED', 'Firmware upgrades on the Ruijie router are switched off on this server (RUIJIE_FIRMWARE_UPGRADE=false)', { capability: 'firmware' });
@@ -506,11 +514,87 @@ export class RuijieNetworkController implements NetworkController {
         return plan;
     }
 
+    /**
+     * Plans setting or removing one DHCP reservation. The basis covers the router, its networks,
+     * every reservation and the devices the change moves: anything else changed since is a CONFLICT.
+     */
+    private async planReservation(change: Extract<Change, { kind: 'reservation' }>): Promise<Plan> {
+        const { mac: routerMac } = await this.router();
+        const networks = await this.listNetworks();
+        const entries = list((await this.client.config<Raw>('dhcp_static')).dhcp_static);
+        const clients = await this.listClients();
+        const world = { networks, reservations: toReservations(entries, networks), clients };
+        const entryOf = (mac: string) => entries.find((e) => normalizeMac(text(e.macaddr)) === normalizeMac(mac));
+        let step: Plan['steps'][number];
+        let effects: string[];
+        let wouldLockOut: Client[] = [];
+        let write: () => Promise<unknown>;
+        let expect: (after: Reservation | undefined) => boolean;
+        if (change.op === 'delete') {
+            const checked = checkReservationDelete(change.mac, world);
+            const entry = entryOf(checked.mac)!;
+            ({ step, effects } = checked);
+            // The address exactly as the router stores it.
+            write = () => this.client.call('devConfig.del', 'dhcp_static', { macaddr: [text(entry.macaddr)] });
+            expect = (after) => after === undefined;
+        } else {
+            const checked = checkReservationSet(change.value, world, { descriptions: false });
+            const entry = entryOf(checked.mac);
+            if (!entry && entries.length >= MAX_RESERVATIONS) throw new NetError('LIMIT', `The router keeps at most ${MAX_RESERVATIONS} reservations; remove one first`);
+            ({ step, effects, wouldLockOut } = checked);
+            write = entry
+                ? () => this.client.call('devConfig.update', 'dhcp_static', { new: { ...entry, ipaddr: checked.ip }, old: entry })
+                : () => this.client.call('devConfig.add', 'dhcp_static', { list: [{ macaddr: checked.mac.toLowerCase().replace(/-/g, ':'), ipaddr: checked.ip }] });
+            expect = (after) => after?.ip === checked.ip;
+        }
+        const plan: Plan = {
+            change,
+            vendor: 'ruijie',
+            steps: [{ ...step, object: 'ruijie.dhcp_static' }],
+            effects,
+            wouldLockOut,
+            basis: createHash('sha256')
+                .update(JSON.stringify({ change, controller: this.id, router: routerMac, networks, entries, lockOut: wouldLockOut.map((c) => c.mac).sort() }))
+                .digest('hex')
+                .slice(0, 16),
+        };
+        const mac = 'mac' in change ? change.mac : change.value.mac;
+        this.executors.set(plan, async () => {
+            try {
+                await write();
+            } catch (error) {
+                // Sent but unanswered: the router may or may not have stored it.
+                if (error instanceof RuijieError && error.kind === 'unreachable' && !error.notSent) {
+                    throw new RuijieError('The router stopped answering while the reservation was being sent, so it may or may not be stored; check net_listReservations before trying again.', 'unreachable');
+                }
+                throw error;
+            }
+            let after: Reservation[];
+            try {
+                after = await this.listReservations();
+            } catch {
+                return { applied: true, owned: [], warnings: ['The router accepted the reservation change, but reading it back failed; check it with net_listReservations.'] };
+            }
+            const found = after.find((r) => normalizeMac(r.mac) === normalizeMac(mac));
+            if (!expect(found)) throw new NetError('CONFLICT', 'The router accepted the reservation change but shows something else now; check it with net_listReservations.');
+            return { applied: true, ...(found ? { object: found } : {}), owned: [] };
+        });
+        return plan;
+    }
+
     async apply(plan: Plan, options: { allowLockout?: boolean } = {}): Promise<ApplyResult> {
         const run = this.queue.then(async () => {
             // Planned again right before writing: anything changed since is a CONFLICT.
             const fresh = await this.plan(plan.change);
             if (fresh.basis !== plan.basis) throw new NetError('CONFLICT', 'The router changed after this change was planned; nothing was written. Plan it again.');
+            if (fresh.change.kind === 'reservation') {
+                if (fresh.wouldLockOut.length && !options.allowLockout) {
+                    throw new NetError('LOCKOUT', `This moves ${fresh.wouldLockOut.length} online device(s) to another address at their next DHCP renewal. Nothing was changed; repeat with allowLockout and the dry run's basis if that is intended.`, {
+                        clients: fresh.wouldLockOut,
+                    });
+                }
+                return await this.executors.get(fresh)!();
+            }
             // The router restarts whoever is online, so an upgrade always needs allowLockout (and so the dry run's basis).
             if (!options.allowLockout) {
                 const who = fresh.wouldLockOut.length ? `cut off ${fresh.wouldLockOut.length} online device(s) and ` : '';

@@ -47,8 +47,8 @@ describe('net_ protection settings', () => {
 
         registerAllTools({ server, ruijieClient: { host: '192.0.2.1' } as unknown as RuijieClient });
 
-        expect(names.filter((n) => n.startsWith('net_'))).toHaveLength(23);
-        expect(names).toHaveLength(23); // nothing else: no Omada tools, no analyzeSensors without an AI client
+        expect(names.filter((n) => n.startsWith('net_'))).toHaveLength(26);
+        expect(names).toHaveLength(26); // nothing else: no Omada tools, no analyzeSensors without an AI client
     });
 
     it('builds the Ruijie client with the pin and the switches from the settings', () => {

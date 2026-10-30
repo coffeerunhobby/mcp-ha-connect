@@ -66,16 +66,43 @@ const as = (permissions: number) => ({ sessionId: 's', http: { authInfo: { extra
 const parse = (r: { content: { text: string }[] }) => JSON.parse(r.content[0].text);
 
 describe('net tools', () => {
-  it('registers twenty-three tools', () => {
+  it('registers twenty-six tools', () => {
     const { handlers, count } = setup();
 
-    expect(count).toBe(23);
+    expect(count).toBe(26);
     expect([...handlers.keys()]).toEqual([
       'net_capabilities', 'net_listNetworks', 'net_listWifi', 'net_createNetwork', 'net_updateNetwork', 'net_deleteNetwork', 'net_createWifi', 'net_updateWifi', 'net_deleteWifi',
       'net_listRules', 'net_listGroups', 'net_createRule', 'net_updateRule', 'net_deleteRule', 'net_moveRule',
       'net_listClients', 'net_listPortProfiles', 'net_listPorts', 'net_assignPort', 'net_getMdnsRepeater', 'net_setMdnsRepeater',
-      'net_listFirmware', 'net_upgradeFirmware',
+      'net_listFirmware', 'net_upgradeFirmware', 'net_listReservations', 'net_setReservation', 'net_deleteReservation',
     ]);
+  });
+
+  it('lists reservations with QUERY and the network names; setting and removing one needs CONFIGURE', async () => {
+    const { handlers, controller } = setup();
+    controller.listReservations = vi.fn(async () => [{ mac: '02-00-00-00-00-05', ip: '10.0.1.50', network: { id: 'n2' } }, { mac: '02-00-00-00-00-06', ip: '10.9.0.5', network: { id: 'gone' } }]);
+
+    expect(parse(await handlers.get('net_listReservations')!({}, as(Permission.QUERY)))).toEqual([
+      { mac: '02-00-00-00-00-05', ip: '10.0.1.50', network: { id: 'n2', name: 'IoT' } },
+      { mac: '02-00-00-00-00-06', ip: '10.9.0.5', network: { id: 'gone' } },
+    ]);
+    for (const tool of ['net_setReservation', 'net_deleteReservation']) {
+      expect((await handlers.get(tool)!({ mac: '02-00-00-00-00-05', ip: '10.0.1.51', dryRun: true }, as(Permission.QUERY))).isError, tool).toBe(true);
+    }
+    expect(controller.plan).not.toHaveBeenCalled();
+
+    await handlers.get('net_setReservation')!({ mac: '02-00-00-00-00-05', ip: '10.0.1.51', dryRun: true }, as(Permission.CONFIGURE));
+    expect(controller.plan).toHaveBeenLastCalledWith({ op: 'set', kind: 'reservation', value: { mac: '02-00-00-00-00-05', ip: '10.0.1.51' } });
+    await handlers.get('net_setReservation')!({ mac: '02-00-00-00-00-05', ip: '10.0.1.51', network: 'IoT', description: 'plug', dryRun: true }, as(Permission.CONFIGURE));
+    expect(controller.plan).toHaveBeenLastCalledWith({ op: 'set', kind: 'reservation', value: { mac: '02-00-00-00-00-05', ip: '10.0.1.51', network: { name: 'IoT' }, description: 'plug' } });
+    await handlers.get('net_deleteReservation')!({ mac: '02-00-00-00-00-05', dryRun: true }, as(Permission.CONFIGURE));
+    expect(controller.plan).toHaveBeenLastCalledWith({ op: 'delete', kind: 'reservation', mac: '02-00-00-00-00-05' });
+    expect(controller.apply).not.toHaveBeenCalled();
+    // Moving an online device: allowLockout only with the dry run's basis (the shared run()).
+    const refused = await handlers.get('net_setReservation')!({ mac: '02-00-00-00-00-05', ip: '10.0.1.51', allowLockout: true }, as(Permission.CONFIGURE));
+    expect(refused.content[0].text).toContain('allowLockout needs the basis');
+    await handlers.get('net_setReservation')!({ mac: '02-00-00-00-00-05', ip: '10.0.1.51', allowLockout: true, basis: 'abc' }, as(Permission.CONFIGURE));
+    expect(controller.apply).toHaveBeenCalledWith(expect.anything(), { allowLockout: true });
   });
 
   it('lists firmware with QUERY; upgrading needs ADMIN, and a device by MAC or name', async () => {

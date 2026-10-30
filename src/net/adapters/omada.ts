@@ -53,6 +53,7 @@ import {
     type WifiSecurity,
 } from '../model.js';
 import { MAX_NETWORK_NAME, MAX_WIFI_NAME, checkBands, checkDhcp, checkGateway, checkName, checkNetworkUnique, checkVlan } from '../validate.js';
+import { checkReservationDelete, checkReservationSet } from '../reservations.js';
 
 import {
     GROUP_TYPE,
@@ -413,10 +414,7 @@ export class OmadaNetworkController implements NetworkController {
     }
 
     async listReservations(): Promise<Reservation[]> {
-        const rows = await this.client.accessControl.listDhcpReservations(this.options.siteId);
-        return rows
-            .filter((r) => typeof r.ip === 'string')
-            .map((r) => ({ mac: formatMac(r.mac), ip: String(r.ip), network: { id: r.netId }, ...(r.description ? { description: String(r.description) } : {}) }));
+        return toReservations(await this.client.accessControl.listDhcpReservations(this.options.siteId));
     }
 
     async listPortProfiles(): Promise<PortProfile[]> {
@@ -709,6 +707,82 @@ export class OmadaNetworkController implements NetworkController {
         };
     }
 
+    // ---- DHCP reservations (the checks every vendor shares are in ../reservations.ts) -------------
+
+    private async buildReservation(change: Extract<Change, { kind: 'reservation' }>, snap: Snapshot): Promise<Built> {
+        const raw = await this.client.accessControl.listDhcpReservations(snap.siteId);
+        const world = { networks: snap.networks, reservations: toReservations(raw), clients: snap.clients };
+        const rawOf = (mac: string) => raw.find((r) => normalizeMac(r.mac) === normalizeMac(mac));
+        // The controller's and this server's own reservations are never moved or removed (where known).
+        const guard = (mac: string, ips: Array<string | undefined>) => {
+            const at = (addresses: number[] | 'unknown' | 'unset') => Array.isArray(addresses) && ips.some((ip) => ip !== undefined && addresses.includes(ipToNumber(ip)));
+            const who = at(this.controllerAddresses) ? 'the controller' : at(this.serverAddresses) ? 'this server' : undefined;
+            if (who) throw new NetError('PROTECTED', `${mac} is ${who}: its address is never moved or released through the tools`);
+        };
+        const online = (mac: string) => snap.clients.find((c) => c.online && normalizeMac(c.mac) === normalizeMac(mac));
+        const extra = { reservations: raw.map(canonical) };
+        if (change.op === 'delete') {
+            const checked = checkReservationDelete(change.mac, world);
+            guard(checked.mac, [checked.current.ip, online(checked.mac)?.ip]);
+            const target = formatMac(rawOf(checked.mac)!.mac);
+            return {
+                steps: [{ ...checked.step, object: 'omada.dhcpReservation' }],
+                effects: checked.effects,
+                wouldLockOut: [],
+                reads: { networks: true },
+                extra,
+                execute: async (s) => {
+                    await this.client.networkConfig.deleteDhcpReservation(target, s.siteId);
+                    const after = await this.readBack(s.siteId, checked.mac);
+                    if (after === 'unread') return { applied: true, owned: [], warnings: [UNREAD] };
+                    if (after) throw new NetError('CONFLICT', `The controller accepted the removal but still shows a reservation for ${checked.mac}; check it with net_listReservations.`);
+                    return { applied: true, owned: [] };
+                },
+            };
+        }
+        const checked = checkReservationSet(change.value, world, { descriptions: true });
+        const device = online(checked.mac);
+        // Pinning such a device to the address it has is fine; moving it is not.
+        if ((checked.current && checked.current.ip !== checked.ip) || (device?.ip !== undefined && device.ip !== checked.ip)) guard(checked.mac, [checked.current?.ip, device?.ip]);
+        const before = rawOf(checked.mac);
+        const body: RawRecord = {
+            netId: checked.network.id,
+            mac: checked.mac,
+            ip: checked.ip,
+            description: checked.description || undefined,
+            status: true,
+            options: before?.options ?? [],
+        };
+        return {
+            steps: [{ ...checked.step, object: 'omada.dhcpReservation' }],
+            effects: checked.effects,
+            wouldLockOut: checked.wouldLockOut,
+            reads: { networks: true },
+            extra,
+            execute: async (s) => {
+                if (before) await this.client.networkConfig.updateDhcpReservation(formatMac(before.mac), body, s.siteId);
+                else await this.client.networkConfig.createDhcpReservation(body, s.siteId);
+                const after = await this.readBack(s.siteId, checked.mac);
+                if (after === 'unread') return { applied: true, owned: [], warnings: [UNREAD] };
+                if (!after || after.ip !== checked.ip || !('id' in after.network) || after.network.id !== checked.network.id) {
+                    throw new NetError('CONFLICT', `The controller accepted the reservation but shows something else for ${checked.mac} now; check it with net_listReservations.`);
+                }
+                return { applied: true, object: after, owned: [] };
+            },
+        };
+    }
+
+    /** The device's reservation as the controller has it now (undefined: none; 'unread': the read failed). */
+    private async readBack(siteId: string, mac: string): Promise<Reservation | undefined | 'unread'> {
+        let rows;
+        try {
+            rows = await this.client.accessControl.listDhcpReservations(siteId);
+        } catch {
+            return 'unread';
+        }
+        return toReservations(rows).find((r) => normalizeMac(r.mac) === normalizeMac(mac));
+    }
+
     // ---- plan / apply ------------------------------------------------------------------
 
     async plan(change: Change): Promise<Plan> {
@@ -770,6 +844,8 @@ export class OmadaNetworkController implements NetworkController {
                 throw unsupported('creating or deleting port profiles here (do it in the controller web UI)', 'ports.profiles');
             case 'mdnsRepeater':
                 return await this.buildMdnsSet(change.enabled, change.networks, snap);
+            case 'reservation':
+                return await this.buildReservation(change, snap);
             case 'firmware':
                 // The Open API can (start-online-upgrade), but it isn't live-tested here yet.
                 throw new NetError('UNSUPPORTED', 'Upgrading Omada firmware through the net_ tools is not available yet; use the controller web UI (Devices > upgrade).', { capability: 'firmware' });
@@ -780,10 +856,7 @@ export class OmadaNetworkController implements NetworkController {
                 if (change.op === 'move') return this.buildRuleMove(change.ref, change.position, snap);
                 break;
             default:
-                throw notYet(
-                    `${change.kind} changes`,
-                    change.kind === 'group' ? 'a later release (use omada_createGroup / omada_deleteGroup)' : 'a later release (use omada_setDhcpReservation)'
-                );
+                throw notYet(`${change.kind} changes`, 'a later release (use omada_createGroup / omada_deleteGroup)');
         }
         throw new NetError('INVALID', 'This change is not supported');
     }
@@ -1799,6 +1872,15 @@ function describeNetworkChanges(current: Network, next: { name: string; vlan: nu
  * rules are sets (ids of networks, services...), so the same state listed in another order
  * fingerprints the same.
  */
+const UNREAD = 'The reservation change was accepted, but reading it back failed; check it with net_listReservations.';
+
+/** Controller reservations in the model (entries without an address are left out). */
+function toReservations(rows: Array<{ mac: string; ip?: unknown; netId: string; description?: unknown }>): Reservation[] {
+    return rows
+        .filter((r) => typeof r.ip === 'string')
+        .map((r) => ({ mac: formatMac(r.mac), ip: String(r.ip), network: { id: r.netId }, ...(r.description ? { description: String(r.description) } : {}) }));
+}
+
 function canonical(value: unknown): unknown {
     if (Array.isArray(value)) {
         return value

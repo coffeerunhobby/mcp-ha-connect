@@ -60,11 +60,11 @@ function controller(controllerHost = '10.0.0.250', resolveHost?: (host: string) 
         /** The gateway ACL list after every write, to check intermediate states. */
         history: [] as Raw[][],
         /** A read that fails once, after letting `skip` calls through (an answer lost after a write); listAcls counts gateway ACL reads only. */
-        failRead: undefined as undefined | { op: 'listAcls' | 'listGroups' | 'listClients'; skip: number },
+        failRead: undefined as undefined | { op: 'listAcls' | 'listGroups' | 'listClients' | 'listDhcpReservations'; skip: number },
         nextId: 0,
     };
     const writes: Array<{ op: string; args: unknown[] }> = [];
-    const failRead = (op: 'listAcls' | 'listGroups' | 'listClients') => {
+    const failRead = (op: 'listAcls' | 'listGroups' | 'listClients' | 'listDhcpReservations') => {
         if (state.failRead?.op !== op) return;
         if (state.failRead.skip-- > 0) return;
         state.failRead = undefined;
@@ -103,6 +103,9 @@ function controller(controllerHost = '10.0.0.250', resolveHost?: (host: string) 
         if (op === 'updateSsidBasic') state.ssids = state.ssids.map((s) => (s.ssidId === args[1] ? { ...s, detail: { ...s.detail, ...(args[2] as Raw) } } : s));
         if (op === 'updateSsidMacFilter') state.ssids = state.ssids.map((s) => (s.ssidId === args[1] ? { ...s, detail: { ...s.detail, macFilter: args[2] } } : s));
         if (op === 'deleteSsid') state.ssids = state.ssids.filter((s) => s.ssidId !== args[1]);
+        if (op === 'createDhcpReservation') state.reservations.push(args[0] as Raw);
+        if (op === 'updateDhcpReservation') state.reservations = state.reservations.map((r) => (r.mac === args[0] ? (args[1] as Raw) : r));
+        if (op === 'deleteDhcpReservation') state.reservations = state.reservations.filter((r) => r.mac !== args[0]);
     };
     const client = {
         controllerHost: '10.0.0.250',
@@ -141,6 +144,9 @@ function controller(controllerHost = '10.0.0.250', resolveHost?: (host: string) 
             updateGatewayAcl: vi.fn(record('updateGatewayAcl')),
             deleteGatewayAcl: vi.fn(record('deleteGatewayAcl')),
             reorderGatewayAcls: vi.fn(record('reorderGatewayAcls')),
+            createDhcpReservation: vi.fn(record('createDhcpReservation')),
+            updateDhcpReservation: vi.fn(record('updateDhcpReservation')),
+            deleteDhcpReservation: vi.fn(record('deleteDhcpReservation')),
         },
         listClients: vi.fn(async () => {
             failRead('listClients');
@@ -149,7 +155,10 @@ function controller(controllerHost = '10.0.0.250', resolveHost?: (host: string) 
         listMacGroups: vi.fn(async () => structuredClone(state.macGroups)),
         listDevices: vi.fn(async () => structuredClone(state.devices)),
         accessControl: {
-            listDhcpReservations: vi.fn(async () => structuredClone(state.reservations)),
+            listDhcpReservations: vi.fn(async () => {
+                if (state.failRead?.op === 'listDhcpReservations') failRead('listDhcpReservations');
+                return structuredClone(state.reservations);
+            }),
             listTimeRanges: vi.fn(async () => structuredClone(state.timeRanges)),
         },
     };
@@ -843,9 +852,100 @@ describe('plan and apply', () => {
         const { net } = controller();
 
         expect(await code(net.plan({ op: 'delete', kind: 'group', ref: { name: 'x' } }))).toBe('UNSUPPORTED');
-        expect(await code(net.plan({ op: 'delete', kind: 'reservation', mac: '02-00-00-00-00-01' }))).toBe('UNSUPPORTED');
         expect(await code(net.plan({ op: 'delete', kind: 'portProfile', ref: { name: 'IoT' } }))).toBe('UNSUPPORTED');
         expect((await net.capabilities()).wifi.security).toEqual(['open', 'wpa2', 'wpa3']);
+    });
+});
+
+// ---- DHCP reservations (2.5.4) ----------------------------------------------------------------
+
+describe('reservations', () => {
+    const reserve = (mac: string, ip: string, extra: Partial<Extract<Change, { kind: 'reservation'; op: 'set' }>['value']> = {}): Change => ({ op: 'set', kind: 'reservation', value: { mac, ip, ...extra } });
+    const RESERVED = { netId: 'net-iot', mac: '02-00-00-00-00-05', ip: '10.0.1.50', description: 'plug', status: true, options: [{ code: 42 }] };
+
+    it('creates one with the same body as omada_setDhcpReservation and reads it back', async () => {
+        const { writes, apply } = controller();
+
+        const result = await apply(reserve('02:aa:bb:cc:dd:ee', '10.0.1.40', { description: ' printer ' }));
+
+        expect(writes).toEqual([{ op: 'createDhcpReservation', args: [{ netId: 'net-iot', mac: '02-AA-BB-CC-DD-EE', ip: '10.0.1.40', description: 'printer', status: true, options: [] }, 'site-1'] }]);
+        expect(result).toEqual({ applied: true, object: { mac: '02-AA-BB-CC-DD-EE', ip: '10.0.1.40', network: { id: 'net-iot' }, description: 'printer' }, owned: [] });
+        expect(await controller().net.listReservations()).toEqual([]);
+    });
+
+    it('changes one in place (PATCH by its MAC), keeping its DHCP options and description', async () => {
+        const { state, writes, net, apply } = controller();
+        state.reservations.push(structuredClone(RESERVED));
+
+        const plan = await net.plan(reserve('02-00-00-00-00-05', '10.0.1.51'));
+        expect(plan.steps).toEqual([{ action: 'update', object: 'omada.dhcpReservation', name: '02-00-00-00-00-05', detail: '10.0.1.50 → 10.0.1.51' }]);
+        await apply(reserve('02-00-00-00-00-05', '10.0.1.51'));
+
+        expect(writes).toEqual([{ op: 'updateDhcpReservation', args: ['02-00-00-00-00-05', { netId: 'net-iot', mac: '02-00-00-00-00-05', ip: '10.0.1.51', description: 'plug', status: true, options: [{ code: 42 }] }, 'site-1'] }]);
+    });
+
+    it('moving an online device needs allowLockout; pinning it to its address does not', async () => {
+        const { writes, apply } = controller();
+
+        expect(await code(apply(reserve('02-00-00-00-00-01', '10.0.0.150')))).toBe('LOCKOUT');
+        expect(writes).toEqual([]);
+        expect(await code(apply(reserve('02-00-00-00-00-01', '10.0.0.101')))).toBe('ok');
+        expect(await code(apply(reserve('02-00-00-00-00-01', '10.0.0.150'), true))).toBe('ok');
+    });
+
+    it('removes one by its MAC as the controller has it', async () => {
+        const { state, writes, apply } = controller();
+        state.reservations.push({ ...structuredClone(RESERVED), mac: '02-00-00-00-00-05' });
+
+        expect(await apply({ op: 'delete', kind: 'reservation', mac: '02:00:00:00:00:05' })).toEqual({ applied: true, owned: [] });
+        expect(writes).toEqual([{ op: 'deleteDhcpReservation', args: ['02-00-00-00-00-05', 'site-1'] }]);
+        expect(state.reservations).toEqual([]);
+    });
+
+    it('never moves or removes the reservation of the controller or this server; pinning them is fine', async () => {
+        const { state, writes, apply } = controller('10.0.0.250', undefined, ['10.0.0.9']);
+        state.clients.push({ mac: '02:00:00:00:00:09', name: 'mcp', ip: '10.0.0.9', vid: 1, active: true });
+        state.reservations.push({ netId: 'net-default', mac: '02-00-00-00-00-0A', ip: '10.0.0.250', status: true, options: [] });
+
+        await expect(apply(reserve('02-00-00-00-00-09', '10.0.0.10'), true)).rejects.toMatchObject({ code: 'PROTECTED', message: '02-00-00-00-00-09 is this server: its address is never moved or released through the tools' });
+        await expect(apply({ op: 'delete', kind: 'reservation', mac: '02-00-00-00-00-0A' })).rejects.toMatchObject({ code: 'PROTECTED', message: expect.stringContaining('is the controller') });
+        await expect(apply(reserve('02-00-00-00-00-0A', '10.0.0.251'))).rejects.toMatchObject({ code: 'PROTECTED' });
+        expect(writes).toEqual([]);
+        expect(await code(apply(reserve('02-00-00-00-00-09', '10.0.0.9')))).toBe('ok');
+    });
+
+    it('a reservation changed in the controller after the dry run is a CONFLICT', async () => {
+        const { state, writes, net } = controller();
+        const plan = await net.plan(reserve('02-AA-BB-CC-DD-EE', '10.0.1.40'));
+        state.reservations.push(structuredClone(RESERVED));
+
+        expect(await code(net.apply(plan))).toBe('CONFLICT');
+        expect(writes).toEqual([]);
+    });
+
+    it('reads every change back: something else stored is a CONFLICT, an unreadable answer a warning', async () => {
+        const ignored = controller();
+        ignored.state.beforeWrite = (op) => {
+            if (op === 'createDhcpReservation') ignored.state.reservations.push({ netId: 'net-iot', mac: '02-AA-BB-CC-DD-EE', ip: '10.0.1.99', status: true });
+        };
+        // The fake stores the body too, after the one pushed first: the first match (10.0.1.99) is read back.
+        expect(await code(ignored.apply(reserve('02-AA-BB-CC-DD-EE', '10.0.1.40')))).toBe('CONFLICT');
+
+        const kept = controller();
+        kept.state.reservations.push(structuredClone(RESERVED));
+        kept.state.beforeWrite = (op) => {
+            if (op === 'deleteDhcpReservation') kept.state.reservations.push({ ...structuredClone(RESERVED), mac: '02:00:00:00:00:05' });
+        };
+        expect(await code(kept.apply({ op: 'delete', kind: 'reservation', mac: '02-00-00-00-00-05' }))).toBe('CONFLICT');
+
+        const unread = controller();
+        // The snapshot, the plan and apply's re-plan read the reservations; the read after the write fails.
+        unread.state.failRead = { op: 'listDhcpReservations', skip: 2 };
+        expect(await unread.apply(reserve('02-AA-BB-CC-DD-EE', '10.0.1.40'))).toEqual({
+            applied: true,
+            owned: [],
+            warnings: ['The reservation change was accepted, but reading it back failed; check it with net_listReservations.'],
+        });
     });
 });
 

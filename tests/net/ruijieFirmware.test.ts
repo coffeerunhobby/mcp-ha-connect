@@ -180,8 +180,8 @@ describe('upgrading the firmware', () => {
         const { net, calls } = controller();
         expect(await code(net.plan({ op: 'upgrade', kind: 'firmware', device: { mac: '02:00:00:00:00:99' } }))).toBe('NOT_FOUND');
         expect(await code(net.plan({ op: 'upgrade', kind: 'firmware', device: { name: 'EG105G-V3' } }))).toBe('ok');
-        await expect(net.plan({ op: 'delete', kind: 'reservation', mac: '02:00:00:00:00:03' })).rejects.toMatchObject({ code: 'UNSUPPORTED', details: { capability: 'reservation' } });
-        expect(await code(net.apply({ change: { op: 'delete', kind: 'reservation', mac: 'x' } } as Plan))).toBe('UNSUPPORTED');
+        await expect(net.plan({ op: 'delete', kind: 'rule', ref: { name: 'x' } })).rejects.toMatchObject({ code: 'UNSUPPORTED', details: { capability: 'rule' } });
+        expect(await code(net.apply({ change: { op: 'delete', kind: 'rule', ref: { name: 'x' } } } as Plan))).toBe('UNSUPPORTED');
         expect(upgrades(calls)).toEqual([]);
         expect(elsewhere.calls.filter(([m]) => m === 'upgradeConfirm')).toEqual([]);
     });
