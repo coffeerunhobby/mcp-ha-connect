@@ -298,9 +298,13 @@ export function getOpenApiSpec(baseUrl: string): object {
 }
 
 /**
- * Handle CORS preflight
+ * CORS headers for the MCP endpoint (and every other non-REST path), for browser MCP
+ * clients such as LocalAI's chat. The SDK client sends `MCP-Protocol-Version` on every
+ * request after initialize (and `Last-Event-ID` when it resumes a stream); a header the
+ * preflight doesn't allow makes the browser drop the request as a "NetworkError". The
+ * exposed headers let a browser client read the session id and the negotiated version.
  */
-function handleCors(req: IncomingMessage, res: ServerResponse, config: EnvironmentConfig): void {
+export function handleCors(req: IncomingMessage, res: ServerResponse, config: EnvironmentConfig): void {
   if (!config.httpAllowCors) {
     return;
   }
@@ -312,7 +316,8 @@ function handleCors(req: IncomingMessage, res: ServerResponse, config: Environme
   if (allowedOrigins.length === 0 || (origin && allowedOrigins.includes(origin))) {
     res.setHeader('Access-Control-Allow-Origin', origin ?? '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version, Last-Event-ID');
+    res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id, MCP-Protocol-Version');
     res.setHeader('Access-Control-Max-Age', '86400');
   }
 }
@@ -447,12 +452,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       return;
     }
 
-    // Apply CORS headers for the browser-facing REST surface BEFORE rate limiting
-    // and auth, so a 429 or 401 rejection still carries `Access-Control-Allow-Origin`.
-    // Otherwise the browser masks the real status as an opaque "NetworkError when
-    // attempting to fetch resource" (Open WebUI auth failures looked like this).
+    // Apply CORS headers BEFORE rate limiting and auth, so a 429 or 401 rejection
+    // still carries `Access-Control-Allow-Origin`. Otherwise the browser masks the
+    // real status as an opaque "NetworkError when attempting to fetch resource"
+    // (Open WebUI auth failures looked like this; so did a browser MCP client's).
     if (isRestApiCorsPath(url, urlPath, sseEventsPath)) {
       addRestApiCors(req, res);
+    } else {
+      handleCors(req, res, config);
     }
 
     // Apply rate limiting (skip health checks and certain paths)
@@ -467,9 +474,6 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
     if (!authMiddleware(req, res)) {
       return; // Response already sent by auth middleware
     }
-
-    // Add CORS headers for MCP endpoints
-    handleCors(req, res, config);
 
     try {
       // Health check endpoint
