@@ -1,4 +1,4 @@
-### Unreleased
+### 2.5.5
 - **Fix — browser MCP clients failed CORS on `/mcp`.** The SDK client sends `MCP-Protocol-Version` on every request after initialize (and `Last-Event-ID` when it resumes a stream), but the preflight allowed only `Content-Type, Authorization, Mcp-Session-Id`, so the browser dropped the request: LocalAI's chat (client MCP) showed "SSE error: NetworkError when attempting to fetch resource". Both are now allowed, and `Access-Control-Expose-Headers: Mcp-Session-Id, MCP-Protocol-Version` lets a browser client read them. The origin must still be in `MCP_HTTP_ALLOWED_ORIGINS`.
 - **Fix — a 401 or 429 on `/mcp` carried no CORS headers** (they were set after auth and rate limiting), so a browser showed a NetworkError instead of the real status. They are now set first, as on the REST surface since 1.5.2.
 - +4 tests (`tests/server/mcpCors.test.ts`, through the real server: the preflight, an origin not allowed, the 401, the exposed headers on an authenticated initialize; mutation-checked).
