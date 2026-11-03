@@ -141,10 +141,10 @@ describe('LocalAIClient', () => {
   describe('getModelName', () => {
     it('should return the configured model name', () => {
       const config = createConfig('ollama');
-      config.aiModel = 'phi4:14b';
+      config.aiModel = 'phi-4-q4_k_m';
       const client = new LocalAIClient(config);
 
-      expect(client.getModelName()).toBe('phi4:14b');
+      expect(client.getModelName()).toBe('phi-4-q4_k_m');
     });
   });
 
