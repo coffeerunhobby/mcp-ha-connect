@@ -2,4 +2,4 @@
  * Package version - hardcoded at build time for reliability
  * Keep in sync with package.json version
  */
-export const VERSION = '2.5.5';
+export const VERSION = '2.5.6-rc.1';

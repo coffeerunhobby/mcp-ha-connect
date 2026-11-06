@@ -1,4 +1,4 @@
-### Unreleased
+### 2.5.6-rc.1
 - **New: traffic rules on Ruijie / Reyee routers.** `net_createRule`, `net_updateRule`, `net_deleteRule` and `net_moveRule` now work with `controller: "ruijie"`, through the same calls as the router's own page (`src/net/adapters/ruijieRules.ts`, mapped on ReyeeOS 2.430): add and update `{list: [entry]}`, delete `{uuid: [...]}`, a move one place at a time `{uuid, opt}`.
   - A block rule is what the page writes (REJECT on new and invalid connections), so replies pass and the other side can still start connections; an allow is ACCEPT on every state. `net_listRules` now reads these as ordinary rules instead of `foreign`; other connection states stay `foreign`, and `foreign` rules are not changed.
   - One source and one destination per rule: a network, one address or network, or the internet, with one port. One device by MAC goes towards the whole internet only. Names are 1 to 28 characters without shell characters. Refused with the reason: schedules, groups, Wi-Fi, the router as a destination, several ports.
