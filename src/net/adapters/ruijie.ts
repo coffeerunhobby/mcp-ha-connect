@@ -636,7 +636,7 @@ export class RuijieNetworkController implements NetworkController {
         const networks = await this.listNetworks();
         const entries = await this.ruleEntries();
         const clients = await this.listClients();
-        const world: RuleWorld = { networks, routerHost: this.client.host, serverAddresses: this.serverAddresses, clients };
+        const world: RuleWorld = { networks, routerHost: this.client.host, routerMac, serverAddresses: this.serverAddresses, clients };
         const rules = entries.map((raw, i) => ({ raw, rule: toRule(raw, i, networks) }));
         const editable = (ref: Parameters<typeof resolve>[1], what: string) => {
             const found = resolve(rules.map((r) => ({ ...r, id: r.rule.id, name: r.rule.name })), ref, 'rule');

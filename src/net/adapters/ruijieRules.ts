@@ -36,6 +36,8 @@ export interface RuleWorld {
     networks: Network[];
     /** The router's management address. */
     routerHost: string;
+    /** The router's MAC, as "AA-BB-CC-DD-EE-FF". */
+    routerMac?: string;
     /** This server's addresses; 'unset' when they aren't configured or aren't plain addresses (MCP_SERVER_ADDRESSES). */
     serverAddresses: number[] | 'unset';
     clients: Client[];
@@ -177,6 +179,7 @@ function sourceHit(raw: Raw, world: RuleWorld): string | undefined {
     };
     if (text(raw.by) === 'mac') {
         const mac = text(raw.mac).toLowerCase().replace(/:/g, '-');
+        if (world.routerMac?.toLowerCase() === mac) return 'the router itself';
         const at = number(world.clients.find((c) => c.mac.toLowerCase() === mac)?.ip ?? '');
         if (server !== 'unset' && at !== undefined) return server.includes(at) ? 'this server' : undefined;
         // Not seen, or this server's address unknown: it is ruled out only when the router sees this
@@ -206,6 +209,13 @@ function sourceHit(raw: Raw, world: RuleWorld): string | undefined {
         } catch {
             return 'a source this check cannot read';
         }
+        // Every network's gateway is the router.
+        const routerHit = world.networks.some((n) => {
+            if (!n.gateway) return false;
+            const gateway = ipToNumber(parseCidr(n.gateway).ip);
+            return gateway >= range.network && gateway <= range.broadcast;
+        });
+        if (routerHit) return `the router itself (${address} includes its address)`;
         if (server === 'unset') {
             const hit = protectedNets.find((n) => subnetsOverlap(address, n.gateway!));
             if (hit) return `devices on '${hit.name}' (${address}; this server's address isn't configured in MCP_SERVER_ADDRESSES, so it may be among them)`;

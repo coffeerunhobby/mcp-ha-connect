@@ -367,6 +367,15 @@ describe('Ruijie rules: what stays online', () => {
         expect(await code(controller({ entries }).net.plan(update('b', { position: 2 })))).toBe('ok');
     });
 
+    it('never blocks the router itself from the internet', async () => {
+        const server = { serverHosts: ['192.168.110.2'] };
+        expect(await code(controller(server).net.plan(create({ from: [{ addresses: ['192.168.110.1'] }] })))).toBe('PROTECTED');
+        expect(await code(controller(server).net.plan(create({ from: [{ addresses: ['10.20.0.1'] }] })))).toBe('PROTECTED');
+        expect(await code(controller(server).net.plan(create({ from: [{ addresses: ['192.168.110.0/30'] }] })))).toBe('PROTECTED');
+        const routerMac = String(fixture('sysinfo').sys_mac);
+        expect(await code(controller(server).net.plan(create({ from: [{ device: routerMac }] })))).toBe('PROTECTED');
+    });
+
     it('protects every address the router has, also when it is reached by name', async () => {
         const iot = { from: [{ network: { name: 'IoT' } }] };
         expect(await code(controller({ host: 'router.lan' }).net.plan(create({ ...iot, to: [{ addresses: ['192.168.110.1'] }] })))).toBe('PROTECTED');
