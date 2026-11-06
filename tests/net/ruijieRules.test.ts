@@ -26,6 +26,7 @@ const twoLans = (): Raw => {
 };
 
 interface Over {
+    host?: string;
     readOnly?: boolean;
     entries?: Raw[];
     serverHosts?: string[];
@@ -40,7 +41,7 @@ function controller(over: Over = {}) {
     const writes: Array<[string, Raw]> = [];
     let next = 0;
     const client = {
-        host: '192.168.110.1',
+        host: over.host ?? '192.168.110.1',
         ...(over.readOnly !== undefined ? { readOnly: over.readOnly } : {}),
         config: async (module: string) => {
             if (module === 'network') return twoLans();
@@ -191,8 +192,8 @@ describe('Ruijie rules: creating', () => {
 
     it('maps addresses to the side they are on', async () => {
         const inside = controller();
-        await inside.apply(create({ from: [{ addresses: ['192.168.110.50'] }], to: [{ addresses: ['10.20.0.0/24'] }], name: 'a' }));
-        expect(added(inside.writes)).toMatchObject({ src: 'lan', srcIP: '192.168.110.50', dest: 'lan', destIP: '10.20.0.0/24' });
+        await inside.apply(create({ from: [{ addresses: ['192.168.110.50'] }], to: [{ addresses: ['10.20.0.128/25'] }], name: 'a' }));
+        expect(added(inside.writes)).toMatchObject({ src: 'lan', srcIP: '192.168.110.50', dest: 'lan', destIP: '10.20.0.128/25' });
         const outside = controller();
         const result = await outside.apply(create({ to: [{ addresses: ['8.8.8.8'] }], name: 'b' }));
         expect(added(outside.writes)).toMatchObject({ src: 'vlan20', dest: 'wan', destIP: '8.8.8.8' });
@@ -342,6 +343,7 @@ describe('Ruijie rules: what stays online', () => {
         ['user groups', { userGroupList: ['kids'] }],
         ['IPv6', { netProto: 'ipv6' }],
         ['a device', { by: 'mac', mac: '02:aa:bb:cc:dd:ee' }],
+        ['a match some other way', { by: 'user' }],
     ])('an allow limited by %s shields nothing below it', async (_what, limit) => {
         const entries = [{ ...allowAll, ...limit }];
         const below = create({ from: [{ network: { name: 'LAN' } }] });
@@ -357,6 +359,13 @@ describe('Ruijie rules: what stays online', () => {
         expect(await code(controller({ entries: [allowAll, stop, between] }).net.plan(update('stop', { position: 1 })))).toBe('PROTECTED');
         expect(await code(controller({ entries: [between, allowAll, stop] }).net.plan(update('all-out', { position: 3 })))).toBe('PROTECTED');
         expect(await code(controller({ entries }).net.plan(update('b', { position: 2 })))).toBe('ok');
+    });
+
+    it('protects every address the router has, also when it is reached by name', async () => {
+        const iot = { from: [{ network: { name: 'IoT' } }] };
+        expect(await code(controller({ host: 'router.lan' }).net.plan(create({ ...iot, to: [{ addresses: ['192.168.110.1'] }] })))).toBe('PROTECTED');
+        expect(await code(controller().net.plan(create({ from: [{ network: { name: 'LAN' } }], to: [{ addresses: ['10.20.0.1'] }] })))).toBe('PROTECTED');
+        expect(await code(controller({ host: 'router.lan' }).net.plan(create({ ...iot, to: [{ addresses: ['192.168.110.50'] }] })))).toBe('ok');
     });
 
     it('refuses what uncovers a block on the router\'s or this server\'s address', async () => {

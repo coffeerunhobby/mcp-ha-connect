@@ -237,7 +237,7 @@ function reachesOutside(raw: Raw, world: RuleWorld): boolean {
  */
 const shields = (raw: Raw) =>
     text(raw.target).toUpperCase() === 'ACCEPT' &&
-    text(raw.by) !== 'mac' &&
+    (text(raw.by) === 'ip' || text(raw.by) === '') &&
     (text(raw.src) === 'lan' || text(raw.src) === 'all') &&
     !text(raw.srcIP) &&
     towardsWholeInternet(raw) &&
@@ -313,8 +313,11 @@ export function guardDestination(entry: Raw, world: RuleWorld): void {
     try {
         router = ipToNumber(world.routerHost);
     } catch {
-        router = undefined;
+        // Reached by name: where it is managed from is its first network's gateway.
+        router = world.networks[0]?.gateway ? ipToNumber(parseCidr(world.networks[0].gateway).ip) : undefined;
     }
+    // Every network's gateway is the router too.
+    const routerAddresses = [...(router === undefined ? [] : [router]), ...world.networks.filter((n) => n.gateway).map((n) => ipToNumber(parseCidr(n.gateway!).ip))];
     if (!text(entry.destIP)) {
         const where = text(entry.dest);
         const reached = world.networks.filter((n) => n.gateway && (where === 'lan' || where === 'all' || n.id === where));
@@ -331,7 +334,7 @@ export function guardDestination(entry: Raw, world: RuleWorld): void {
             throw new NetError('PROTECTED', `The destination ${address} can't be read, so it may include the router or this server; refused`);
         }
         const covers = (a: number) => a >= range.network && a <= range.broadcast;
-        if (router !== undefined && covers(router)) throw new NetError('PROTECTED', `${address} includes the router's own address; a rule may not block it`);
+        if (routerAddresses.some(covers)) throw new NetError('PROTECTED', `${address} includes the router's own address; a rule may not block it`);
         if (world.serverAddresses !== 'unset' && world.serverAddresses.some(covers)) throw new NetError('PROTECTED', `${address} includes this server's address; a rule may not block it`);
     }
 }
