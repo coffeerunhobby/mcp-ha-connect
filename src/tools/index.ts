@@ -61,7 +61,7 @@ export function registerAllTools(options: RegisterToolsOptions): void {
     totalTools += omadaToolCount;
     netControllers.push(new OmadaNetworkController(omadaClient, { controllerHost: omadaClient.controllerHost, serverHosts: omadaClient.serverAddresses }));
   }
-  if (ruijieClient) netControllers.push(new RuijieNetworkController(ruijieClient));
+  if (ruijieClient) netControllers.push(new RuijieNetworkController(ruijieClient, { serverHosts: ruijieClient.serverAddresses }));
   // Vendor-neutral net_* tools, through every configured adapter (same in eager and graph mode).
   totalTools += registerNetTools(server, netControllers);
 

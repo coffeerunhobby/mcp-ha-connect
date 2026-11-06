@@ -37,6 +37,8 @@ export interface RuijieClientConfig {
     readOnly?: boolean;
     /** false: firmware upgrades are refused (RUIJIE_FIRMWARE_UPGRADE). */
     firmwareUpgrade?: boolean;
+    /** LAN addresses of the machine this server runs on (MCP_SERVER_ADDRESSES). */
+    serverAddresses?: string[];
     /** Milliseconds per request (default 15000). */
     timeout?: number;
 }
@@ -79,6 +81,8 @@ export class RuijieClient {
     private readonly dispatcher?: Dispatcher;
     /** Changes through the tools switched off (RUIJIE_READ_ONLY). */
     readonly readOnly: boolean;
+    /** Where this server runs, so no rule cuts it off; empty when not configured. */
+    readonly serverAddresses: string[];
     /** Firmware upgrades allowed (RUIJIE_FIRMWARE_UPGRADE). */
     readonly firmwareUpgrade: boolean;
     private session?: Session;
@@ -92,6 +96,7 @@ export class RuijieClient {
         this.password = config.password;
         this.timeout = config.timeout ?? 15_000;
         this.readOnly = config.readOnly ?? false;
+        this.serverAddresses = config.serverAddresses ?? [];
         this.firmwareUpgrade = config.firmwareUpgrade ?? true;
         if (config.certSha256 !== undefined) {
             if (url.protocol !== 'https:') throw new Error('A certificate pin (RUIJIE_CERT_SHA256) needs an https:// router address');

@@ -30,6 +30,11 @@ describe('net_ protection settings', () => {
         expect(loadConfig({ ...env, MCP_SERVER_ADDRESSES: ' 10.0.0.18 , nas.home.test ,' }).serverAddresses).toEqual(['10.0.0.18', 'nas.home.test']);
     });
 
+    it('hands this server\'s addresses to the Ruijie adapter', async () => {
+        const client = defaultFactories.ruijie(loadConfig({ HA_PLUGIN_ENABLED: 'false', RUIJIE_PLUGIN_ENABLED: 'true', RUIJIE_BASE_URL: 'https://192.168.110.1', RUIJIE_PASSWORD: 'x', MCP_SERVER_ADDRESSES: '10.0.0.18' }));
+        expect(client.serverAddresses).toEqual(['10.0.0.18']);
+    });
+
     it('hands the controller host and this server\'s addresses to the adapter', () => {
         const client = defaultFactories.omada(loadConfig({ ...env, MCP_SERVER_ADDRESSES: '10.0.0.18' }));
         expect(client).toBeInstanceOf(OmadaClient);

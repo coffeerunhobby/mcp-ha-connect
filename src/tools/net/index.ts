@@ -482,7 +482,7 @@ function registerRuleTools(server: McpServer, controller: NetworkController): vo
             description:
                 'Create a traffic rule: allow or block traffic from networks, a group or addresses to networks, a group, addresses (optionally on ports) or the internet.' +
                 RULES +
-                ' Addresses given here become a group the rule owns (removed with it). Refused with the reason: the router itself as a destination, one device by MAC, Wi-Fi as source, schedules, and any change that would cut the controller off the internet.' +
+                ' On Omada, addresses given here become a group the rule owns (removed with it); on Ruijie a rule takes one source, one destination and one port, and one device by MAC goes towards the whole internet only. Refused with the reason: the router itself as a destination, one device by MAC (Omada), Wi-Fi as source, schedules, and any change that would cut the controller or this server off the internet.' +
                 CONFIRM,
             inputSchema: createRuleSchema,
         },

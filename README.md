@@ -310,11 +310,16 @@ mDNS rules, several rules or a one-way rule are shown as `foreign` and left to t
 On a Ruijie / Reyee router (2.5.0, mapped on a RG-EG105G-V3 with ReyeeOS 2.324) the `net_` list tools show
 its LAN networks, the devices it sees on its LAN right now (named by their address lease), DHCP reservations, its
 ports (the WAN port as the protected uplink) and its access-control rules; rules the model can't say faithfully (a
-source "anywhere", source ports, IPv6, user groups, schedules, only some connection states, an interface restriction the
+source "anywhere", source ports, IPv6, user groups, schedules, connection states other than the page's own, an interface restriction the
 model can't carry, ports for TCP or UDP only) are shown as `foreign`.
-It changes DHCP reservations (2.5.4, the same calls as its page) and the firmware (2.5.1: the version the router itself
-is offered, the same as its page's Online Upgrade); every other change is refused for now: rules come next, then
-networks. It talks to the router's local web
+It changes DHCP reservations (2.5.4, the same calls as its page), the firmware (2.5.1: the version the router itself
+is offered, the same as its page's Online Upgrade) and rules (2.5.6, mapped from its page on ReyeeOS 2.430): create,
+change, delete and move, one source and one destination per rule (a network, one address or network, or the internet;
+one port), or one device by MAC towards the whole internet. A block is what the page writes: it stops new connections,
+and the other side can still start its own. No rule may block a protected network or this server from the internet, or
+block the router's or this server's address, so set `MCP_SERVER_ADDRESSES` (plain addresses here, not host names): while
+it is unset, a block towards the internet from any address or online device on a protected network is refused. Rules
+listed as `foreign` are not changed. Every other change is refused for now: networks come next. It talks to the router's local web
 API with its admin password; use `https://` with `RUIJIE_CERT_SHA256` (the router's own login page hides the password
 with a key that is shipped in the page, so only HTTPS really protects it, and the router's self-signed certificate is
 best pinned: the RG-EG105G-V3 ships OpenSSL's sample identity, valid until 2122, likely the same on every unit). A refused login is never retried, because wrong passwords lock

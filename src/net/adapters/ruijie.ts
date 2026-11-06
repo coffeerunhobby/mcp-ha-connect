@@ -2,8 +2,9 @@
  * Ruijie / Reyee adapter for the vendor-neutral network model (src/net/model.ts), through the
  * router's local eWeb API (src/ruijieClient). Mapped on a RG-EG105G-V3, ReyeeOS 2.324
  * (2026-10-24). It reads; the changes it makes are a firmware upgrade to the version the router
- * itself is offered (2.5.1: system getVersion / upgradeConfirm, the page's "Online Upgrade") and
- * DHCP reservations (2.5.4: devConfig add / update / del dhcp_static). Other changes are refused
+ * itself is offered (2.5.1: system getVersion / upgradeConfirm, the page's "Online Upgrade"),
+ * DHCP reservations (2.5.4: devConfig add / update / del dhcp_static) and traffic rules (2.5.6:
+ * devConfig add / update / del access_ctrl, see ruijieRules.ts). Other changes are refused
  * (UNSUPPORTED) until their write phases are built and live-tested.
  *
  * What is read, and how it maps:
@@ -21,8 +22,9 @@
  * - ports: devSta.get port_status. The router doesn't say which device is on which port, so
  *   `seen` stays empty; the WAN port is the uplink and protected.
  * - rules: devConfig.get access_ctrl (evaluated in list order). Anything the model can't say
- *   faithfully (a source "anywhere", source ports, IPv6, user groups, schedules, a rule that
- *   matches only some connection states) is listed as `foreign` with the reason.
+ *   faithfully (a source "anywhere", source ports, IPv6, user groups, schedules, connection states
+ *   other than the page's own: every state, or a block on new and invalid ones) is listed as
+ *   `foreign` with the reason, and is not changed through the tools.
  * No Wi-Fi radio on this model, no switch port profiles, no mDNS repeater; groups (Ruijie's
  * user groups are address ranges and users, not the model's address groups) come later.
  */
@@ -55,11 +57,14 @@ import {
     type Wifi,
 } from '../model.js';
 
+import { resolve } from './omadaRules.js';
+import { actionFields, checkEntry, checkRuleName, describeEntry, destinationFields, guardDestination, guardInternet, parseServerAddresses, protocolFields, ruleEntry, sourceFields, BLOCK_STATE, type RuleWorld } from './ruijieRules.js';
+
 type Raw = Record<string, unknown>;
 
 /** Ruijie's name for "all the time" in a rule's time setting (the default time group). */
 const ALL_TIME = new Set(['所有时段', 'everytime', 'All Time', '']);
-const READ_ONLY = 'The Ruijie adapter changes only DHCP reservations and firmware in this version; rules come next, then networks.';
+const READ_ONLY = 'The Ruijie adapter changes only DHCP reservations, rules and firmware in this version; networks come next.';
 /** The router keeps at most this many reservations (dhcp_static_scan answers max 300). */
 const MAX_RESERVATIONS = 300;
 /**
@@ -314,9 +319,11 @@ export function toRule(raw: Raw, index: number, networks: Network[]): Rule {
     if (text(raw.netProto) && text(raw.netProto) !== 'ipv4') reasons.push(`an ${text(raw.netProto)} rule`);
     if (list(raw.user).length || list(raw.user_group_list).length || (Array.isArray(raw.userGroupList) && raw.userGroupList.length)) reasons.push('user groups');
     if (!ALL_TIME.has(text(raw.tmngtName))) reasons.push(`a schedule ('${text(raw.tmngtName)}')`);
-    // "0" = every connection state, replies included (the rule is not stateful).
+    // "0" = every connection state, replies included. A block on new and invalid connections only
+    // is what the page writes: the other side can still start connections, and their replies pass.
     const state = text(raw.state) || '0';
-    if (state !== '0') reasons.push(`only some connection states (${state})`);
+    const newOnly = state.split(',').sort().join(',') === BLOCK_STATE;
+    if (state !== '0' && !(action === 'block' && newOnly)) reasons.push(`only some connection states (${state})`);
     return {
         id: text(raw.uuid) || text(raw.ruleid) || `rule-${index + 1}`,
         name: text(raw.ruleName) || `rule ${index + 1}`,
@@ -324,7 +331,7 @@ export function toRule(raw: Raw, index: number, networks: Network[]): Rule {
         from,
         to,
         protocol,
-        replies: 'match',
+        replies: action === 'allow' || newOnly ? 'allow' : 'match',
         schedule: { kind: 'always' },
         enabled: text(raw.enable) === '1',
         position: index + 1,
@@ -335,6 +342,8 @@ export function toRule(raw: Raw, index: number, networks: Network[]): Rule {
 export interface RuijieAdapterOptions {
     /** An id for this router (several may be configured later). */
     id?: string;
+    /** Where this server runs (MCP_SERVER_ADDRESSES): no rule may cut it off. */
+    serverHosts?: string[];
 }
 
 export class RuijieNetworkController implements NetworkController {
@@ -343,12 +352,14 @@ export class RuijieNetworkController implements NetworkController {
     private readonly executors = new WeakMap<Plan, () => Promise<ApplyResult>>();
     /** One change at a time. */
     private queue: Promise<unknown> = Promise.resolve();
+    private readonly serverAddresses: number[] | 'unset';
 
     constructor(
         private readonly client: RuijieClient,
         options: RuijieAdapterOptions = {}
     ) {
         this.id = options.id ?? `ruijie:${client.host}`;
+        this.serverAddresses = parseServerAddresses(options.serverHosts);
     }
 
     async capabilities(): Promise<Capabilities> {
@@ -357,7 +368,9 @@ export class RuijieNetworkController implements NetworkController {
             networks: { create: 'unsupported', isolation: 'unsupported', ipv6: 'unsupported', guestPurpose: 'unsupported' },
             wifi: { create: 'unsupported', bands: [], security: [], pmf: 'unsupported', fastRoaming: 'unsupported', bandSteering: 'unsupported' },
             ports: { profiles: 'unsupported', assign: 'unsupported' },
-            rules: { between: 'unsupported', toInternet: 'unsupported', deviceMatch: 'unsupported', wifiMatch: 'unsupported', stateful: 'unsupported', schedule: 'unsupported' },
+            rules: this.client.readOnly
+                ? { between: 'unsupported', toInternet: 'unsupported', deviceMatch: 'unsupported', wifiMatch: 'unsupported', stateful: 'unsupported', schedule: 'unsupported' }
+                : { between: 'native', toInternet: 'native', deviceMatch: 'native', wifiMatch: 'unsupported', stateful: 'native', schedule: 'unsupported' },
             groups: { address: 'unsupported', mac: 'unsupported' },
             reservations: this.client.readOnly ? 'unsupported' : 'native',
             mdnsRepeater: 'unsupported',
@@ -459,6 +472,7 @@ export class RuijieNetworkController implements NetworkController {
     async plan(change: Change): Promise<Plan> {
         if (this.client.readOnly) throw new NetError('UNSUPPORTED', 'Changes to the Ruijie router are switched off on this server (RUIJIE_READ_ONLY=true)', { capability: change.kind });
         if (change.kind === 'reservation') return await this.planReservation(change);
+        if (change.kind === 'rule') return await this.planRule(change);
         if (change.kind !== 'firmware') throw new NetError('UNSUPPORTED', READ_ONLY, { capability: change.kind });
         if (this.client.firmwareUpgrade === false) {
             throw new NetError('UNSUPPORTED', 'Firmware upgrades on the Ruijie router are switched off on this server (RUIJIE_FIRMWARE_UPGRADE=false)', { capability: 'firmware' });
@@ -582,11 +596,201 @@ export class RuijieNetworkController implements NetworkController {
         return plan;
     }
 
+    /** One rule's call: what is written, and how it reads back. */
+    private async ruleCall(method: string, data: Raw, what: string): Promise<void> {
+        try {
+            await this.client.call(method, 'access_ctrl', data);
+        } catch (error) {
+            // Sent but unanswered: the router may or may not have done it.
+            if (error instanceof RuijieError && error.kind === 'unreachable' && !error.notSent) {
+                throw new RuijieError(`The router stopped answering while ${what} was being sent, so it may or may not be done; check net_listRules before trying again.`, 'unreachable');
+            }
+            throw error;
+        }
+    }
+
+    private async ruleEntries(): Promise<Raw[]> {
+        return list((await this.client.config<Raw>('access_ctrl')).list);
+    }
+
+    /** Moves a rule one place at a time, the only way the router moves one. */
+    private async moveEntry(uuid: string, from: number, to: number): Promise<void> {
+        for (let at = from; at !== to; at += to > from ? 1 : -1) {
+            await this.ruleCall('devConfig.update', { uuid, opt: to > from ? 'down' : 'up' }, 'the move of the rule');
+        }
+    }
+
+    /**
+     * Plans one rule change. The basis covers the router, its networks, every rule and the online
+     * devices (a device rule is checked against them): anything else changed since is a CONFLICT.
+     * A new or moved rule is written switched off and switched on in place, so it never acts from
+     * the wrong position; a new rule that can't be finished is removed again.
+     */
+    private async planRule(change: Extract<Change, { kind: 'rule' }>): Promise<Plan> {
+        const { mac: routerMac } = await this.router();
+        const networks = await this.listNetworks();
+        const entries = await this.ruleEntries();
+        const clients = await this.listClients();
+        const world: RuleWorld = { networks, routerHost: this.client.host, serverAddresses: this.serverAddresses, clients };
+        const rules = entries.map((raw, i) => ({ raw, rule: toRule(raw, i, networks) }));
+        const editable = (ref: Parameters<typeof resolve>[1], what: string) => {
+            const found = resolve(rules.map((r) => ({ ...r, id: r.rule.id, name: r.rule.name })), ref, 'rule');
+            if (found.rule.foreign) throw new NetError('UNSUPPORTED', `Rule '${found.rule.name}' can't be ${what} through net_: ${found.rule.foreign.reason}`, { capability: 'rule' });
+            if (!text(found.raw.uuid)) throw new NetError('INVALID', `Rule '${found.rule.name}' has no id on the router, so it can't be ${what}`);
+            return found;
+        };
+        const checkPosition = (position: number, count: number) => {
+            if (!Number.isInteger(position) || position < 1 || position > count) throw new NetError('INVALID', `Position ${position} must be from 1 to ${count}`);
+            return position;
+        };
+        const nameTaken = (name: string, except?: string) => {
+            if (rules.some((r) => r.rule.id !== except && r.rule.name.toLowerCase() === name.trim().toLowerCase())) throw new NetError('EXISTS', `A rule named '${name.trim()}' already exists`);
+        };
+        const without = (uuid: string) => entries.filter((e) => text(e.uuid) !== uuid);
+        const placed = (others: Raw[], entry: Raw, at: number) => [...others.slice(0, at - 1), entry, ...others.slice(at - 1)];
+
+        let step: Plan['steps'][number];
+        let effects: string[];
+        let execute: () => Promise<ApplyResult>;
+        const readBack = async (find: (after: Rule[]) => Rule | undefined, check: (rule: Rule | undefined) => boolean): Promise<ApplyResult> => {
+            let after: Rule[];
+            try {
+                after = await this.listRules();
+            } catch {
+                return { applied: true, owned: [], warnings: ['The router accepted the rule change, but reading it back failed; check it with net_listRules.'] };
+            }
+            const found = find(after);
+            if (!check(found)) throw new NetError('CONFLICT', 'The router accepted the rule change but shows something else now; check it with net_listRules.');
+            return { applied: true, ...(found ? { object: found } : {}), owned: [] };
+        };
+
+        /** Whether a rule read back says what the entry written says, at that position. */
+        const same = (entry: Raw, at: number) => (found: Rule | undefined) => {
+            const expected = toRule(entry, at - 1, networks);
+            return found !== undefined && found.position === at && !found.foreign && (['name', 'action', 'from', 'to', 'protocol', 'replies', 'enabled'] as const).every((key) => JSON.stringify(found[key]) === JSON.stringify(expected[key]));
+        };
+
+        if (change.op === 'create') {
+            const entry = ruleEntry(change.value, world);
+            nameTaken(text(entry.ruleName));
+            const at = change.value.position === undefined ? entries.length + 1 : checkPosition(change.value.position, entries.length + 1);
+            guardDestination(entry, world);
+            guardInternet(entries, [placed(entries, { ...entry, uuid: 'new-rule' }, at)], world);
+            step = { action: 'create', object: 'ruijie.access_ctrl', name: text(entry.ruleName), detail: describeEntry(entry) };
+            effects = [
+                `${describeEntry(entry)}${change.value.enabled ? '' : ' (switched off)'}.`,
+                ...(entry.target === 'REJECT' ? ['New connections are stopped; connections the other side starts still work, replies included.'] : []),
+                `It is rule ${at} of ${entries.length + 1}; rules are checked from the top and the first match decides.`,
+            ];
+            execute = async () => {
+                await this.ruleCall('devConfig.add', { list: [{ ...entry, enable: '0' }] }, 'the new rule');
+                let uuid = '';
+                try {
+                    const stored = await this.ruleEntries();
+                    const index = stored.findIndex((e) => text(e.ruleName) === text(entry.ruleName));
+                    if (index < 0) throw new NetError('CONFLICT', `Created rule '${text(entry.ruleName)}' but could not find it again; check net_listRules.`);
+                    uuid = text(stored[index].uuid);
+                    await this.moveEntry(uuid, index + 1, at);
+                    if (entry.enable === '1') await this.ruleCall('devConfig.update', { list: [{ ...stored[index], enable: '1' }] }, 'switching the rule on');
+                } catch (error) {
+                    if (uuid) {
+                        try {
+                            await this.client.call('devConfig.del', 'access_ctrl', { uuid: [uuid] });
+                        } catch {
+                            throw new NetError('CONFLICT', `Creating rule '${text(entry.ruleName)}' failed halfway and it could not be removed again; it is stored switched off. Check net_listRules.`);
+                        }
+                    }
+                    throw error;
+                }
+                return await readBack((after) => after.find((r) => r.name === text(entry.ruleName)), same(entry, at));
+            };
+        } else if (change.op === 'delete') {
+            const { raw, rule } = editable(change.ref, 'deleted');
+            const uuid = text(raw.uuid);
+            guardInternet(entries, [without(uuid)], world);
+            step = { action: 'delete', object: 'ruijie.access_ctrl', name: rule.name };
+            effects = [`Rule '${rule.name}' is removed${rule.enabled ? '; the traffic it matched follows the rules below it' : ' (it was switched off)'}.`];
+            execute = async () => {
+                await this.ruleCall('devConfig.del', { uuid: [uuid] }, 'the delete of the rule');
+                return await readBack((after) => after.find((r) => r.id === rule.id), (r) => r === undefined);
+            };
+        } else if (change.op === 'move') {
+            const { raw, rule } = editable(change.ref, 'moved');
+            const uuid = text(raw.uuid);
+            const to = checkPosition(change.position, entries.length);
+            if (to === rule.position) throw new NetError('INVALID', `Rule '${rule.name}' is already at position ${to}`);
+            const walk: Raw[][] = [];
+            for (let at = rule.position; at !== to; ) {
+                at += to > rule.position ? 1 : -1;
+                walk.push(placed(without(uuid), raw, at));
+            }
+            guardInternet(entries, walk, world);
+            step = { action: 'update', object: 'ruijie.access_ctrl', name: rule.name, detail: `position ${to}` };
+            effects = [`Rule '${rule.name}' moves from position ${rule.position} to ${to}; rules are checked from the top and the first match decides.`];
+            execute = async () => {
+                await this.moveEntry(uuid, rule.position, to);
+                return await readBack((after) => after.find((r) => r.id === rule.id), (r) => r?.position === to);
+            };
+        } else {
+            const { raw, rule } = editable(change.value.ref, 'changed');
+            const uuid = text(raw.uuid);
+            const { position, ...fields } = change.value.set;
+            if (fields.schedule !== undefined && fields.schedule.kind !== 'always') throw new NetError('UNSUPPORTED', "This Ruijie router can't do schedules on a rule through the tools", { capability: 'rules.schedule' });
+            // What wasn't asked for keeps the router's own values (a rule on "lan" stays on "lan").
+            const entry: Raw = {
+                ...raw,
+                ...(fields.name !== undefined ? { ruleName: checkRuleName(fields.name) } : {}),
+                ...(fields.enabled !== undefined ? { enable: fields.enabled ? '1' : '0' } : {}),
+                ...(fields.action !== undefined && fields.action !== rule.action ? actionFields(fields.action) : {}),
+                ...(fields.from !== undefined ? sourceFields(fields.from, world) : {}),
+                ...(fields.to !== undefined ? destinationFields(fields.to, world) : {}),
+                ...(fields.protocol !== undefined ? protocolFields(fields.protocol) : {}),
+            };
+            checkEntry(entry);
+            if (fields.name !== undefined) nameTaken(text(entry.ruleName), rule.id);
+            const to = position === undefined ? rule.position : checkPosition(position, entries.length);
+            const moves = to !== rule.position;
+            const changed = JSON.stringify(entry) !== JSON.stringify(raw);
+            if (!changed && !moves) throw new NetError('INVALID', `Nothing to change on rule '${rule.name}'`);
+            guardDestination(entry, world);
+            const others = without(uuid);
+            const staged = moves && changed && text(entry.enable) === '1';
+            const states: Raw[][] = [placed(others, entry, to)];
+            if (staged) states.push(others);
+            guardInternet(entries, states, world);
+            step = { action: 'update', object: 'ruijie.access_ctrl', name: rule.name, detail: [changed ? describeEntry(entry) : '', moves ? `position ${to}` : ''].filter(Boolean).join('; ') };
+            effects = [
+                `Rule '${rule.name}' becomes: ${describeEntry(entry)}${text(entry.enable) === '1' ? '' : ' (switched off)'}, at position ${to}.`,
+                ...(staged ? ['It is switched off until it is in place.'] : []),
+            ];
+            execute = async () => {
+                if (changed) await this.ruleCall('devConfig.update', { list: [staged ? { ...entry, enable: '0' } : entry] }, 'the rule change');
+                if (moves) await this.moveEntry(uuid, rule.position, to);
+                if (staged) await this.ruleCall('devConfig.update', { list: [entry] }, 'switching the rule on');
+                return await readBack((after) => after.find((r) => r.id === rule.id), same(entry, to));
+            };
+        }
+        const plan: Plan = {
+            change,
+            vendor: 'ruijie',
+            steps: [step],
+            effects,
+            wouldLockOut: [],
+            basis: createHash('sha256')
+                .update(JSON.stringify({ change, controller: this.id, router: routerMac, networks, entries, server: this.serverAddresses, online: clients.map((c) => `${c.mac}@${c.ip ?? ''}`).sort() }))
+                .digest('hex')
+                .slice(0, 16),
+        };
+        this.executors.set(plan, execute);
+        return plan;
+    }
+
     async apply(plan: Plan, options: { allowLockout?: boolean } = {}): Promise<ApplyResult> {
         const run = this.queue.then(async () => {
             // Planned again right before writing: anything changed since is a CONFLICT.
             const fresh = await this.plan(plan.change);
             if (fresh.basis !== plan.basis) throw new NetError('CONFLICT', 'The router changed after this change was planned; nothing was written. Plan it again.');
+            if (fresh.change.kind === 'rule') return await this.executors.get(fresh)!();
             if (fresh.change.kind === 'reservation') {
                 if (fresh.wouldLockOut.length && !options.allowLockout) {
                     throw new NetError('LOCKOUT', `This moves ${fresh.wouldLockOut.length} online device(s) to another address at their next DHCP renewal. Nothing was changed; repeat with allowLockout and the dry run's basis if that is intended.`, {

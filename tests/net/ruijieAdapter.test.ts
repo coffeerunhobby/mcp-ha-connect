@@ -255,17 +255,17 @@ describe('rules', () => {
 });
 
 describe('the rest of the model', () => {
-    it('reports every change but firmware and reservations as unsupported and refuses each one, writing nothing', async () => {
+    it('reports every change but firmware, reservations and rules as unsupported and refuses each one, writing nothing', async () => {
         const { net, calls } = controller();
         const caps = await net.capabilities();
 
         expect(caps.vendor).toBe('ruijie');
         expect(caps.reservations).toBe('native');
-        expect(caps.rules.between).toBe('unsupported');
+        expect(caps.rules.between).toBe('native');
         expect(caps.networks.create).toBe('unsupported');
         expect(caps.firmware).toBe('native');
-        await expect(net.plan({ op: 'delete', kind: 'rule', ref: { name: 'mcp-test' } })).rejects.toMatchObject({ code: 'UNSUPPORTED', details: { capability: 'rule' } });
-        expect(await code(net.apply({ change: { op: 'delete', kind: 'rule', ref: { name: 'mcp-test' } } } as Plan))).toBe('UNSUPPORTED');
+        await expect(net.plan({ op: 'delete', kind: 'network', ref: { name: 'LAN' } })).rejects.toMatchObject({ code: 'UNSUPPORTED', details: { capability: 'network' } });
+        expect(await code(net.apply({ change: { op: 'delete', kind: 'network', ref: { name: 'LAN' } } } as Plan))).toBe('UNSUPPORTED');
         expect(calls).toEqual([]);
     });
 

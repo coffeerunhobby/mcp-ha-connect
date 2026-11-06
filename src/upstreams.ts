@@ -115,6 +115,7 @@ export const defaultFactories: UpstreamFactories = {
       certSha256: config.ruijieCertSha256,
       readOnly: config.ruijieReadOnly,
       firmwareUpgrade: config.ruijieFirmwareUpgrade,
+      serverAddresses: config.serverAddresses,
       timeout: config.ruijieTimeout,
     }),
   ai: (config) => new LocalAIClient(config),
