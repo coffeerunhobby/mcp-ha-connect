@@ -293,6 +293,9 @@ export function toRule(raw: Raw, index: number, networks: Network[]): Rule {
         // The model's device match has no interface: only "any LAN" or "anywhere" say the same.
         const where = text(raw.src);
         if (where && where !== 'lan' && where !== 'all') reasons.push(`a device match limited to the interface '${where}'`);
+        // The page writes a device rule towards the whole internet, for every protocol.
+        const protoOf = text(raw.proto).toLowerCase();
+        if (text(raw.dest) !== 'wan' || text(raw.destIP) || text(raw.destPort) || (protoOf !== 'all' && protoOf !== '')) reasons.push('a device match with its own destination, protocol or ports');
     } else {
         const s = side(text(raw.src), text(raw.srcIP), networks, true);
         if (typeof s === 'string') reasons.push(s);

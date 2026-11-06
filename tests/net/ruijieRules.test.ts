@@ -110,6 +110,14 @@ describe('Ruijie rules: reading what the page writes', () => {
         expect(toRule({ ...base, target: 'ACCEPT', state: '0' }, 0, LAN)).toMatchObject({ action: 'allow', replies: 'allow' });
     });
 
+    it('keeps a device rule the page wouldn\'t write read-only', () => {
+        const device = { ...base, by: 'mac', mac: '02:aa:bb:cc:dd:ee' };
+        expect(toRule(device, 0, LAN).foreign).toBeUndefined();
+        for (const odd of [{ dest: 'vlan233' }, { destIP: '8.8.8.8' }, { proto: 'tcp' }, { proto: 'tcpudp', destPort: '80' }]) {
+            expect(toRule({ ...device, ...odd }, 0, LAN).foreign?.reason).toContain('a device match');
+        }
+    });
+
     it('keeps other connection states read-only', () => {
         expect(toRule({ ...base, state: '1' }, 0, LAN).foreign?.reason).toContain('only some connection states (1)');
         expect(toRule({ ...base, target: 'ACCEPT', state: '1,4' }, 0, LAN).foreign?.reason).toContain('only some connection states');
