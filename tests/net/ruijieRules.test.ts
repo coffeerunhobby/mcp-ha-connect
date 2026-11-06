@@ -625,6 +625,13 @@ describe('Ruijie rules: when the router differs or fails', () => {
         expect(writes.map(([m]) => m)).toEqual(['devConfig.add']);
     });
 
+    it('never takes a rule that was already there for the new one, even if it now says the same', async () => {
+        const lookalike = { ...base, ruleName: 'iot-out', enable: '0', src: 'vlan20', uuid: 'U-OLD' };
+        const { writes, apply } = controller({ readBack: () => ({ list: [lookalike] }) });
+        await expect(apply(create())).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('could not find it again') });
+        expect(writes.map(([m]) => m)).toEqual(['devConfig.add']);
+    });
+
     it('two rules that both look like the new one are reported, and neither is touched', async () => {
         const twin = (uuid: string) => ({ ...base, ruleName: 'iot-out', enable: '0', src: 'vlan20', srcPort: '', destPort: '', uuid });
         const { writes, apply } = controller({ readBack: () => ({ list: [OLD, twin('U-A'), twin('U-B')] }) });
