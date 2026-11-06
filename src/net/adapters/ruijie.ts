@@ -623,7 +623,7 @@ export class RuijieNetworkController implements NetworkController {
      * devices (a device rule is checked against them): anything else changed since is a CONFLICT.
      * A new or moved rule is written switched off and switched on in place, so it never acts from
      * the wrong position; a new rule that can't be finished is removed again, and a change that
-     * can't be finished puts the rule's old settings back and says where it is.
+     * can't be finished goes back as it was, or says how far that got.
      */
     private async planRule(change: Extract<Change, { kind: 'rule' }>): Promise<Plan> {
         const { mac: routerMac } = await this.router();
@@ -658,30 +658,42 @@ export class RuijieNetworkController implements NetworkController {
             return states;
         };
         /**
-         * After a change to a rule failed: nothing happened, or the old settings go back and the
-         * caller hears where the rule is now. It never says more than it read from the router.
+         * After a change to a rule failed: nothing happened, or it goes back as it was and the caller
+         * hears how far that got. It never says more than it read from the router.
          */
         const recover = async (error: unknown, raw: Raw, name: string, position: number): Promise<never> => {
             const uuid = text(raw.uuid);
             const unclear = () => new NetError('CONFLICT', `Changing rule '${name}' failed halfway and its state couldn't be confirmed: it may be switched off or at another position; check net_listRules.`);
-            let at: number;
-            let restored = false;
+            const place = async () => {
+                const stored = await this.ruleEntries();
+                const index = stored.findIndex((e) => text(e.uuid) === uuid);
+                if (index < 0) throw unclear();
+                return { entry: stored[index], at: index + 1 };
+            };
+            let now: { entry: Raw; at: number };
+            let touched = false;
             try {
-                let stored = await this.ruleEntries();
-                at = stored.findIndex((e) => text(e.uuid) === uuid);
-                if (at < 0) throw unclear();
-                if (JSON.stringify(stored[at]) !== JSON.stringify(raw)) {
+                now = await place();
+                if (JSON.stringify(now.entry) !== JSON.stringify(raw)) {
+                    touched = true;
                     await this.client.call('devConfig.update', 'access_ctrl', { list: [raw] });
-                    stored = await this.ruleEntries();
-                    at = stored.findIndex((e) => text(e.uuid) === uuid);
-                    if (at < 0 || JSON.stringify(stored[at]) !== JSON.stringify(raw)) throw unclear();
-                    restored = true;
+                    now = await place();
+                    if (JSON.stringify(now.entry) !== JSON.stringify(raw)) throw unclear();
+                }
+                if (now.at !== position) {
+                    touched = true;
+                    try {
+                        await this.moveEntry(uuid, now.at, position);
+                    } catch {
+                        // Said below: where it is now.
+                    }
+                    now = await place();
                 }
             } catch {
                 throw unclear();
             }
-            if (!restored && at + 1 === position) throw error;
-            throw new NetError('CONFLICT', `Changing rule '${name}' failed halfway; ${restored ? `its old settings are back, at position ${at + 1}` : `it is at position ${at + 1}`} (it was at ${position}). Check net_listRules.`);
+            if (!touched) throw error;
+            throw new NetError('CONFLICT', `Changing rule '${name}' failed halfway; ${now.at === position ? `it was put back as it was, at position ${position}` : `its old settings are back, but it is at position ${now.at} (it was at ${position})`}. Check net_listRules.`);
         };
 
         let step: Plan['steps'][number];
@@ -721,10 +733,16 @@ export class RuijieNetworkController implements NetworkController {
                 await this.ruleCall('devConfig.add', { list: [{ ...entry, enable: '0' }] }, 'the new rule');
                 let uuid = '';
                 try {
-                    const stored = await this.ruleEntries();
+                    let stored: Raw[];
+                    try {
+                        stored = await this.ruleEntries();
+                    } catch {
+                        throw new NetError('CONFLICT', `The router accepted rule '${text(entry.ruleName)}', but reading the rules back failed: it may be stored, switched off. Check net_listRules.`);
+                    }
                     const index = stored.findIndex((e) => text(e.ruleName) === text(entry.ruleName));
                     if (index < 0) throw new NetError('CONFLICT', `Created rule '${text(entry.ruleName)}' but could not find it again; check net_listRules.`);
                     uuid = text(stored[index].uuid);
+                    if (!uuid) throw new NetError('CONFLICT', `Rule '${text(entry.ruleName)}' is stored switched off, but the router gives it no id, so it can't be finished or removed here. Check net_listRules.`);
                     await this.moveEntry(uuid, index + 1, at);
                     if (entry.enable === '1') await this.ruleCall('devConfig.update', { list: [{ ...stored[index], enable: '1' }] }, 'switching the rule on');
                 } catch (error) {

@@ -316,7 +316,7 @@ It changes DHCP reservations (2.5.4, the same calls as its page), the firmware (
 is offered, the same as its page's Online Upgrade) and rules (2.5.6, mapped from its page on ReyeeOS 2.430): create,
 change, delete and move, one source and one destination per rule (a network, one address or network, or the internet;
 one port), or one device by MAC towards the whole internet. A block is what the page writes: it stops new connections,
-and the other side can still start its own. No rule may block a protected network or this server from the internet, or
+and the other side can still start its own. No rule may block a protected network or this server from the internet or one outside address, or
 block the router's or this server's address, so set `MCP_SERVER_ADDRESSES` (plain addresses here, not host names): while
 it is unset, a block towards the internet from any address or online device on a protected network is refused. Rules
 listed as `foreign` are not changed. Every other change is refused for now: networks come next. It talks to the router's local web

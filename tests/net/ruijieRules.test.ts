@@ -273,9 +273,20 @@ describe('Ruijie rules: what stays online', () => {
         expect(await code(controller().net.plan(toInternet([{ device: '02-AA-BB-CC-DD-EE' }])))).toBe('ok');
     });
 
-    it('lets one address on the protected network be blocked towards one destination, not the router or this server', async () => {
-        const from = [{ network: { name: 'LAN' } }];
-        expect(await code(controller().net.plan(create({ from, to: [{ addresses: ['8.8.8.8'] }] })))).toBe('ok');
+    it('treats one outside address like the internet: it may be a relay this server needs', async () => {
+        const to = [{ addresses: ['8.8.8.8'] }];
+        expect(await code(controller().net.plan(create({ from: [{ network: { name: 'LAN' } }], to })))).toBe('PROTECTED');
+        expect(await code(controller({ serverHosts: ['192.168.110.3'] }).net.plan(create({ from: [{ addresses: ['192.168.110.3'] }], to })))).toBe('PROTECTED');
+        expect(await code(controller({ serverHosts: ['192.168.110.3'] }).net.plan(create({ from: [{ addresses: ['192.168.110.99'] }], to })))).toBe('ok');
+        expect(await code(controller().net.plan(create({ to })))).toBe('ok');
+    });
+
+    it('a block between its own networks is no danger to the internet path', async () => {
+        const to = [{ addresses: ['10.20.0.5'] }];
+        expect(await code(controller().net.plan(create({ from: [{ network: { name: 'LAN' } }], to })))).toBe('ok');
+    });
+
+    it('never blocks the router or this server as a destination', async () => {
         expect(await code(controller().net.plan(create({ from: [{ network: { name: 'IoT' } }], to: [{ addresses: ['192.168.110.1'] }] })))).toBe('PROTECTED');
         expect(await code(controller().net.plan(create({ from: [{ network: { name: 'IoT' } }], to: [{ addresses: ['192.168.110.0/24'] }] })))).toBe('PROTECTED');
         expect(await code(controller({ serverHosts: ['192.168.110.3'] }).net.plan(create({ from: [{ network: { name: 'IoT' } }], to: [{ addresses: ['192.168.110.3'] }] })))).toBe('PROTECTED');
@@ -397,10 +408,11 @@ describe('Ruijie rules: deleting and moving', () => {
 
 describe('Ruijie rules: changing', () => {
     it('keeps what wasn\'t asked for, as the router stores it', async () => {
-        const { state, writes, apply } = controller();
+        const old = { ...OLD, src: 'vlan20' };
+        const { state, writes, apply } = controller({ entries: [old] });
         const result = await apply(update('old', { enabled: true }));
-        expect(writes).toEqual([['devConfig.update', { list: [{ ...OLD, enable: '1' }] }]]);
-        expect(state.entries[0]).toMatchObject({ target: 'DROP', state: '0', enable: '1', src: 'lan' });
+        expect(writes).toEqual([['devConfig.update', { list: [{ ...old, enable: '1' }] }]]);
+        expect(state.entries[0]).toMatchObject({ target: 'DROP', state: '0', enable: '1', src: 'vlan20' });
         expect(result.object).toMatchObject({ enabled: true, replies: 'match' });
     });
 
@@ -438,7 +450,7 @@ describe('Ruijie rules: changing', () => {
     });
 
     it('a changed, enabled rule that moves is switched off until it is in place', async () => {
-        const entries = [{ ...OLD, enable: '1', destIP: '8.8.8.8' }, { ...OLD, ruleName: 'b', uuid: 'U-B' }];
+        const entries = [{ ...OLD, enable: '1', src: 'vlan20', destIP: '8.8.8.8' }, { ...OLD, ruleName: 'b', uuid: 'U-B' }];
         const { state, writes, apply } = controller({ entries });
         await apply(update('old', { to: [{ addresses: ['1.1.1.1'] }], position: 2 }));
         expect(writes.map(([, d]) => (d.opt ? `move ${String(d.opt)}` : (d.list as Raw[])[0].enable))).toEqual(['0', 'move down', '1']);
@@ -537,12 +549,22 @@ describe('Ruijie rules: when the router differs or fails', () => {
     const refuse = () => {
         throw new RuijieError('The Ruijie router refused the call', 'refused');
     };
-    const pair = [{ ...OLD, enable: '1', destIP: '8.8.8.8' }, { ...OLD, ruleName: 'b', uuid: 'U-B' }, { ...OLD, ruleName: 'c', uuid: 'U-C' }];
+    const pair = [{ ...OLD, enable: '1', src: 'vlan20', destIP: '8.8.8.8' }, { ...OLD, ruleName: 'b', uuid: 'U-B' }, { ...OLD, ruleName: 'c', uuid: 'U-C' }];
 
     it('a change that fails on its first write changed nothing and says so plainly', async () => {
         const { state, apply } = controller({ entries: pair, write: refuse });
         await expect(apply(update('old', { to: [{ addresses: ['1.1.1.1'] }], position: 2 }))).rejects.toThrow('The Ruijie router refused the call');
         expect(state.entries).toEqual(pair);
+    });
+
+    it('a new rule stored without an id is reported, not moved', async () => {
+        const { writes, apply } = controller({ readBack: () => ({ list: [OLD, { ...base, ruleName: 'iot-out', enable: '0', src: 'vlan20' }] }) });
+        await expect(apply(create())).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('gives it no id') });
+        expect(writes.map(([m]) => m)).toEqual(['devConfig.add']);
+    });
+
+    it('a new rule it can\'t read back after adding says it may be stored', async () => {
+        await expect(controller({ readBackFails: true }).apply(create())).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('may be stored, switched off') });
     });
 
     it('a staged change whose move fails puts the old settings back and says where the rule is', async () => {
@@ -553,12 +575,12 @@ describe('Ruijie rules: when the router differs or fails', () => {
                 return undefined;
             },
         });
-        await expect(apply(update('old', { to: [{ addresses: ['1.1.1.1'] }], position: 2 }))).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('its old settings are back, at position 1') });
+        await expect(apply(update('old', { to: [{ addresses: ['1.1.1.1'] }], position: 2 }))).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('put back as it was, at position 1') });
         expect(state.entries).toEqual(pair);
         expect(writes.at(-1)).toEqual(['devConfig.update', { list: [pair[0]] }]);
     });
 
-    it('a staged change whose switch-on fails puts the old settings back, at the position it reached', async () => {
+    it('a staged change whose switch-on fails goes back as it was, position included', async () => {
         let list = 0;
         const { state, apply } = controller({
             entries: pair,
@@ -567,12 +589,11 @@ describe('Ruijie rules: when the router differs or fails', () => {
                 return undefined;
             },
         });
-        await expect(apply(update('old', { to: [{ addresses: ['1.1.1.1'] }], position: 2 }))).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('its old settings are back, at position 2') });
-        expect(state.entries.map((e) => e.ruleName)).toEqual(['b', 'old', 'c']);
-        expect(state.entries[1]).toEqual(pair[0]);
+        await expect(apply(update('old', { to: [{ addresses: ['1.1.1.1'] }], position: 2 }))).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('put back as it was, at position 1') });
+        expect(state.entries).toEqual(pair);
     });
 
-    it('a move that stops halfway says where the rule is', async () => {
+    it('a move that stops halfway goes back to where it was', async () => {
         let moves = 0;
         const { state, apply } = controller({
             entries: pair,
@@ -581,7 +602,20 @@ describe('Ruijie rules: when the router differs or fails', () => {
                 return undefined;
             },
         });
-        await expect(apply({ op: 'move', kind: 'rule', ref: { name: 'old' }, position: 3 })).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('at position 2') });
+        await expect(apply({ op: 'move', kind: 'rule', ref: { name: 'old' }, position: 3 })).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('put back as it was, at position 1') });
+        expect(state.entries).toEqual(pair);
+    });
+
+    it('a move that can\'t go back says where the rule is', async () => {
+        let moves = 0;
+        const { state, apply } = controller({
+            entries: pair,
+            write: (_method, data) => {
+                if (data.opt && ++moves >= 2) refuse();
+                return undefined;
+            },
+        });
+        await expect(apply({ op: 'move', kind: 'rule', ref: { name: 'old' }, position: 3 })).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('it is at position 2 (it was at 1)') });
         expect(state.entries.map((e) => e.ruleName)).toEqual(['b', 'old', 'c']);
     });
 

@@ -211,7 +211,24 @@ function sourceHit(raw: Raw, world: RuleWorld): string | undefined {
     return undefined;
 }
 
-const towardsInternet = (raw: Raw) => (text(raw.dest) === 'wan' || text(raw.dest) === 'all') && !text(raw.destIP);
+const towardsWholeInternet = (raw: Raw) => (text(raw.dest) === 'wan' || text(raw.dest) === 'all') && !text(raw.destIP);
+
+/**
+ * Whether a rule reaches anything outside the router's networks. One address counts too: it may be
+ * what this server needs (a Nebula relay or lighthouse, its DNS).
+ */
+function reachesOutside(raw: Raw, world: RuleWorld): boolean {
+    if (text(raw.dest) !== 'wan' && text(raw.dest) !== 'all') return false;
+    const addresses = text(raw.destIP);
+    if (!addresses) return true;
+    return addresses.split(',').some((a) => {
+        try {
+            return placeOf(a.trim(), world.networks) !== 'inside';
+        } catch {
+            return true;
+        }
+    });
+}
 
 /**
  * An enabled allow rule that lets everything from every network out, always, on every connection
@@ -223,7 +240,7 @@ const shields = (raw: Raw) =>
     text(raw.by) !== 'mac' &&
     (text(raw.src) === 'lan' || text(raw.src) === 'all') &&
     !text(raw.srcIP) &&
-    towardsInternet(raw) &&
+    towardsWholeInternet(raw) &&
     (text(raw.proto) === 'all' || text(raw.proto) === '') &&
     !text(raw.srcPort) &&
     !text(raw.destPort) &&
@@ -244,9 +261,10 @@ export function internetRisks(entries: Raw[], world: RuleWorld): Map<string, str
     for (const raw of entries) {
         if (text(raw.enable) !== '1') continue;
         if (shields(raw)) break;
-        if (text(raw.target).toUpperCase() === 'ACCEPT' || !towardsInternet(raw)) continue;
+        if (text(raw.target).toUpperCase() === 'ACCEPT' || !reachesOutside(raw, world)) continue;
         const hit = sourceHit(raw, world);
-        if (hit) risks.set(text(raw.uuid) || text(raw.ruleName), hit);
+        // What it matches is part of its key: widening a rule already there is a new danger.
+        if (hit) risks.set([text(raw.uuid) || text(raw.ruleName), raw.by, raw.mac, raw.src, raw.srcIP, raw.dest, raw.destIP].map(text).join('|'), hit);
     }
     return risks;
 }
@@ -256,7 +274,7 @@ export function guardInternet(before: Raw[], states: Raw[][], world: RuleWorld):
     const today = internetRisks(before, world);
     for (const state of states) {
         for (const [key, reason] of internetRisks(state, world)) {
-            if (!today.has(key)) throw new NetError('PROTECTED', `This would block ${reason} from the internet, and this server has to stay reachable; refused`);
+            if (!today.has(key)) throw new NetError('PROTECTED', `This would block ${reason} from the internet or part of it, and this server has to stay reachable; refused`);
         }
     }
 }
