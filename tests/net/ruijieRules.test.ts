@@ -406,6 +406,9 @@ describe('Ruijie rules: what stays online', () => {
         expect(await code(controller({ entries: [out, stop] }).net.plan({ op: 'delete', kind: 'rule', ref: { name: 'out' } }))).toBe('PROTECTED');
         expect(await code(controller({ entries: [out, stop] }).net.plan(update('out', { enabled: false })))).toBe('PROTECTED');
         expect(await code(controller({ entries: [out, stop] }).net.plan(update('out', { name: 'out2' })))).toBe('ok');
+        // Narrowed or pointed elsewhere it no longer lets the same traffic past.
+        expect(await code(controller({ entries: [out, stop] }).net.plan(update('out', { protocol: 'udp' })))).toBe('PROTECTED');
+        expect(await code(controller({ entries: [port, shut] }).net.plan(update('p80', { protocol: { tcpUdpPorts: '81' } })))).toBe('PROTECTED');
     });
 
     it('refuses switching on or widening a rule into a cut-off', async () => {

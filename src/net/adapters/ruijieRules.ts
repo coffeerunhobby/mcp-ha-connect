@@ -266,6 +266,9 @@ const shields = (raw: Raw) =>
     !(Array.isArray(raw.user_group_list) && raw.user_group_list.length) &&
     !(Array.isArray(raw.userGroupList) && raw.userGroupList.length);
 
+/** A rule and everything that decides what it matches: narrowing it is a different rule to the guards. */
+const matchKey = (raw: Raw) => [text(raw.uuid) || text(raw.ruleName), raw.by, raw.mac, raw.src, raw.srcIP, raw.srcPort, raw.dest, raw.destIP, raw.destPort, raw.proto, raw.state, raw.tmngtName].map(text).join('|');
+
 /** A danger on the router's list: why, and the enabled allow rules above it that let some traffic past it. */
 interface Risk {
     reason: string;
@@ -284,13 +287,13 @@ export function internetRisks(entries: Raw[], world: RuleWorld): Map<string, Ris
         if (text(raw.enable) !== '1') continue;
         if (shields(raw)) break;
         if (text(raw.target).toUpperCase() === 'ACCEPT') {
-            allows.push(text(raw.uuid) || text(raw.ruleName));
+            allows.push(matchKey(raw));
             continue;
         }
         if (!reachesOutside(raw, world)) continue;
         const hit = sourceHit(raw, world);
         // What it matches is part of its key: widening a rule already there is a new danger.
-        if (hit) risks.set([text(raw.uuid) || text(raw.ruleName), raw.by, raw.mac, raw.src, raw.srcIP, raw.srcPort, raw.dest, raw.destIP, raw.destPort, raw.proto, raw.state, raw.tmngtName].map(text).join('|'), { reason: hit, allowsAbove: [...allows] });
+        if (hit) risks.set(matchKey(raw), { reason: hit, allowsAbove: [...allows] });
     }
     return risks;
 }
@@ -302,13 +305,13 @@ function destinationRisks(entries: Raw[], world: RuleWorld): Map<string, Risk> {
     for (const raw of entries) {
         if (text(raw.enable) !== '1') continue;
         if (text(raw.target).toUpperCase() === 'ACCEPT') {
-            allows.push(text(raw.uuid) || text(raw.ruleName));
+            allows.push(matchKey(raw));
             continue;
         }
         try {
             guardDestination(raw, world);
         } catch {
-            risks.set([text(raw.uuid) || text(raw.ruleName), raw.src, raw.srcIP, raw.dest, raw.destIP, raw.destPort, raw.proto].map(text).join('|'), { reason: "the router's or this server's address", allowsAbove: [...allows] });
+            risks.set(matchKey(raw), { reason: "the router's or this server's address", allowsAbove: [...allows] });
         }
     }
     return risks;
