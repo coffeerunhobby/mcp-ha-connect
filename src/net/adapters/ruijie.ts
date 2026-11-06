@@ -58,12 +58,10 @@ import {
 } from '../model.js';
 
 import { resolve } from './omadaRules.js';
-import { actionFields, checkEntry, checkRuleName, describeEntry, destinationFields, guardDestination, guardInternet, parseServerAddresses, protocolFields, ruleEntry, sourceFields, BLOCK_STATE, type RuleWorld } from './ruijieRules.js';
+import { actionFields, ALL_TIME, checkEntry, checkRuleName, describeEntry, destinationFields, guardDestination, guardInternet, parseServerAddresses, protocolFields, ruleEntry, sourceFields, BLOCK_STATE, type RuleWorld } from './ruijieRules.js';
 
 type Raw = Record<string, unknown>;
 
-/** Ruijie's name for "all the time" in a rule's time setting (the default time group). */
-const ALL_TIME = new Set(['所有时段', 'everytime', 'All Time', '']);
 const READ_ONLY = 'The Ruijie adapter changes only DHCP reservations, rules and firmware in this version; networks come next.';
 /** The router keeps at most this many reservations (dhcp_static_scan answers max 300). */
 const MAX_RESERVATIONS = 300;
@@ -624,7 +622,8 @@ export class RuijieNetworkController implements NetworkController {
      * Plans one rule change. The basis covers the router, its networks, every rule and the online
      * devices (a device rule is checked against them): anything else changed since is a CONFLICT.
      * A new or moved rule is written switched off and switched on in place, so it never acts from
-     * the wrong position; a new rule that can't be finished is removed again.
+     * the wrong position; a new rule that can't be finished is removed again, and a change that
+     * can't be finished puts the rule's old settings back and says where it is.
      */
     private async planRule(change: Extract<Change, { kind: 'rule' }>): Promise<Plan> {
         const { mac: routerMac } = await this.router();
@@ -648,6 +647,42 @@ export class RuijieNetworkController implements NetworkController {
         };
         const without = (uuid: string) => entries.filter((e) => text(e.uuid) !== uuid);
         const placed = (others: Raw[], entry: Raw, at: number) => [...others.slice(0, at - 1), entry, ...others.slice(at - 1)];
+
+        /** The list at every place an entry passes through on its way from one position to another. */
+        const walk = (entry: Raw, from: number, to: number): Raw[][] => {
+            const states: Raw[][] = [];
+            for (let at = from; at !== to; ) {
+                at += to > from ? 1 : -1;
+                states.push(placed(without(text(entry.uuid)), entry, at));
+            }
+            return states;
+        };
+        /**
+         * After a change to a rule failed: nothing happened, or the old settings go back and the
+         * caller hears where the rule is now. It never says more than it read from the router.
+         */
+        const recover = async (error: unknown, raw: Raw, name: string, position: number): Promise<never> => {
+            const uuid = text(raw.uuid);
+            const unclear = () => new NetError('CONFLICT', `Changing rule '${name}' failed halfway and its state couldn't be confirmed: it may be switched off or at another position; check net_listRules.`);
+            let at: number;
+            let restored = false;
+            try {
+                let stored = await this.ruleEntries();
+                at = stored.findIndex((e) => text(e.uuid) === uuid);
+                if (at < 0) throw unclear();
+                if (JSON.stringify(stored[at]) !== JSON.stringify(raw)) {
+                    await this.client.call('devConfig.update', 'access_ctrl', { list: [raw] });
+                    stored = await this.ruleEntries();
+                    at = stored.findIndex((e) => text(e.uuid) === uuid);
+                    if (at < 0 || JSON.stringify(stored[at]) !== JSON.stringify(raw)) throw unclear();
+                    restored = true;
+                }
+            } catch {
+                throw unclear();
+            }
+            if (!restored && at + 1 === position) throw error;
+            throw new NetError('CONFLICT', `Changing rule '${name}' failed halfway; ${restored ? `its old settings are back, at position ${at + 1}` : `it is at position ${at + 1}`} (it was at ${position}). Check net_listRules.`);
+        };
 
         let step: Plan['steps'][number];
         let effects: string[];
@@ -697,7 +732,7 @@ export class RuijieNetworkController implements NetworkController {
                         try {
                             await this.client.call('devConfig.del', 'access_ctrl', { uuid: [uuid] });
                         } catch {
-                            throw new NetError('CONFLICT', `Creating rule '${text(entry.ruleName)}' failed halfway and it could not be removed again; it is stored switched off. Check net_listRules.`);
+                            throw new NetError('CONFLICT', `Creating rule '${text(entry.ruleName)}' failed halfway and it could not be removed again; it may still be stored, switched off or on. Check net_listRules.`);
                         }
                     }
                     throw error;
@@ -719,16 +754,15 @@ export class RuijieNetworkController implements NetworkController {
             const uuid = text(raw.uuid);
             const to = checkPosition(change.position, entries.length);
             if (to === rule.position) throw new NetError('INVALID', `Rule '${rule.name}' is already at position ${to}`);
-            const walk: Raw[][] = [];
-            for (let at = rule.position; at !== to; ) {
-                at += to > rule.position ? 1 : -1;
-                walk.push(placed(without(uuid), raw, at));
-            }
-            guardInternet(entries, walk, world);
+            guardInternet(entries, walk(raw, rule.position, to), world);
             step = { action: 'update', object: 'ruijie.access_ctrl', name: rule.name, detail: `position ${to}` };
             effects = [`Rule '${rule.name}' moves from position ${rule.position} to ${to}; rules are checked from the top and the first match decides.`];
             execute = async () => {
-                await this.moveEntry(uuid, rule.position, to);
+                try {
+                    await this.moveEntry(uuid, rule.position, to);
+                } catch (error) {
+                    return await recover(error, raw, rule.name, rule.position);
+                }
                 return await readBack((after) => after.find((r) => r.id === rule.id), (r) => r?.position === to);
             };
         } else {
@@ -755,8 +789,8 @@ export class RuijieNetworkController implements NetworkController {
             guardDestination(entry, world);
             const others = without(uuid);
             const staged = moves && changed && text(entry.enable) === '1';
-            const states: Raw[][] = [placed(others, entry, to)];
-            if (staged) states.push(others);
+            // Staged it is off on the way (as if gone), and if that fails its old settings go back wherever it got to.
+            const states: Raw[][] = [placed(others, entry, to), ...(staged ? [others, ...walk(raw, rule.position, to)] : moves ? walk(entry, rule.position, to) : [])];
             guardInternet(entries, states, world);
             step = { action: 'update', object: 'ruijie.access_ctrl', name: rule.name, detail: [changed ? describeEntry(entry) : '', moves ? `position ${to}` : ''].filter(Boolean).join('; ') };
             effects = [
@@ -764,9 +798,13 @@ export class RuijieNetworkController implements NetworkController {
                 ...(staged ? ['It is switched off until it is in place.'] : []),
             ];
             execute = async () => {
-                if (changed) await this.ruleCall('devConfig.update', { list: [staged ? { ...entry, enable: '0' } : entry] }, 'the rule change');
-                if (moves) await this.moveEntry(uuid, rule.position, to);
-                if (staged) await this.ruleCall('devConfig.update', { list: [entry] }, 'switching the rule on');
+                try {
+                    if (changed) await this.ruleCall('devConfig.update', { list: [staged ? { ...entry, enable: '0' } : entry] }, 'the rule change');
+                    if (moves) await this.moveEntry(uuid, rule.position, to);
+                    if (staged) await this.ruleCall('devConfig.update', { list: [entry] }, 'switching the rule on');
+                } catch (error) {
+                    return await recover(error, raw, rule.name, rule.position);
+                }
                 return await readBack((after) => after.find((r) => r.id === rule.id), same(entry, to));
             };
         }

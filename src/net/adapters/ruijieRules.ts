@@ -22,6 +22,8 @@ type Raw = Record<string, unknown>;
 export const MAX_RULE_NAME = 28;
 /** "All the time" as the router's page writes it. */
 export const ALWAYS = '所有时段';
+/** Ruijie's names for "all the time" in a rule's time setting (the default time group). */
+export const ALL_TIME = new Set([ALWAYS, 'everytime', 'All Time', '']);
 export const BLOCK_STATE = '1,4';
 export const ALLOW_STATE = '0';
 /** The router's page refuses these in values, which travel on to its config commands. */
@@ -211,8 +213,26 @@ function sourceHit(raw: Raw, world: RuleWorld): string | undefined {
 
 const towardsInternet = (raw: Raw) => (text(raw.dest) === 'wan' || text(raw.dest) === 'all') && !text(raw.destIP);
 
-/** An enabled allow rule that lets everything on the router's first network out, so nothing below it can cut it off. */
-const shields = (raw: Raw) => text(raw.target).toUpperCase() === 'ACCEPT' && text(raw.by) !== 'mac' && (text(raw.src) === 'lan' || text(raw.src) === 'all') && !text(raw.srcIP) && towardsInternet(raw) && (text(raw.proto) === 'all' || text(raw.proto) === '');
+/**
+ * An enabled allow rule that lets everything from every network out, always, on every connection
+ * state, so nothing below it can cut anything off. Anything limiting it means traffic it doesn't
+ * match goes on to the rules below.
+ */
+const shields = (raw: Raw) =>
+    text(raw.target).toUpperCase() === 'ACCEPT' &&
+    text(raw.by) !== 'mac' &&
+    (text(raw.src) === 'lan' || text(raw.src) === 'all') &&
+    !text(raw.srcIP) &&
+    towardsInternet(raw) &&
+    (text(raw.proto) === 'all' || text(raw.proto) === '') &&
+    !text(raw.srcPort) &&
+    !text(raw.destPort) &&
+    (text(raw.state) === '0' || text(raw.state) === '') &&
+    (text(raw.netProto) === 'ipv4' || text(raw.netProto) === '') &&
+    ALL_TIME.has(text(raw.tmngtName)) &&
+    !(Array.isArray(raw.user) && raw.user.length) &&
+    !(Array.isArray(raw.user_group_list) && raw.user_group_list.length) &&
+    !(Array.isArray(raw.userGroupList) && raw.userGroupList.length);
 
 /**
  * The enabled block rules that can reach what must stay online on its way to the internet: this
