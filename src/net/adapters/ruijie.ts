@@ -744,11 +744,19 @@ export class RuijieNetworkController implements NetworkController {
                     uuid = text(stored[index].uuid);
                     if (!uuid) throw new NetError('CONFLICT', `Rule '${text(entry.ruleName)}' is stored switched off, but the router gives it no id, so it can't be finished or removed here. Check net_listRules.`);
                     await this.moveEntry(uuid, index + 1, at);
-                    if (entry.enable === '1') await this.ruleCall('devConfig.update', { list: [{ ...stored[index], enable: '1' }] }, 'switching the rule on');
+                    if (entry.enable === '1') {
+                        // Read again: the move took a while, and an entry edited meanwhile must not be overwritten.
+                        const placedEntry = (await this.ruleEntries()).find((e) => text(e.uuid) === uuid);
+                        if (!placedEntry || JSON.stringify(placedEntry) !== JSON.stringify(stored[index])) {
+                            throw new NetError('CONFLICT', `Rule '${text(entry.ruleName)}' changed while it was being created, so it wasn't switched on; check net_listRules.`);
+                        }
+                        await this.ruleCall('devConfig.update', { list: [{ ...placedEntry, enable: '1' }] }, 'switching the rule on');
+                    }
                 } catch (error) {
                     if (uuid) {
                         try {
                             await this.client.call('devConfig.del', 'access_ctrl', { uuid: [uuid] });
+                            if ((await this.ruleEntries()).some((e) => text(e.uuid) === uuid)) throw new Error('still there');
                         } catch {
                             throw new NetError('CONFLICT', `Creating rule '${text(entry.ruleName)}' failed halfway and it could not be removed again; it may still be stored, switched off or on. Check net_listRules.`);
                         }

@@ -557,6 +557,33 @@ describe('Ruijie rules: when the router differs or fails', () => {
         expect(state.entries).toEqual(pair);
     });
 
+    it('a new rule edited by someone else while it was moving isn\'t overwritten', async () => {
+        const { state, writes, apply } = controller({
+            addAtTop: true,
+            write: (_method, data) => {
+                if (data.opt) {
+                    const mine = state.entries.find((e) => e.uuid === data.uuid)!;
+                    mine.ruleName = 'iot-out';
+                    mine.src = 'vlan233';
+                }
+                return undefined;
+            },
+        });
+        await expect(apply(create())).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('changed while it was being created') });
+        expect(writes.filter(([, d]) => d.list && (d.list as Raw[])[0].enable === '1')).toEqual([]);
+    });
+
+    it('a delete the router ignores while undoing a new rule is reported', async () => {
+        const { state, apply } = controller({
+            write: (method, data) => {
+                if (method === 'devConfig.update' && data.list) throw new RuijieError('The Ruijie router refused the call', 'refused');
+                return method === 'devConfig.del' ? { rcode: '00000000' } : undefined;
+            },
+        });
+        await expect(apply(create())).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('it may still be stored, switched off or on') });
+        expect(state.entries.map((e) => e.ruleName)).toEqual(['old', 'iot-out']);
+    });
+
     it('a new rule stored without an id is reported, not moved', async () => {
         const { writes, apply } = controller({ readBack: () => ({ list: [OLD, { ...base, ruleName: 'iot-out', enable: '0', src: 'vlan20' }] }) });
         await expect(apply(create())).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('gives it no id') });
