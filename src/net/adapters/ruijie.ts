@@ -288,6 +288,7 @@ export function toRule(raw: Raw, index: number, networks: Network[]): Rule {
     const action: Rule['action'] = target === 'ACCEPT' ? 'allow' : 'block';
     if (!['ACCEPT', 'DROP', 'REJECT'].includes(target)) reasons.push(`an unknown action '${text(raw.target)}'`);
     let from: Selector[] = [];
+    if (!['', 'ip', 'mac'].includes(text(raw.by))) reasons.push(`a match by '${text(raw.by)}'`);
     if (text(raw.by) === 'mac') {
         const mac = macOrUndefined(raw.mac);
         if (mac) from = [{ device: mac }];

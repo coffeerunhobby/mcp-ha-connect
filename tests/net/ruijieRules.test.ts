@@ -118,6 +118,11 @@ describe('Ruijie rules: reading what the page writes', () => {
         }
     });
 
+    it('keeps a rule matching some other way read-only', () => {
+        expect(toRule({ ...base, by: 'user' }, 0, LAN).foreign?.reason).toContain("a match by 'user'");
+        expect(toRule({ ...base, by: '' }, 0, LAN).foreign).toBeUndefined();
+    });
+
     it('keeps other connection states read-only', () => {
         expect(toRule({ ...base, state: '1' }, 0, LAN).foreign?.reason).toContain('only some connection states (1)');
         expect(toRule({ ...base, target: 'ACCEPT', state: '1,4' }, 0, LAN).foreign?.reason).toContain('only some connection states');
