@@ -740,6 +740,7 @@ export class RuijieNetworkController implements NetworkController {
             execute = async () => {
                 await this.ruleCall('devConfig.add', { list: [{ ...entry, enable: '0' }] }, 'the new rule');
                 let uuid = '';
+                let written: Raw = {};
                 try {
                     let stored: Raw[];
                     try {
@@ -753,6 +754,7 @@ export class RuijieNetworkController implements NetworkController {
                     if (mine.length !== 1) throw new NetError('CONFLICT', `Created rule '${text(entry.ruleName)}' but could not find it again: it may still be stored, switched off, and is not removed because it can't be told from any other. Check net_listRules.`);
                     const index = mine[0];
                     uuid = text(stored[index].uuid);
+                    written = stored[index];
                     if (!uuid) throw new NetError('CONFLICT', `Rule '${text(entry.ruleName)}' is stored switched off, but the router gives it no id, so it can't be finished or removed here. Check net_listRules.`);
                     await this.moveEntry(uuid, index + 1, at);
                     if (entry.enable === '1') {
@@ -774,7 +776,23 @@ export class RuijieNetworkController implements NetworkController {
                     }
                     throw error;
                 }
-                return await readBack((after) => after.find((r) => r.name === text(entry.ruleName)), same(entry, at));
+                try {
+                    return await readBack((after) => after.find((r) => r.id === uuid), same(entry, at));
+                } catch (error) {
+                    if (!(error instanceof NetError)) throw error;
+                    // Taken back only while it still says what this change wrote, never someone else's edit.
+                    let removed = false;
+                    try {
+                        const stored = (await this.ruleEntries()).find((e) => text(e.uuid) === uuid);
+                        if (stored && sameEntry(stored, { ...written, enable: entry.enable })) {
+                            await this.client.call('devConfig.del', 'access_ctrl', { uuid: [uuid] });
+                            removed = !(await this.ruleEntries()).some((e) => text(e.uuid) === uuid);
+                        }
+                    } catch {
+                        removed = false;
+                    }
+                    throw new NetError('CONFLICT', removed ? `Rule '${text(entry.ruleName)}' didn't end up as planned on the router, so it was removed again. Check net_listRules.` : `Rule '${text(entry.ruleName)}' didn't end up as planned and was left as it is; it may be active. Check net_listRules.`);
+                }
             };
         } else if (change.op === 'delete') {
             const { raw, rule } = editable(change.ref, 'deleted');

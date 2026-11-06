@@ -381,6 +381,18 @@ describe('Ruijie rules: what stays online', () => {
         expect(await code(controller({ entries }).net.plan({ op: 'delete', kind: 'rule', ref: { name: 'shut' } }))).toBe('ok');
     });
 
+    it('sees every partial allow above a danger: removing any of them uncovers traffic', async () => {
+        const port: Raw = { ...base, ruleName: 'p80', uuid: 'U-80', src: 'vlan20', dest: 'lan', destIP: '192.168.110.1', proto: 'tcpudp', destPort: '80', target: 'ACCEPT', state: '0' };
+        const ssh: Raw = { ...port, ruleName: 'p22', uuid: 'U-22', destPort: '22' };
+        const shut: Raw = { ...base, ruleName: 'shut', uuid: 'U-S', src: 'vlan20', dest: 'lan', destIP: '192.168.110.1' };
+        expect(await code(controller({ entries: [port, ssh, shut] }).net.plan({ op: 'delete', kind: 'rule', ref: { name: 'p22' } }))).toBe('PROTECTED');
+        const out: Raw = { ...base, ruleName: 'out', uuid: 'U-OUT', proto: 'tcp', target: 'ACCEPT', state: '0' };
+        const stop: Raw = { ...base, ruleName: 'stop', uuid: 'U-ST' };
+        expect(await code(controller({ entries: [out, stop] }).net.plan({ op: 'delete', kind: 'rule', ref: { name: 'out' } }))).toBe('PROTECTED');
+        expect(await code(controller({ entries: [out, stop] }).net.plan(update('out', { enabled: false })))).toBe('PROTECTED');
+        expect(await code(controller({ entries: [out, stop] }).net.plan(update('out', { name: 'out2' })))).toBe('ok');
+    });
+
     it('refuses switching on or widening a rule into a cut-off', async () => {
         const off: Raw = { ...base, ruleName: 'off', uuid: 'U-OFF', enable: '0' };
         expect(await code(controller({ entries: [off] }).net.plan(update('off', { enabled: true })))).toBe('PROTECTED');
@@ -783,6 +795,28 @@ describe('Ruijie rules: when the router differs or fails', () => {
         });
         await expect(apply(update('old', { to: [{ addresses: ['1.1.1.1'] }], position: 2 }))).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('may be switched off or at another position') });
         expect(writes.filter(([, d]) => d.list)).toHaveLength(1);
+    });
+
+    it('a new rule that ends up wrong is removed again while it still says what was written', async () => {
+        const { state, apply } = controller({
+            addAtTop: true,
+            write: (_method, data) => (data.opt ? { rcode: '00000000' } : undefined),
+        });
+        await expect(apply(create())).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('removed again') });
+        expect(state.entries.map((e) => e.ruleName)).toEqual(['old']);
+    });
+
+    it('a new rule edited at the last moment is left alone and reported', async () => {
+        let enabled = false;
+        const made = controller({
+            write: (_method, data) => {
+                if (data.list && (data.list as Raw[])[0].enable === '1') enabled = true;
+                return undefined;
+            },
+            readBack: () => ({ list: made.state.entries.map((e) => (enabled && e.ruleName === 'iot-out' ? { ...e, proto: 'udp' } : e)) }),
+        });
+        await expect(made.apply(create())).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('left as it is') });
+        expect(made.writes.filter(([m]) => m === 'devConfig.del')).toEqual([]);
     });
 
     it('a read-back that differs is a CONFLICT, never a success', async () => {

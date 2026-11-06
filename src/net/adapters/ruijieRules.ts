@@ -251,40 +251,61 @@ const shields = (raw: Raw) =>
     !(Array.isArray(raw.user_group_list) && raw.user_group_list.length) &&
     !(Array.isArray(raw.userGroupList) && raw.userGroupList.length);
 
+/** A danger on the router's list: why, and the enabled allow rules above it that let some traffic past it. */
+interface Risk {
+    reason: string;
+    allowsAbove: string[];
+}
+
 /**
  * The enabled block rules that can reach what must stay online on its way to the internet: this
- * server's internet is also how it is reached (at Xpress through the Nebula overlay). Each comes
- * with its reason, in the order the router checks them.
+ * server's internet is also how it is reached (at Xpress through the Nebula overlay). A partial
+ * allow above one lets only some traffic past, so it is noted, not trusted.
  */
-export function internetRisks(entries: Raw[], world: RuleWorld): Map<string, string> {
-    const risks = new Map<string, string>();
+export function internetRisks(entries: Raw[], world: RuleWorld): Map<string, Risk> {
+    const risks = new Map<string, Risk>();
+    const allows: string[] = [];
     for (const raw of entries) {
         if (text(raw.enable) !== '1') continue;
         if (shields(raw)) break;
-        if (text(raw.target).toUpperCase() === 'ACCEPT' || !reachesOutside(raw, world)) continue;
+        if (text(raw.target).toUpperCase() === 'ACCEPT') {
+            allows.push(text(raw.uuid) || text(raw.ruleName));
+            continue;
+        }
+        if (!reachesOutside(raw, world)) continue;
         const hit = sourceHit(raw, world);
         // What it matches is part of its key: widening a rule already there is a new danger.
-        if (hit) risks.set([text(raw.uuid) || text(raw.ruleName), raw.by, raw.mac, raw.src, raw.srcIP, raw.srcPort, raw.dest, raw.destIP, raw.destPort, raw.proto, raw.state, raw.tmngtName].map(text).join('|'), hit);
+        if (hit) risks.set([text(raw.uuid) || text(raw.ruleName), raw.by, raw.mac, raw.src, raw.srcIP, raw.srcPort, raw.dest, raw.destIP, raw.destPort, raw.proto, raw.state, raw.tmngtName].map(text).join('|'), { reason: hit, allowsAbove: [...allows] });
     }
     return risks;
 }
 
-/**
- * The enabled block rules on the router's or this server's address that nothing above them may let
- * through (any enabled allow above one counts as possibly doing so), so a change uncovering one is seen.
- */
-function destinationRisks(entries: Raw[], world: RuleWorld): Set<string> {
-    const risks = new Set<string>();
+/** The enabled block rules on the router's or this server's address, with the allows above them. */
+function destinationRisks(entries: Raw[], world: RuleWorld): Map<string, Risk> {
+    const risks = new Map<string, Risk>();
+    const allows: string[] = [];
     for (const raw of entries) {
         if (text(raw.enable) !== '1') continue;
-        if (text(raw.target).toUpperCase() === 'ACCEPT') break;
+        if (text(raw.target).toUpperCase() === 'ACCEPT') {
+            allows.push(text(raw.uuid) || text(raw.ruleName));
+            continue;
+        }
         try {
             guardDestination(raw, world);
         } catch {
-            risks.add([text(raw.uuid) || text(raw.ruleName), raw.src, raw.srcIP, raw.dest, raw.destIP].map(text).join('|'));
+            risks.set([text(raw.uuid) || text(raw.ruleName), raw.src, raw.srcIP, raw.dest, raw.destIP, raw.destPort, raw.proto].map(text).join('|'), { reason: "the router's or this server's address", allowsAbove: [...allows] });
         }
     }
     return risks;
+}
+
+/** A danger is new when it wasn't there, or when an allow that let traffic past it no longer stands above it. */
+function newDanger(today: Map<string, Risk>, after: Map<string, Risk>): Risk | undefined {
+    for (const [key, risk] of after) {
+        const was = today.get(key);
+        if (!was || was.allowsAbove.some((allow) => !risk.allowsAbove.includes(allow))) return risk;
+    }
+    return undefined;
 }
 
 /** Refuses when a rule list the change passes through newly endangers what must stay online. */
@@ -292,12 +313,9 @@ export function guardInternet(before: Raw[], states: Raw[][], world: RuleWorld):
     const today = internetRisks(before, world);
     const todayDestinations = destinationRisks(before, world);
     for (const state of states) {
-        for (const [key, reason] of internetRisks(state, world)) {
-            if (!today.has(key)) throw new NetError('PROTECTED', `This would block ${reason} from the internet or part of it, and this server has to stay reachable; refused`);
-        }
-        for (const key of destinationRisks(state, world)) {
-            if (!todayDestinations.has(key)) throw new NetError('PROTECTED', 'This would make a block on the router\'s or this server\'s address take effect; refused');
-        }
+        const outside = newDanger(today, internetRisks(state, world));
+        if (outside) throw new NetError('PROTECTED', `This would block ${outside.reason} from the internet or part of it, and this server has to stay reachable; refused`);
+        if (newDanger(todayDestinations, destinationRisks(state, world))) throw new NetError('PROTECTED', "This would make a block on the router's or this server's address take effect for more traffic; refused");
     }
 }
 
