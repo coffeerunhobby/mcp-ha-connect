@@ -113,7 +113,7 @@ describe('Ruijie rules: reading what the page writes', () => {
     it('keeps a device rule the page wouldn\'t write read-only', () => {
         const device = { ...base, by: 'mac', mac: '02:aa:bb:cc:dd:ee' };
         expect(toRule(device, 0, LAN).foreign).toBeUndefined();
-        for (const odd of [{ dest: 'vlan233' }, { destIP: '8.8.8.8' }, { proto: 'tcp' }, { proto: 'tcpudp', destPort: '80' }]) {
+        for (const odd of [{ dest: 'vlan233' }, { destIP: '8.8.8.8' }, { srcIP: '192.168.110.5' }, { proto: 'tcp' }, { proto: 'tcpudp', destPort: '80' }]) {
             expect(toRule({ ...device, ...odd }, 0, LAN).foreign?.reason).toContain('a device match');
         }
     });
@@ -611,6 +611,26 @@ describe('Ruijie rules: when the router differs or fails', () => {
         });
         await expect(apply(create())).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('it may still be stored, switched off or on') });
         expect(state.entries.map((e) => e.ruleName)).toEqual(['old', 'iot-out']);
+    });
+
+    it('never takes someone else\'s rule of the same name for the new one', async () => {
+        const other = { ...base, ruleName: 'iot-out', enable: '1', src: 'vlan20', destIP: '9.9.9.9', uuid: 'U-OTHER' };
+        const { writes, apply } = controller({ readBack: () => ({ list: [OLD, other] }) });
+        await expect(apply(create())).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('could not find it again') });
+        expect(writes.map(([m]) => m)).toEqual(['devConfig.add']);
+    });
+
+    it('two rules that both look like the new one are reported, and neither is touched', async () => {
+        const twin = (uuid: string) => ({ ...base, ruleName: 'iot-out', enable: '0', src: 'vlan20', srcPort: '', destPort: '', uuid });
+        const { writes, apply } = controller({ readBack: () => ({ list: [OLD, twin('U-A'), twin('U-B')] }) });
+        await expect(apply(create())).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('could not find it again') });
+        expect(writes.map(([m]) => m)).toEqual(['devConfig.add']);
+    });
+
+    it('a rule changed by someone else during a move is reported, not a success', async () => {
+        const entries = [OLD, { ...OLD, ruleName: 'b', uuid: 'U-B' }];
+        const edited = { ...OLD, destIP: '1.1.1.1' };
+        await expect(controller({ entries, readBack: () => ({ list: [entries[1], edited] }) }).apply({ op: 'move', kind: 'rule', ref: { name: 'old' }, position: 2 })).rejects.toMatchObject({ code: 'CONFLICT' });
     });
 
     it('a new rule stored without an id is reported, not moved', async () => {

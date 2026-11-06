@@ -297,7 +297,7 @@ export function toRule(raw: Raw, index: number, networks: Network[]): Rule {
         if (where && where !== 'lan' && where !== 'all') reasons.push(`a device match limited to the interface '${where}'`);
         // The page writes a device rule towards the whole internet, for every protocol.
         const protoOf = text(raw.proto).toLowerCase();
-        if (text(raw.dest) !== 'wan' || text(raw.destIP) || text(raw.destPort) || (protoOf !== 'all' && protoOf !== '')) reasons.push('a device match with its own destination, protocol or ports');
+        if (text(raw.srcIP) || text(raw.dest) !== 'wan' || text(raw.destIP) || text(raw.destPort) || (protoOf !== 'all' && protoOf !== '')) reasons.push('a device match with its own addresses, destination, protocol or ports');
     } else {
         const s = side(text(raw.src), text(raw.srcIP), networks, true);
         if (typeof s === 'string') reasons.push(s);
@@ -746,8 +746,11 @@ export class RuijieNetworkController implements NetworkController {
                     } catch {
                         throw new NetError('CONFLICT', `The router accepted rule '${text(entry.ruleName)}', but reading the rules back failed: it may be stored, switched off. Check net_listRules.`);
                     }
-                    const index = stored.findIndex((e) => text(e.ruleName) === text(entry.ruleName));
-                    if (index < 0) throw new NetError('CONFLICT', `Created rule '${text(entry.ruleName)}' but could not find it again; check net_listRules.`);
+                    // Only an entry that wasn't there and says exactly what was written is this one.
+                    const known = new Set(entries.map((e) => text(e.uuid)));
+                    const mine = stored.flatMap((e, i) => (!known.has(text(e.uuid)) && Object.entries({ ...entry, enable: '0' }).every(([key, value]) => text(e[key]) === text(value)) ? [i] : []));
+                    if (mine.length !== 1) throw new NetError('CONFLICT', `Created rule '${text(entry.ruleName)}' but could not find it again; check net_listRules.`);
+                    const index = mine[0];
                     uuid = text(stored[index].uuid);
                     if (!uuid) throw new NetError('CONFLICT', `Rule '${text(entry.ruleName)}' is stored switched off, but the router gives it no id, so it can't be finished or removed here. Check net_listRules.`);
                     await this.moveEntry(uuid, index + 1, at);
@@ -796,7 +799,7 @@ export class RuijieNetworkController implements NetworkController {
                 } catch (error) {
                     return await recover(error, raw, rule.name, rule.position);
                 }
-                return await readBack((after) => after.find((r) => r.id === rule.id), (r) => r?.position === to);
+                return await readBack((after) => after.find((r) => r.id === rule.id), same(raw, to));
             };
         } else {
             const { raw, rule } = editable(change.value.ref, 'changed');
