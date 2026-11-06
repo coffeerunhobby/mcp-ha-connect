@@ -868,7 +868,7 @@ export class RuijieNetworkController implements NetworkController {
                     } catch (error) {
                         return await recover(error, raw, rule.name, rule.position, written);
                     }
-                    if (!current || !sameEntry(current, written)) throw new NetError('CONFLICT', `Rule '${rule.name}' changed while it was being changed, so it wasn't switched on; check net_listRules.`);
+                    if (!current || !sameEntry(current, written)) throw new NetError('CONFLICT', `Rule '${rule.name}' changed while it was being changed, so someone else's edit was left alone: it wasn't switched on again and stays off, at position ${to}, until you switch it on. Check net_listRules.`);
                     try {
                         await this.ruleCall('devConfig.update', { list: [entry] }, 'switching the rule on');
                     } catch (error) {

@@ -741,7 +741,7 @@ describe('Ruijie rules: when the router differs or fails', () => {
                 return undefined;
             },
         });
-        await expect(apply(update('old', { to: [{ addresses: ['1.1.1.1'] }], position: 2 }))).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('changed while it was being changed') });
+        await expect(apply(update('old', { to: [{ addresses: ['1.1.1.1'] }], position: 2 }))).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining("wasn't switched on again and stays off") });
         expect(writes.filter(([, d]) => d.list)).toHaveLength(1);
         expect(state.entries.find((e) => e.uuid === 'U-OLD')).toMatchObject({ proto: 'udp', enable: '0' });
     });
