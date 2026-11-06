@@ -214,13 +214,13 @@ describe('Ruijie rules: creating', () => {
     });
 
     it('takes a device by MAC, lower case with colons, towards the whole internet only', async () => {
-        const { writes, apply } = controller({ serverHosts: ['192.168.110.3'] });
+        const { writes, apply } = controller({ serverHosts: ['192.168.110.2'] });
         const result = await apply(create({ from: [{ device: '02-AA-BB-CC-DD-EE' }] }));
         expect(added(writes)).toMatchObject({ by: 'mac', mac: '02:aa:bb:cc:dd:ee', src: 'lan', dest: 'wan', destIP: '', proto: 'all' });
         expect(result.object).toMatchObject({ from: [{ device: '02-AA-BB-CC-DD-EE' }], to: [{ internet: true }] });
         expect(await code(controller().net.plan(create({ from: [{ device: '02-AA-BB-CC-DD-EE' }], to: [{ addresses: ['8.8.8.8'] }] })))).toBe('UNSUPPORTED');
         expect(await code(controller().net.plan(create({ from: [{ device: '02-AA-BB-CC-DD-EE' }], protocol: 'tcp' })))).toBe('UNSUPPORTED');
-        expect(await code(controller().net.plan(create({ from: [{ device: 'FF-FF-FF-FF-FF-FF' }] })))).toBe('INVALID');
+        expect(await code(controller({ serverHosts: ['192.168.110.2'] }).net.plan(create({ from: [{ device: 'FF-FF-FF-FF-FF-FF' }] })))).toBe('INVALID');
     });
 
     it.each<[string, Partial<Value>, string]>([
@@ -279,12 +279,18 @@ describe('Ruijie rules: what stays online', () => {
         expect(await code(controller({ serverHosts: ['192.168.110.3'] }).net.plan(toInternet([{ addresses: ['192.168.110.0/25'] }])))).toBe('PROTECTED');
     });
 
-    it('blocks an online device only when it knows that is not this server; an offline one can\'t be it', async () => {
+    it('blocks a device only when it knows that is not this server', async () => {
         const online = [{ device: '02:00:00:00:00:03' }];
         expect(await code(controller().net.plan(toInternet(online)))).toBe('PROTECTED');
         expect(await code(controller({ serverHosts: ['192.168.110.2'] }).net.plan(toInternet(online)))).toBe('PROTECTED');
         expect(await code(controller({ serverHosts: ['192.168.110.3'] }).net.plan(toInternet(online)))).toBe('ok');
-        expect(await code(controller().net.plan(toInternet([{ device: '02-AA-BB-CC-DD-EE' }])))).toBe('ok');
+        // Not on the router's list right now: that alone doesn't rule it out, the list can have gaps.
+        const unseen = [{ device: '02-AA-BB-CC-DD-EE' }];
+        expect(await code(controller().net.plan(toInternet(unseen)))).toBe('PROTECTED');
+        expect(await code(controller({ serverHosts: ['192.168.110.3'] }).net.plan(toInternet(unseen)))).toBe('PROTECTED');
+        // The router sees this server under another MAC, or it isn't on the router's networks at all.
+        expect(await code(controller({ serverHosts: ['192.168.110.2'] }).net.plan(toInternet(unseen)))).toBe('ok');
+        expect(await code(controller({ serverHosts: ['172.16.0.9'] }).net.plan(toInternet(unseen)))).toBe('ok');
     });
 
     it('treats one outside address like the internet: it may be a relay this server needs', async () => {

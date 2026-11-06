@@ -178,10 +178,15 @@ function sourceHit(raw: Raw, world: RuleWorld): string | undefined {
     if (text(raw.by) === 'mac') {
         const mac = text(raw.mac).toLowerCase().replace(/:/g, '-');
         const at = number(world.clients.find((c) => c.mac.toLowerCase() === mac)?.ip ?? '');
-        // A server that is running is online, so a device that isn't can't be it.
-        if (at === undefined) return undefined;
-        if (server !== 'unset') return server.includes(at) ? 'this server' : undefined;
-        const hit = protectedNets.find((n) => inSubnet(at, n.gateway!));
+        if (server !== 'unset' && at !== undefined) return server.includes(at) ? 'this server' : undefined;
+        // Not seen, or this server's address unknown: it is ruled out only when the router sees this
+        // server under another MAC, or this server isn't on the router's networks at all.
+        if (server !== 'unset') {
+            const elsewhere = server.every((a) => !world.networks.some((n) => n.gateway && inSubnet(a, n.gateway)));
+            const seen = world.clients.some((c) => number(c.ip ?? '') !== undefined && server.includes(number(c.ip ?? '')!) && c.mac.toLowerCase() !== mac);
+            return elsewhere || seen ? undefined : `a device the router doesn't see right now, which may be this server (${text(raw.mac)})`;
+        }
+        const hit = at === undefined ? protectedNets[0] : protectedNets.find((n) => inSubnet(at, n.gateway!));
         return hit ? `a device on '${hit.name}' (this server's address isn't configured in MCP_SERVER_ADDRESSES, so it may be this server)` : undefined;
     }
     const where = text(raw.src);
