@@ -269,12 +269,34 @@ export function internetRisks(entries: Raw[], world: RuleWorld): Map<string, str
     return risks;
 }
 
+/**
+ * The enabled block rules on the router's or this server's address that nothing above them may let
+ * through (any enabled allow above one counts as possibly doing so), so a change uncovering one is seen.
+ */
+function destinationRisks(entries: Raw[], world: RuleWorld): Set<string> {
+    const risks = new Set<string>();
+    for (const raw of entries) {
+        if (text(raw.enable) !== '1') continue;
+        if (text(raw.target).toUpperCase() === 'ACCEPT') break;
+        try {
+            guardDestination(raw, world);
+        } catch {
+            risks.add([text(raw.uuid) || text(raw.ruleName), raw.src, raw.srcIP, raw.dest, raw.destIP].map(text).join('|'));
+        }
+    }
+    return risks;
+}
+
 /** Refuses when a rule list the change passes through newly endangers what must stay online. */
 export function guardInternet(before: Raw[], states: Raw[][], world: RuleWorld): void {
     const today = internetRisks(before, world);
+    const todayDestinations = destinationRisks(before, world);
     for (const state of states) {
         for (const [key, reason] of internetRisks(state, world)) {
             if (!today.has(key)) throw new NetError('PROTECTED', `This would block ${reason} from the internet or part of it, and this server has to stay reachable; refused`);
+        }
+        for (const key of destinationRisks(state, world)) {
+            if (!todayDestinations.has(key)) throw new NetError('PROTECTED', 'This would make a block on the router\'s or this server\'s address take effect; refused');
         }
     }
 }

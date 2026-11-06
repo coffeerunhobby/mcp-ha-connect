@@ -359,6 +359,19 @@ describe('Ruijie rules: what stays online', () => {
         expect(await code(controller({ entries }).net.plan(update('b', { position: 2 })))).toBe('ok');
     });
 
+    it('refuses what uncovers a block on the router\'s or this server\'s address', async () => {
+        const open: Raw = { ...base, ruleName: 'open', uuid: 'U-O', src: 'vlan20', dest: 'lan', destIP: '192.168.110.1', target: 'ACCEPT', state: '0' };
+        const shut: Raw = { ...base, ruleName: 'shut', uuid: 'U-S', src: 'vlan20', dest: 'lan', destIP: '192.168.110.1' };
+        const entries = [open, shut];
+        expect(await code(controller({ entries }).net.plan({ op: 'delete', kind: 'rule', ref: { name: 'open' } }))).toBe('PROTECTED');
+        expect(await code(controller({ entries }).net.plan({ op: 'move', kind: 'rule', ref: { name: 'shut' }, position: 1 }))).toBe('PROTECTED');
+        expect(await code(controller({ entries }).net.plan({ op: 'move', kind: 'rule', ref: { name: 'open' }, position: 2 }))).toBe('PROTECTED');
+        expect(await code(controller({ entries }).net.plan(update('open', { enabled: false })))).toBe('PROTECTED');
+        expect(await code(controller({ entries }).net.plan(update('open', { position: 2 })))).toBe('PROTECTED');
+        expect(await code(controller({ entries: [{ ...open, enable: '0' }, shut] }).net.plan({ op: 'delete', kind: 'rule', ref: { name: 'open' } }))).toBe('ok');
+        expect(await code(controller({ entries }).net.plan({ op: 'delete', kind: 'rule', ref: { name: 'shut' } }))).toBe('ok');
+    });
+
     it('refuses switching on or widening a rule into a cut-off', async () => {
         const off: Raw = { ...base, ruleName: 'off', uuid: 'U-OFF', enable: '0' };
         expect(await code(controller({ entries: [off] }).net.plan(update('off', { enabled: true })))).toBe('PROTECTED');
