@@ -318,7 +318,7 @@ change, delete and move, one source and one destination per rule (a network, one
 one port), or one device by MAC towards the whole internet. A block is what the page writes: it stops new connections,
 and the other side can still start its own. No rule may block a protected network or this server from the internet or one outside address, or
 block the router's or this server's address (blocking another network from the router's whole network is fine, unless the source may hold this server), so set `MCP_SERVER_ADDRESSES` (plain addresses here, not host names): while
-it is unset, a block towards the internet from any address or online device on a protected network is refused. Rules
+it is unset, a block towards the internet from any address or online device on a protected network is refused. Give that machine a fixed address (a reservation or static): the setting doesn't follow a DHCP lease that moves. Rules
 listed as `foreign` are not changed. Every other change is refused for now: networks come next. It talks to the router's local web
 API with its admin password; use `https://` with `RUIJIE_CERT_SHA256` (the router's own login page hides the password
 with a key that is shipped in the page, so only HTTPS really protects it, and the router's self-signed certificate is
