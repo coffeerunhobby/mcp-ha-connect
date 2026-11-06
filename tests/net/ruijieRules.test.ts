@@ -286,6 +286,18 @@ describe('Ruijie rules: what stays online', () => {
         expect(await code(controller().net.plan(create({ from: [{ network: { name: 'LAN' } }], to })))).toBe('ok');
     });
 
+    it('blocking a network from the router\'s network is the point, unless that network may hold this server', async () => {
+        const lan = [{ network: { name: 'LAN' } }];
+        expect(await code(controller().net.plan(create({ to: lan })))).toBe('ok');
+        expect(await code(controller({ serverHosts: ['192.168.110.3'] }).net.plan(create({ to: lan })))).toBe('ok');
+        expect(await code(controller({ serverHosts: ['10.20.0.5'] }).net.plan(create({ to: lan })))).toBe('PROTECTED');
+        expect(await code(controller({ serverHosts: ['10.20.0.5'] }).net.plan(create({ from: [{ addresses: ['10.20.0.9'] }], to: lan })))).toBe('ok');
+        expect(await code(controller({ serverHosts: ['10.20.0.5'] }).net.plan(create({ from: [{ addresses: ['10.20.0.5'] }], to: lan })))).toBe('PROTECTED');
+        // The other way: towards a network holding only other devices nothing is at stake, towards this server's it is.
+        expect(await code(controller({ serverHosts: ['192.168.110.3'] }).net.plan(create({ from: lan, to: [{ network: { name: 'IoT' } }] })))).toBe('ok');
+        expect(await code(controller({ serverHosts: ['10.20.0.5'] }).net.plan(create({ from: lan, to: [{ network: { name: 'IoT' } }] })))).toBe('PROTECTED');
+    });
+
     it('never blocks the router or this server as a destination', async () => {
         expect(await code(controller().net.plan(create({ from: [{ network: { name: 'IoT' } }], to: [{ addresses: ['192.168.110.1'] }] })))).toBe('PROTECTED');
         expect(await code(controller().net.plan(create({ from: [{ network: { name: 'IoT' } }], to: [{ addresses: ['192.168.110.0/24'] }] })))).toBe('PROTECTED');
@@ -341,6 +353,15 @@ describe('Ruijie rules: what stays online', () => {
         expect(await code(controller({ entries: [narrow] }).net.plan(update('narrow', { to: [{ internet: true }] })))).toBe('PROTECTED');
         const router: Raw = { ...base, ruleName: 'r', uuid: 'U-R', enable: '0', src: 'vlan20', dest: 'lan', destIP: '192.168.110.1' };
         expect(await code(controller({ entries: [router] }).net.plan(update('r', { enabled: true })))).toBe('PROTECTED');
+    });
+
+    it.each<[string, Raw, Parameters<typeof update>[1]]>([
+        ['a protocol', { proto: 'tcp' }, { protocol: 'any' }],
+        ['a port', { proto: 'tcpudp', destPort: '80' }, { protocol: { tcpUdpPorts: '443' } }],
+        ['a destination', { destIP: '8.8.8.8' }, { to: [{ internet: true }] }],
+    ])('widening %s on a rule already there is a new danger', async (_what, limit, set) => {
+        const entries = [{ ...base, ruleName: 'part', uuid: 'U-P', ...limit }];
+        expect(await code(controller({ entries }).net.plan(update('part', set)))).toBe('PROTECTED');
     });
 
     it('leaves a danger already there alone rather than blocking unrelated changes to it', async () => {

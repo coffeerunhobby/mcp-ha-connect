@@ -264,7 +264,7 @@ export function internetRisks(entries: Raw[], world: RuleWorld): Map<string, str
         if (text(raw.target).toUpperCase() === 'ACCEPT' || !reachesOutside(raw, world)) continue;
         const hit = sourceHit(raw, world);
         // What it matches is part of its key: widening a rule already there is a new danger.
-        if (hit) risks.set([text(raw.uuid) || text(raw.ruleName), raw.by, raw.mac, raw.src, raw.srcIP, raw.dest, raw.destIP].map(text).join('|'), hit);
+        if (hit) risks.set([text(raw.uuid) || text(raw.ruleName), raw.by, raw.mac, raw.src, raw.srcIP, raw.srcPort, raw.dest, raw.destIP, raw.destPort, raw.proto, raw.state, raw.tmngtName].map(text).join('|'), hit);
     }
     return risks;
 }
@@ -279,14 +279,27 @@ export function guardInternet(before: Raw[], states: Raw[][], world: RuleWorld):
     }
 }
 
-/** A block rule may not stop devices reaching the router or this server. */
+/**
+ * A block rule may not stop devices reaching the router's or this server's address. A whole network
+ * as the destination is different: blocking a network from reaching the one the router is on ("block
+ * IoT from Home") is what these rules are for, so that is refused only when the source may hold this
+ * server, which would cut it off from the router.
+ */
 export function guardDestination(entry: Raw, world: RuleWorld): void {
-    if (text(entry.target).toUpperCase() === 'ACCEPT' || text(entry.enable) !== '1' || !text(entry.destIP)) return;
+    if (text(entry.target).toUpperCase() === 'ACCEPT' || text(entry.enable) !== '1') return;
     let router: number | undefined;
     try {
         router = ipToNumber(world.routerHost);
     } catch {
         router = undefined;
+    }
+    if (!text(entry.destIP)) {
+        const where = text(entry.dest);
+        const reached = world.networks.filter((n) => n.gateway && (where === 'lan' || where === 'all' || n.id === where));
+        const holds = reached.some((n) => (router !== undefined && inSubnet(router, n.gateway!)) || (world.serverAddresses !== 'unset' && world.serverAddresses.some((a) => inSubnet(a, n.gateway!))));
+        const hit = holds ? sourceHit(entry, world) : undefined;
+        if (hit) throw new NetError('PROTECTED', `This would block ${hit} from the network the router or this server is on, and this server has to reach the router; refused`);
+        return;
     }
     for (const address of text(entry.destIP).split(',').map((a) => a.trim())) {
         let range;
