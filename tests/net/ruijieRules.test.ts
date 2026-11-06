@@ -72,7 +72,7 @@ function controller(over: Over = {}) {
                 }
             }
             if (method === 'devConfig.update' && data.list) {
-                for (const e of data.list as Raw[]) state.entries = state.entries.map((r) => (r.uuid === e.uuid ? e : r));
+                for (const e of data.list as Raw[]) state.entries = state.entries.map((r) => (r.uuid === e.uuid ? structuredClone(e) : r));
             }
             if (method === 'devConfig.update' && data.opt) {
                 const at = state.entries.findIndex((r) => r.uuid === data.uuid);
@@ -647,6 +647,35 @@ describe('Ruijie rules: when the router differs or fails', () => {
         });
         await expect(apply(update('old', { to: [{ addresses: ['1.1.1.1'] }], position: 2 }))).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('put back as it was, at position 1') });
         expect(state.entries).toEqual(pair);
+    });
+
+    it('a rule edited by someone else during a staged change isn\'t overwritten', async () => {
+        const { state, writes, apply } = controller({
+            entries: pair,
+            write: (_method, data) => {
+                if (data.opt) state.entries.find((e) => e.uuid === 'U-OLD')!.proto = 'udp';
+                return undefined;
+            },
+        });
+        await expect(apply(update('old', { to: [{ addresses: ['1.1.1.1'] }], position: 2 }))).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('changed while it was being changed') });
+        expect(writes.filter(([, d]) => d.list)).toHaveLength(1);
+        expect(state.entries.find((e) => e.uuid === 'U-OLD')).toMatchObject({ proto: 'udp', enable: '0' });
+    });
+
+    it('a failure doesn\'t write the old settings over someone else\'s edit', async () => {
+        const { state, writes, apply } = controller({
+            entries: pair,
+            write: (_method, data) => {
+                if (data.opt) {
+                    state.entries.find((e) => e.uuid === 'U-OLD')!.proto = 'udp';
+                    refuse();
+                }
+                return undefined;
+            },
+        });
+        await expect(apply(update('old', { to: [{ addresses: ['1.1.1.1'] }], position: 2 }))).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining("couldn't be confirmed") });
+        expect(writes.filter(([, d]) => d.list)).toHaveLength(1);
+        expect(state.entries.find((e) => e.uuid === 'U-OLD')).toMatchObject({ proto: 'udp' });
     });
 
     it('a move that stops halfway goes back to where it was', async () => {

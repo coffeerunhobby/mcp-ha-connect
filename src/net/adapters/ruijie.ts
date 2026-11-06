@@ -111,6 +111,8 @@ export function isRuijieDownload(url: string | undefined): boolean {
 }
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : value === undefined || value === null ? '' : String(value));
+/** Whether two router entries say the same, whatever order the router gives their fields in. */
+const sameEntry = (a: Raw, b: Raw): boolean => JSON.stringify(Object.entries(a).sort(([x], [y]) => x.localeCompare(y))) === JSON.stringify(Object.entries(b).sort(([x], [y]) => x.localeCompare(y)));
 const list = (value: unknown): Raw[] => (Array.isArray(value) ? (value.filter((v) => v && typeof v === 'object') as Raw[]) : []);
 
 /** "255.255.255.0" -> 24; undefined for a mask that isn't contiguous ones. */
@@ -664,7 +666,7 @@ export class RuijieNetworkController implements NetworkController {
          * After a change to a rule failed: nothing happened, or it goes back as it was and the caller
          * hears how far that got. It never says more than it read from the router.
          */
-        const recover = async (error: unknown, raw: Raw, name: string, position: number): Promise<never> => {
+        const recover = async (error: unknown, raw: Raw, name: string, position: number, written?: Raw): Promise<never> => {
             const uuid = text(raw.uuid);
             const unclear = () => new NetError('CONFLICT', `Changing rule '${name}' failed halfway and its state couldn't be confirmed: it may be switched off or at another position; check net_listRules.`);
             const place = async () => {
@@ -677,11 +679,13 @@ export class RuijieNetworkController implements NetworkController {
             let touched = false;
             try {
                 now = await place();
-                if (JSON.stringify(now.entry) !== JSON.stringify(raw)) {
+                if (!sameEntry(now.entry, raw)) {
+                    // Only what this change wrote is taken back, never someone else's edit.
+                    if (!written || !sameEntry(now.entry, written)) throw unclear();
                     touched = true;
                     await this.client.call('devConfig.update', 'access_ctrl', { list: [raw] });
                     now = await place();
-                    if (JSON.stringify(now.entry) !== JSON.stringify(raw)) throw unclear();
+                    if (!sameEntry(now.entry, raw)) throw unclear();
                 }
                 if (now.at !== position) {
                     touched = true;
@@ -750,7 +754,7 @@ export class RuijieNetworkController implements NetworkController {
                     if (entry.enable === '1') {
                         // Read again: the move took a while, and an entry edited meanwhile must not be overwritten.
                         const placedEntry = (await this.ruleEntries()).find((e) => text(e.uuid) === uuid);
-                        if (!placedEntry || JSON.stringify(placedEntry) !== JSON.stringify(stored[index])) {
+                        if (!placedEntry || !sameEntry(placedEntry, stored[index])) {
                             throw new NetError('CONFLICT', `Rule '${text(entry.ruleName)}' changed while it was being created, so it wasn't switched on; check net_listRules.`);
                         }
                         await this.ruleCall('devConfig.update', { list: [{ ...placedEntry, enable: '1' }] }, 'switching the rule on');
@@ -827,12 +831,27 @@ export class RuijieNetworkController implements NetworkController {
                 ...(staged ? ['It is switched off until it is in place.'] : []),
             ];
             execute = async () => {
+                const written = staged ? { ...entry, enable: '0' } : entry;
                 try {
-                    if (changed) await this.ruleCall('devConfig.update', { list: [staged ? { ...entry, enable: '0' } : entry] }, 'the rule change');
+                    if (changed) await this.ruleCall('devConfig.update', { list: [written] }, 'the rule change');
                     if (moves) await this.moveEntry(uuid, rule.position, to);
-                    if (staged) await this.ruleCall('devConfig.update', { list: [entry] }, 'switching the rule on');
                 } catch (error) {
-                    return await recover(error, raw, rule.name, rule.position);
+                    return await recover(error, raw, rule.name, rule.position, changed ? written : undefined);
+                }
+                if (staged) {
+                    // Read again: the move took a while, and an entry edited meanwhile must not be overwritten.
+                    let current: Raw | undefined;
+                    try {
+                        current = (await this.ruleEntries()).find((e) => text(e.uuid) === uuid);
+                    } catch (error) {
+                        return await recover(error, raw, rule.name, rule.position, written);
+                    }
+                    if (!current || !sameEntry(current, written)) throw new NetError('CONFLICT', `Rule '${rule.name}' changed while it was being changed, so it wasn't switched on; check net_listRules.`);
+                    try {
+                        await this.ruleCall('devConfig.update', { list: [entry] }, 'switching the rule on');
+                    } catch (error) {
+                        return await recover(error, raw, rule.name, rule.position, written);
+                    }
                 }
                 return await readBack((after) => after.find((r) => r.id === rule.id), same(entry, to));
             };
