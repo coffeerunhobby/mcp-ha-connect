@@ -135,7 +135,7 @@ Ask the owner a question as a phone notification with up to 3 buttons and read b
 
 | Tool | Description |
 |------|-------------|
-| `askOwner` | Send the question (plain text, max 256 characters; 1-3 buttons, default Approve / Deny; open up to 7 days) and return a `requestId` at once |
+| `askOwner` | Send the question (plain text, max 512 characters; 1-3 buttons, default Approve / Deny; open up to 7 days) and return a `requestId` at once |
 | `getOwnerAnswer` | Wait up to 50 s per call: `answered` (button index and label, time, HA user), `pending`, `timeout`, `cancelled` or `unknown` |
 | `cancelOwnerQuestion` | Withdraw an open question; the notification changes to "Cancelled" |
 

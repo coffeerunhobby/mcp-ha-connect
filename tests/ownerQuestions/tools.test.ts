@@ -8,7 +8,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 
 import { OwnerQuestionService } from '../../src/ownerQuestions/service.js';
-import { registerOwnerQuestionTools, askOwnerSchema } from '../../src/tools/homeassistant/askOwner.js';
+import { registerOwnerQuestionTools, askOwnerSchema, getOwnerAnswerSchema, cancelOwnerQuestionSchema } from '../../src/tools/homeassistant/askOwner.js';
 import { createServer } from '../../src/server/common.js';
 import { Permission, Role } from '../../src/permissions/index.js';
 import { setLocalFullTrust } from '../../src/tools/common.js';
@@ -55,7 +55,7 @@ describe('askOwner input validation', () => {
         ['a zero-width joiner', { question: 'ok‍ok' }, /U\+200D/],
         ['a right-to-left override', { question: 'pay ‮evil' }, /U\+202E/],
         ['stacked combining marks', { question: 'á́' }, /U\+0301/],
-        ['a 257-character question', { question: 'x'.repeat(257) }, /257 characters; the maximum is 256/],
+        ['a 513-character question', { question: 'x'.repeat(513) }, /513 characters; the maximum is 512/],
         ['a line break in the title', { title: 'two\nlines' }, /title contains a disallowed character U\+000A/],
         ['a 61-character title', { title: 't'.repeat(61) }, /maximum is 60/],
         ['an emoji button', { buttons: ['Yes ✅', 'No'] }, /button label/],
@@ -70,9 +70,31 @@ describe('askOwner input validation', () => {
         expect(JSON.stringify(result.error!.issues)).toMatch(error);
     });
 
-    it('accepts a 256-character question with line breaks', () => {
-        const question = `${'x'.repeat(100)}\n${'y'.repeat(155)}`;
+    it('accepts a 512-character question with line breaks', () => {
+        const question = `${'x'.repeat(200)}\n${'y'.repeat(311)}`;
         expect(askOwnerSchema.parse({ ...valid, question }).question).toBe(question);
+    });
+
+    it('a requestId for the largest question still fits the requestId limit of getOwnerAnswer and cancelOwnerQuestion', async () => {
+        // Every text at its maximum, in 4-byte letters (U+1D400), the widest UTF-8 a plain-text character can take.
+        const wide = (n: number) => '\u{1D400}'.repeat(n);
+        const input = askOwnerSchema.parse({
+            question: wide(512),
+            title: wide(60),
+            buttons: [wide(20), `${wide(19)}b`, `${wide(19)}c`],
+            target: `mobile_app_${'a'.repeat(64)}`,
+            timeoutSeconds: 7 * 24 * 3600,
+        });
+        const { service } = makeService();
+        const caller = 's'.repeat(512);
+        const { requestId } = await service.ask(
+            { question: input.question, title: input.title!, buttons: input.buttons!, target: input.target, timeoutSeconds: input.timeoutSeconds! },
+            caller,
+        );
+        expect(getOwnerAnswerSchema.safeParse({ requestId }).success).toBe(true);
+        expect(cancelOwnerQuestionSchema.safeParse({ requestId }).success).toBe(true);
+        expect((await service.getAnswer(requestId, caller, 0)).status).toBe('pending');
+        service.stop();
     });
 });
 

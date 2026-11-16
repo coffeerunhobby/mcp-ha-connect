@@ -1,3 +1,9 @@
+### 2.5.7
+- **Longer owner questions: `askOwner` takes up to 512 characters** (was 256), so an approval card can show a whole command instead of cutting it (asked for mechions' phone approvals). The other limits stay: title 60, button labels 20, plain text only, longer text refused, not cut.
+- **Fix that comes with it:** a `requestId` carries the whole signed question, and at 512 characters of 4-byte letters it could pass the 4096 characters `getOwnerAnswer` and `cancelOwnerQuestion` accept, so such a question could never be read back. They now accept 8192 (the largest is about 3.6 KB plus the caller's name).
+- README: the new limit.
+- Tests: 512 accepted and 513 refused; the largest question's `requestId` passes both tools' input checks and reads back as pending (fails with the old 4096).
+
 ### 2.5.6
 - **New: traffic rules on Ruijie / Reyee routers.** `net_createRule`, `net_updateRule`, `net_deleteRule` and `net_moveRule` now work with `controller: "ruijie"`, through the same calls as the router's own page (`src/net/adapters/ruijieRules.ts`, mapped on ReyeeOS 2.430): add and update `{list: [entry]}`, delete `{uuid: [...]}`, a move one place at a time `{uuid, opt}`. Live-tested on a RG-EG105G-V3 with ReyeeOS 2.430 (2026-11-06, with 2.5.6-rc.1): add, change, move and delete, each read back from the router; that the router then really blocks the traffic was not tested on the wire. The later guard and failure-handling fixes in this release are tested against a fake router only.
   - A block rule is what the page writes (REJECT on new and invalid connections), so replies pass and the other side can still start connections; an allow is ACCEPT on every state. `net_listRules` now reads these as ordinary rules instead of `foreign`; other connection states stay `foreign`, and `foreign` rules are not changed.

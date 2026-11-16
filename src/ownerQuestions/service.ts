@@ -34,7 +34,7 @@ import { logger } from '../utils/logger.js';
 export const ACTION_EVENT = 'mobile_app_notification_action';
 
 export const LIMITS = {
-    questionChars: 256,
+    questionChars: 512,
     titleChars: 60,
     buttonChars: 20,
     maxButtons: 3,
