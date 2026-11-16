@@ -63,6 +63,19 @@ describe('OwnerQuestionService', () => {
         vi.useRealTimers();
     });
 
+    it('refuses before sending when the requestId would be longer than getOwnerAnswer accepts (a very long caller name)', async () => {
+        const { service, notify } = await harness();
+        const longCaller = 'c'.repeat(LIMITS.requestIdChars);
+        await expect(service.ask(input(), longCaller)).rejects.toThrow(/too long/);
+        expect(notify).not.toHaveBeenCalled();
+        // Nothing was reserved: the caller can still ask a question that fits.
+        const fits = 'c'.repeat(200);
+        for (let i = 0; i < LIMITS.maxOpenPerCaller; i++) {
+            const { requestId } = await service.ask(input(), fits);
+            expect(requestId.length).toBeLessThanOrEqual(LIMITS.requestIdChars);
+        }
+    });
+
     it('does not start when Home Assistant refuses the tap subscription', async () => {
         const service = new OwnerQuestionService({
             notify: vi.fn(),

@@ -47,9 +47,8 @@ export const askOwnerSchema = z.object({
     importance: z.enum(['high', 'default', 'low', 'min']).optional().describe('Android notification channel importance'),
 });
 
-// A requestId carries the whole signed question: at the largest texts in 4-byte characters it
-// is about 3.6 KB, plus the caller's name (tests/ownerQuestions/tools.test.ts checks the worst case fits).
-const requestIdSchema = z.string().min(1).max(8192).describe('The requestId returned by askOwner');
+// askOwner refuses a question whose requestId would be longer (see LIMITS.requestIdChars).
+const requestIdSchema = z.string().min(1).max(LIMITS.requestIdChars).describe('The requestId returned by askOwner');
 
 export const getOwnerAnswerSchema = z.object({
     requestId: requestIdSchema,

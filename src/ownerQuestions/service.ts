@@ -35,6 +35,9 @@ export const ACTION_EVENT = 'mobile_app_notification_action';
 
 export const LIMITS = {
     questionChars: 512,
+    /** What getOwnerAnswer/cancelOwnerQuestion accept. A requestId carries the whole signed
+     *  question: at the largest texts in 4-byte letters about 3.6 KB, plus the caller's name. */
+    requestIdChars: 8192,
     titleChars: 60,
     buttonChars: 20,
     maxButtons: 3,
@@ -197,6 +200,10 @@ export class OwnerQuestionService {
             ti: input.title,
         };
         const requestId = this.signRequest(payload);
+        if (requestId.length > LIMITS.requestIdChars) {
+            // Only a very long caller name (token sub) gets here; refuse before anything is sent.
+            throw new Error(`The question's requestId would be too long (${requestId.length} characters, the maximum is ${LIMITS.requestIdChars}); use a shorter client name or question`);
+        }
 
         const data: Record<string, unknown> = {
             tag: this.tagFor(nonce),
