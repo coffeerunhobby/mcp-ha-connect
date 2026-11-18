@@ -396,6 +396,8 @@ interface RuleContext {
 
 /** Whether every member of a group is an address or MAC object of one kind the model can say. */
 function groupComplete(group: Raw, addresses: Map<string, Raw>): boolean {
+    // A group with exclusions matches its members minus others: not a list of entries.
+    if (text(group.exclude) === 'enable' || names(group['exclude-member']).length) return false;
     const kinds = names(group.member).map((m) => addressValue(addresses.get(m))?.kind);
     return kinds.length > 0 && kinds.every((k) => k !== undefined && k === kinds[0]);
 }
@@ -452,8 +454,12 @@ function toRule(raw: Raw, index: number, context: RuleContext): Rule {
     if (schedule !== 'always') reasons.push(`runs on the schedule '${schedule}'`);
     const action = text(raw.action);
     if (action !== 'accept' && action !== 'deny') reasons.push(`action '${action}'`);
-    if (text(raw['srcaddr-negate']) === 'enable' || text(raw['dstaddr-negate']) === 'enable' || text(raw['service-negate']) === 'enable') reasons.push('negates its addresses or services');
-    if (text(raw['internet-service']) === 'enable' || text(raw['internet-service-src']) === 'enable') reasons.push('matches internet services');
+    // Every FortiOS "...-negate" switch inverts a match; every "internet-service..." switch adds one.
+    const on = (pattern: RegExp) => Object.entries(raw).some(([key, value]) => pattern.test(key) && value === 'enable');
+    if (on(/-negate$/)) reasons.push('negates its addresses or services');
+    if (on(/^internet-service/)) reasons.push('matches internet services');
+    // A consolidated policy (FortiOS 6.4+) also matches IPv6 through srcaddr6 / dstaddr6.
+    if (names(raw.srcaddr6).length || names(raw.dstaddr6).length) reasons.push('also matches IPv6 addresses');
     if (names(raw.users).length || names(raw.groups).length) reasons.push('matches users or user groups');
     return {
         id,

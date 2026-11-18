@@ -66,7 +66,7 @@ describe('fortigate_read', () => {
         await read({ path: '/firewall/sessions', limit: 10 }, Role.ADMIN);
         expect(calls).toEqual([
             { kind: 'log', segments: ['memory', 'event', 'system'], query: { rows: 50 } },
-            { kind: 'monitor', segments: ['firewall', 'session'], query: { count: 10, start: 0 } },
+            { kind: 'monitor', segments: ['firewall', 'sessions'], query: { count: 20, start: 0 } },
         ]);
     });
 
@@ -83,6 +83,26 @@ describe('fortigate_read', () => {
         expect(data[0]['auth-key']).toBe('<redacted>');
         expect(data[0].name).toBe('wan2');
         expect(redactEncrypted({ a: ['ENC x', 'ENCORE'] })).toEqual({ a: ['<redacted>', 'ENCORE'] });
+    });
+
+    it('redacts plaintext secrets under FortiOS hyphenated names, but keeps object names', async () => {
+        const { read } = setup(() => [{ name: 'vpn1', q_origin_key: 'vpn1', 'auth-key': 'plain1', 'private-key': 'plain2', 'pre-shared-key': 'plain3', psksecret: 'plain4', 'ppk-secret': 'plain5', keepalive: 10 }]);
+        const [row] = body(await read({ path: '/vpn/ipsec' }, Role.READONLY)).data as Array<Record<string, unknown>>;
+        expect(row).toEqual({ name: 'vpn1', q_origin_key: 'vpn1', 'auth-key': '<redacted>', 'private-key': '<redacted>', 'pre-shared-key': '<redacted>', psksecret: '<redacted>', 'ppk-secret': '<redacted>', keepalive: 10 });
+    });
+
+    it('reads sessions from firewall/sessions, falling back to firewall/session, with at least 20 rows asked and the limit kept', async () => {
+        const rows = Array.from({ length: 25 }, (_, i) => ({ i }));
+        const { read, calls } = setup((kind, segments) => {
+            if (segments[1] === 'sessions') throw new FortiGateError('no', 'notFound');
+            return rows;
+        });
+        const data = body(await read({ path: '/firewall/sessions', limit: 5 }, Role.ADMIN)).data as unknown[];
+        expect(data).toHaveLength(5);
+        expect(calls.map((c) => [c.segments.join('/'), c.query])).toEqual([
+            ['firewall/sessions', { count: 20, start: 0 }],
+            ['firewall/session', { count: 20, start: 0 }],
+        ]);
     });
 
     it('turns FortiGate errors into tool errors with their kind', async () => {

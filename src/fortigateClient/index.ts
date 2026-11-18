@@ -126,7 +126,11 @@ export class FortiGateClient {
         }
         const params = new URLSearchParams();
         if (this.vdom) params.set('vdom', this.vdom);
-        for (const [key, value] of Object.entries(query ?? {})) params.set(key, String(value));
+        for (const [key, value] of Object.entries(query ?? {})) {
+            // The VDOM is this server's setting: a call never reads another one.
+            if (key.toLowerCase() === 'vdom') throw new FortiGateError('A FortiGate call may not choose the VDOM', 'notFound');
+            params.set(key, String(value));
+        }
         const path = `/api/v2/${api}/${segments.map(encodeURIComponent).join('/')}`;
         const label = `${api} ${segments.join('/')}`;
         const search = params.size ? `?${params.toString()}` : '';

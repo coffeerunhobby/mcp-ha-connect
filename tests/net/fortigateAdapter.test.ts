@@ -213,6 +213,27 @@ describe('FortiGateNetworkController (read-only)', () => {
         expect(nested.foreign?.reason).toContain("group 'nested'");
     });
 
+    it('marks as foreign: negation and internet services of any kind, IPv6 addresses, groups with exclusions', async () => {
+        const base = { status: 'enable', action: 'accept', service: [{ name: 'ALL' }], schedule: 'always', srcintf: [{ name: 'lan' }], srcaddr: [{ name: 'all' }], dstintf: [{ name: 'wan1' }], dstaddr: [{ name: 'all' }] };
+        const { adapter } = controller({
+            'cmdb firewall/addrgrp': [{ name: 'minus', member: [{ name: 'printers' }], exclude: 'enable', 'exclude-member': [{ name: 'node-c6' }] }],
+            'cmdb firewall/policy': [
+                { ...base, policyid: 1, 'dstaddr-negate': 'enable' },
+                { ...base, policyid: 2, 'internet-service-negate': 'enable' },
+                { ...base, policyid: 3, 'internet-service-src-negate': 'enable' },
+                { ...base, policyid: 4, 'internet-service6': 'enable' },
+                { ...base, policyid: 5, srcaddr6: [{ name: 'all' }], dstaddr6: [{ name: 'all' }] },
+                { ...base, policyid: 6, srcaddr: [{ name: 'minus' }] },
+                { ...base, policyid: 7, srcaddr6: [], dstaddr6: [] },
+            ],
+        });
+        const rules = await adapter.listRules();
+        expect(rules.slice(0, 6).map((r) => r.foreign === undefined)).toEqual([false, false, false, false, false, false]);
+        expect(rules[4].foreign?.reason).toContain('IPv6');
+        expect(rules[5].foreign?.reason).toContain("group 'minus'");
+        expect(rules[6].foreign).toBeUndefined();
+    });
+
     it('lists address groups with their members resolved; members the model cannot say are left out', async () => {
         const { adapter } = controller();
         expect(await adapter.listGroups()).toEqual([

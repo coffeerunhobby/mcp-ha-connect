@@ -14,7 +14,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 
 import { FortiGateError, type FortiGateClient } from '../../fortigateClient/index.js';
 import { hasPermission, getPermissionNames } from '../../permissions/index.js';
-import { REDACTED } from '../../utils/redact.js';
+import { REDACTED, isSecretName } from '../../utils/redact.js';
 import { toToolResult, wrapToolHandler, getCallerPermissions, setToolVisibilityRule, Permission, type ToolExtra } from '../common.js';
 
 type Query = Record<string, string | number | boolean>;
@@ -60,7 +60,20 @@ export const FORTIGATE_RESOURCES: Record<string, Resource> = {
         description: 'Active sessions (who talks to what), newest first; limit = rows (default 50, max 200)',
         permission: Permission.ADMIN,
         limited: true,
-        fetch: async (client, limit) => (await client.monitor('firewall', 'session', undefined, { count: limit, start: 0 })).results,
+        fetch: async (client, limit) => {
+            // FortiOS 7.x names it firewall/sessions, older builds firewall/session; some want at least 20 rows.
+            const query = { count: Math.max(limit, 20), start: 0 };
+            let results: unknown;
+            try {
+                results = (await client.monitor('firewall', 'sessions', undefined, query)).results;
+            } catch (error) {
+                if (!(error instanceof FortiGateError && error.kind === 'notFound')) throw error;
+                results = (await client.monitor('firewall', 'session', undefined, query)).results;
+            }
+            if (Array.isArray(results)) return results.slice(0, limit);
+            const details = (results as { details?: unknown } | undefined)?.details;
+            return Array.isArray(details) ? { ...(results as object), details: details.slice(0, limit) } : results;
+        },
     },
     '/vpn/ipsec': { description: 'IPsec tunnels and whether they are up', permission: Permission.QUERY, fetch: monitor('vpn', 'ipsec') },
     '/vpn/ssl': { description: 'SSL-VPN users connected now', permission: Permission.ADMIN, fetch: monitor('vpn', 'ssl') },
@@ -79,11 +92,24 @@ export const fortigateReadSchema = z.object({
     limit: z.number().int().min(1).max(MAX_ROWS).optional().describe(`Rows for /firewall/sessions and /log/events (default ${DEFAULT_ROWS}, max ${MAX_ROWS})`),
 });
 
-/** FortiOS returns stored secrets encrypted ("ENC <base64>"): never passed on, whatever the field is called. */
+/**
+ * FortiOS secrets: stored ones come back encrypted ("ENC <base64>"), never passed on whatever the
+ * field is called; plaintext ones sit under hyphenated names ("auth-key", "private-key",
+ * "pre-shared-key") that the shared redactor (which also runs, in toToolResult) doesn't match.
+ * "q_origin_key" is an object's own name, not a key.
+ */
 export function redactEncrypted(value: unknown): unknown {
     if (typeof value === 'string') return /^ENC\s/.test(value) ? REDACTED : value;
     if (Array.isArray(value)) return value.map(redactEncrypted);
-    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, redactEncrypted(v)]));
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(
+            Object.entries(value).map(([k, v]) => {
+                const flat = k.replace(/[-_]/g, '');
+                const secret = k !== 'q_origin_key' && (isSecretName(flat) || /(key|secret)$/i.test(flat));
+                return [k, secret && typeof v === 'string' && v !== '' ? REDACTED : redactEncrypted(v)];
+            })
+        );
+    }
     return value;
 }
 

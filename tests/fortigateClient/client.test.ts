@@ -65,6 +65,13 @@ describe('FortiGateClient', () => {
         ]);
     });
 
+    it('keeps the configured VDOM: a query cannot override it', async () => {
+        const sent = fortigate(() => json(envelope('x', 'y', [])));
+        expect((await failure(client({ vdom: 'root' }).cmdb('firewall', 'policy', { vdom: 'other' }))).kind).toBe('notFound');
+        expect((await failure(client().monitor('system', 'status', undefined, { VDOM: 'other' }))).kind).toBe('notFound');
+        expect(sent).toHaveLength(0);
+    });
+
     it('refuses path segments that are not plain FortiOS names, without calling', async () => {
         const sent = fortigate(() => json(envelope('x', 'y', [])));
         expect((await failure(client().cmdb('firewall', '../../admin'))).kind).toBe('notFound');
