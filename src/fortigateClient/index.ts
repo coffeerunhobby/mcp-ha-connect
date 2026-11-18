@@ -81,6 +81,9 @@ export class FortiGateClient {
         const url = new URL(config.baseUrl);
         // The token is a full credential: over plain http anyone on the path could read it.
         if (url.protocol !== 'https:') throw new Error('FORTIGATE_BASE_URL must be https:// (the token would travel in clear text)');
+        if (url.username || url.password || (url.pathname !== '/' && url.pathname !== '') || url.search || url.hash) {
+            throw new Error('FORTIGATE_BASE_URL takes only https://host[:port]: no user name, password, path, query or fragment');
+        }
         if (config.vdom !== undefined && !SEGMENT.test(config.vdom)) throw new Error('FORTIGATE_VDOM must be a VDOM name (letters, digits, . _ -)');
         this.baseUrl = url.origin;
         this.host = url.hostname;

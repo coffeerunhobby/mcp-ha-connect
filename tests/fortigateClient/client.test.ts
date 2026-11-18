@@ -170,6 +170,9 @@ describe('FortiGateClient', () => {
     it('accepts https only, and a plain VDOM name', () => {
         expect(() => client({ baseUrl: 'http://192.0.2.99' })).toThrow(/https/);
         expect(() => client({ vdom: 'root/../x' })).toThrow(/VDOM/);
+        expect(() => client({ baseUrl: 'https://user:pw@192.0.2.99' })).toThrow(/user name, password, path/);
+        expect(() => client({ baseUrl: 'https://192.0.2.99/forti' })).toThrow(/path/);
+        expect(() => client({ baseUrl: 'https://192.0.2.99/?x=1' })).toThrow(/path/);
         expect(client({ baseUrl: 'https://192.0.2.99:8443/' }).host).toBe('192.0.2.99');
     });
 });

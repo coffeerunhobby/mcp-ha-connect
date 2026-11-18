@@ -232,6 +232,29 @@ describe('FortiGateNetworkController (read-only)', () => {
         expect(rule).toMatchObject({ id: '1', action: 'allow', from: [{ network: { id: 'lan' } }], to: [{ internet: true }], protocol: 'any', enabled: true });
     });
 
+    it('marks policies whose match is narrowed or changed by FortiOS-only fields as foreign (VIP matching, ZTNA, reputation, vendor MACs, ToS, tags, dynamic services, FSSO, VLAN filter)', async () => {
+        const real = JSON.parse(readFileSync(new URL('./fixtures/fortigate-policy-7.4.4.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+        const base = { ...real, srcintf: [{ name: 'lan' }] };
+        const variants: Array<[Record<string, unknown>, string]> = [
+            [{ action: 'deny', 'match-vip': 'disable' }, 'virtual IPs'],
+            [{ 'match-vip-only': 'enable' }, 'virtual IPs'],
+            [{ 'ztna-status': 'enable' }, 'ztna-status'],
+            [{ 'ztna-ems-tag': [{ name: 'tag' }] }, 'ztna-ems-tag'],
+            [{ 'network-service-dynamic': [{ name: 'svc' }] }, 'network-service-dynamic'],
+            [{ 'reputation-minimum': 20 }, 'reputation-minimum'],
+            [{ 'src-vendor-mac': [{ id: 1 }] }, 'src-vendor-mac'],
+            [{ 'tos-mask': '0x0f', tos: '0x04' }, 'tos-mask'],
+            [{ 'sgt-check': 'enable', sgt: [{ id: 5 }] }, 'sgt'],
+            [{ 'fsso-groups': [{ name: 'g' }] }, 'fsso-groups'],
+            [{ 'vlan-filter': '10-20' }, 'vlan-filter'],
+        ];
+        const { adapter } = controller({ 'cmdb firewall/policy': [{ ...base, action: 'deny' }, ...variants.map(([over], i) => ({ ...base, policyid: i + 2, ...over }))] });
+        const rules = await adapter.listRules();
+        // A deny with match-vip on (the default) also blocks port-forwarded traffic: what the neutral block says.
+        expect(rules[0].foreign).toBeUndefined();
+        variants.forEach(([, why], i) => expect(rules[i + 1].foreign?.reason, why).toContain(why));
+    });
+
     it('PING (echo requests only) is narrower than the model\'s icmp: foreign; ALL_ICMP is icmp', async () => {
         const base = { status: 'enable', action: 'accept', schedule: 'always', srcintf: [{ name: 'lan' }], srcaddr: [{ name: 'all' }], dstintf: [{ name: 'wan1' }], dstaddr: [{ name: 'all' }] };
         const { adapter } = controller({ 'cmdb firewall/policy': [{ ...base, policyid: 1, service: [{ name: 'PING' }] }, { ...base, policyid: 2, service: [{ name: 'ALL_ICMP' }] }] });

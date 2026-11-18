@@ -410,6 +410,28 @@ function addressValue(raw: Raw | undefined): { kind: 'address' | 'mac'; values: 
 }
 
 // PING (echo requests only) is narrower than the model's icmp, so it isn't here.
+const isOff = (value: unknown) => value === 'disable' || value === false || value === 0 || value === '' || value === null || value === undefined || (Array.isArray(value) && value.length === 0);
+const zeroTos = (value: unknown) => isOff(value) || /^0x0+$/i.test(text(value));
+
+/** Policy fields (FortiOS 7.4) that narrow its match, each with what its default looks like. */
+const NARROWING: Array<[string, (value: unknown) => boolean]> = [
+    ['ztna-status', isOff],
+    ['ztna-device-ownership', isOff],
+    ['ztna-ems-tag', isOff],
+    ['ztna-ems-tag-secondary', isOff],
+    ['ztna-geo-tag', isOff],
+    ['network-service-dynamic', isOff],
+    ['network-service-src-dynamic', isOff],
+    ['reputation-minimum', isOff],
+    ['reputation-minimum6', isOff],
+    ['src-vendor-mac', isOff],
+    ['tos-mask', zeroTos],
+    ['sgt-check', isOff],
+    ['sgt', isOff],
+    ['fsso-groups', isOff],
+    ['vlan-filter', isOff],
+];
+
 const SERVICES: Record<string, Rule['protocol']> = { ALL: 'any', ALL_TCP: 'tcp', ALL_UDP: 'udp', ALL_ICMP: 'icmp' };
 
 interface RuleContext {
@@ -483,10 +505,15 @@ function toRule(raw: Raw, index: number, context: RuleContext): Rule {
     if (action !== 'accept' && action !== 'deny') reasons.push(`action '${action}'`);
     // Every FortiOS "...-negate" switch inverts a match; every "internet-service..." switch adds one.
     // Anything but an explicit "off" counts as on, so an unexpected value format can't hide a negation.
-    const off = (value: unknown) => value === 'disable' || value === false || value === 0 || value === '' || value === null || value === undefined || (Array.isArray(value) && value.length === 0);
+    const off = isOff;
     const on = (pattern: RegExp) => Object.entries(raw).some(([key, value]) => pattern.test(key) && !off(value));
     if (on(/-negate$/)) reasons.push('negates its addresses or services');
     if (on(/^internet-service/)) reasons.push('matches internet services');
+    // A deny with match-vip off lets port-forwarded (VIP) traffic through; match-vip-only matches only that.
+    if ((action === 'deny' && off(raw['match-vip'] ?? 'enable')) || !off(raw['match-vip-only'])) reasons.push('treats traffic to virtual IPs (port forwards) differently');
+    // Fields that narrow what a FortiOS 7.4 policy matches beyond interfaces, addresses and services.
+    const narrowed = NARROWING.filter(([key, isDefault]) => key in raw && !isDefault(raw[key])).map(([key]) => key);
+    if (narrowed.length) reasons.push(`narrows its match with ${narrowed.join(', ')}`);
     // A consolidated policy (FortiOS 6.4+) also matches IPv6 through srcaddr6 / dstaddr6.
     if (names(raw.srcaddr6).length || names(raw.dstaddr6).length) reasons.push('also matches IPv6 addresses');
     if (names(raw.users).length || names(raw.groups).length) reasons.push('matches users or user groups');
