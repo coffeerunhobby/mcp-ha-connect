@@ -157,7 +157,18 @@ export class FortiGateNetworkController implements NetworkController {
 
     async listNetworks(): Promise<Network[]> {
         const { interfaces, dhcpServers } = await this.snapshot();
-        return interfaces.filter((raw) => this.routed(raw)).map((raw) => this.toNetwork(raw, dhcpServers));
+        return interfaces.filter((raw) => this.routed(raw)).flatMap((raw) => [this.toNetwork(raw, dhcpServers), ...this.secondaryNetworks(raw)]);
+    }
+
+    /** An interface's secondary subnets, each as a network of its own ("<interface>:secondary:<id>"), without DHCP. */
+    private secondaryNetworks(raw: Raw): Network[] {
+        const name = text(raw.name);
+        return list(raw.secondaryip).flatMap((sec) => {
+            const gateway = toCidr(sec.ip);
+            if (!gateway) return [];
+            const primary = this.toNetwork({ ...raw, ip: sec.ip }, []);
+            return [{ ...primary, id: `${name}:secondary:${text(sec.id)}`, name: `${text(raw.alias) || name} (secondary ${text(sec.id)})`, gateway, dhcp: { enabled: false } }];
+        });
     }
 
     private toNetwork(raw: Raw, dhcpServers: Raw[]): Network {

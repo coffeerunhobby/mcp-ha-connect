@@ -202,6 +202,7 @@ export class FortiGateClient {
         if (!response.ok || (body.status !== undefined && body.status !== 'success')) {
             throw new FortiGateError(`The FortiGate refused ${label} (HTTP ${response.status}${errorCode(body.error)})`);
         }
+        if (!('results' in body)) throw new FortiGateError(`The FortiGate answered ${label} without results`);
         this.tokenWorked = true;
         logger.debug('FortiGate call', { call: label });
         return {

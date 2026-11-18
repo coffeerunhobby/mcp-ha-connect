@@ -153,6 +153,13 @@ describe('FortiGateClient', () => {
         expect((await failure(client().cmdb('firewall', 'policy'))).message).toContain('error -5');
     });
 
+    it('a success without results is an unexpected answer, not empty data', async () => {
+        fortigate(() => json({ http_method: 'GET', status: 'success', http_status: 200 }));
+        const { kind, message } = await failure(client().monitor('system', 'status'));
+        expect(kind).toBe('device');
+        expect(message).toContain('without results');
+    });
+
     it('does not follow a redirect', async () => {
         fortigate(() => new Response(null, { status: 302, headers: { location: 'https://elsewhere.example/' } }));
         expect((await failure(client().monitor('system', 'status'))).message).toContain('redirected');

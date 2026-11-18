@@ -94,6 +94,24 @@ describe('FortiGateNetworkController (read-only)', () => {
         expect(networks.find((n) => n.id === 'dmz')).toMatchObject({ dhcp: { enabled: false } });
     });
 
+    it('lists each secondary subnet of an interface as a network of its own', async () => {
+        const interfaces = fx.interfaces.map((i) => (i.name === 'iot' ? { ...i, 'secondary-IP': 'enable', secondaryip: [{ id: 1, ip: '192.168.21.1 255.255.255.0' }, { id: 2, ip: '0.0.0.0 0.0.0.0' }] } : i));
+        const { adapter } = controller({ 'cmdb system/interface': interfaces }, { serverHosts: ['192.168.21.7'] });
+        const networks = await adapter.listNetworks();
+        expect(networks.find((n) => n.id === 'iot:secondary:1')).toEqual({
+            id: 'iot:secondary:1',
+            name: 'iot (secondary 1)',
+            purpose: 'normal',
+            vlan: 20,
+            gateway: '192.168.21.1/24',
+            dhcp: { enabled: false },
+            ipv6: false,
+            isolated: false,
+            protected: true,
+        });
+        expect(networks.filter((n) => n.id.startsWith('iot'))).toHaveLength(2);
+    });
+
     it('marks the network holding this server as protected', async () => {
         const { adapter } = controller({}, { serverHosts: ['192.168.20.5', 'not-an-address'] });
         const networks = await adapter.listNetworks();
