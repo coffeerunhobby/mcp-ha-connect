@@ -4,6 +4,8 @@
  * firmware, and the refusal of every change.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { describe, it, expect } from 'vitest';
 
 import { FortiGateError, type FortiGateClient } from '../../src/fortigateClient/index.js';
@@ -197,6 +199,33 @@ describe('FortiGateNetworkController (read-only)', () => {
         expect(reasons[3]).toContain('several MACs');
         expect(reasons[4]).toContain("action 'ipsec'");
         expect(reasons[5]).toContain('ALL_TCP, ALL_UDP');
+    });
+
+    it('a policy mixing WAN and LAN interfaces is foreign, and so is a negate or internet-service flag in any form', async () => {
+        const base = { status: 'enable', action: 'accept', service: [{ name: 'ALL' }], schedule: 'always', srcintf: [{ name: 'lan' }], srcaddr: [{ name: 'all' }], dstintf: [{ name: 'wan1' }], dstaddr: [{ name: 'all' }] };
+        const { adapter } = controller({
+            'cmdb firewall/policy': [
+                { ...base, policyid: 1, srcintf: [{ name: 'lan' }, { name: 'wan1' }] },
+                { ...base, policyid: 2, 'srcaddr-negate': true },
+                { ...base, policyid: 3, 'internet-service': 1 },
+                { ...base, policyid: 4, 'dstaddr-negate': 'disable', 'internet-service': false },
+            ],
+        });
+        const rules = await adapter.listRules();
+        expect(rules[0].foreign?.reason).toContain('mixes WAN and LAN interfaces');
+        expect(rules[1].foreign?.reason).toContain('negates');
+        expect(rules[2].foreign?.reason).toContain('internet services');
+        expect(rules[3].foreign).toBeUndefined();
+    });
+
+    it('reads the real factory policy of a FortiGate 80F on 7.4.4 (174 fields, empty internet-service lists) as an ordinary rule', async () => {
+        const real = JSON.parse(readFileSync(new URL('./fixtures/fortigate-policy-7.4.4.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+        // On that box the LAN is called "internal"; here it is "lan".
+        const policy = { ...real, srcintf: [{ name: 'lan', q_origin_key: 'lan' }] };
+        const { adapter } = controller({ 'cmdb firewall/policy': [policy] });
+        const [rule] = await adapter.listRules();
+        expect(rule.foreign).toBeUndefined();
+        expect(rule).toMatchObject({ id: '1', action: 'allow', from: [{ network: { id: 'lan' } }], to: [{ internet: true }], protocol: 'any', enabled: true });
     });
 
     it('PING (echo requests only) is narrower than the model\'s icmp: foreign; ALL_ICMP is icmp', async () => {

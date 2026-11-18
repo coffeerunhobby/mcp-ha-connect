@@ -132,7 +132,11 @@ export const FORTIGATE_RESOURCES: Record<string, Resource> = {
         description: 'Recent system event log (memory log): admin logins, configuration changes, link changes; limit = rows',
         permission: Permission.ADMIN,
         limited: true,
-        fetch: async (client, limit) => (await client.log(['memory', 'event', 'system'], { rows: limit })).results,
+        fetch: async (client, limit) => {
+            const rows = (await client.log(['memory', 'event', 'system'], { rows: limit })).results;
+            // Newest first, whatever order the memory log keeps.
+            return Array.isArray(rows) ? [...rows].sort((a: Row, b: Row) => Number(b?.eventtime ?? 0) - Number(a?.eventtime ?? 0)) : rows;
+        },
     },
 };
 

@@ -70,6 +70,11 @@ describe('fortigate_read', () => {
         ]);
     });
 
+    it('returns events newest first', async () => {
+        const { read } = setup(() => [{ eventtime: 1, logdesc: 'old' }, { eventtime: 3, logdesc: 'new' }, { eventtime: 2, logdesc: 'mid' }]);
+        expect((body(await read({ path: '/log/events' }, Role.ADMIN)).data as Array<{ logdesc: string }>).map((e) => e.logdesc)).toEqual(['new', 'mid', 'old']);
+    });
+
     it('adds serial and version to the system status', async () => {
         const { read } = setup(() => ({ hostname: 'FGT80F-Home' }));
         expect(body(await read({ path: '/system/status' }, Role.READONLY)).data).toEqual({ hostname: 'FGT80F-Home', serial: 'FGT80FTK00000001', version: 'v7.4.4', build: 2662 });

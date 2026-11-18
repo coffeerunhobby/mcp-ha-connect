@@ -430,6 +430,7 @@ function groupComplete(group: Raw, addresses: Map<string, Raw>): boolean {
 function side(interfaces: string[], addrs: string[], context: RuleContext): Selector[] | string {
     const all = addrs.length === 1 && addrs[0] === 'all';
     if (interfaces.some((i) => i === 'any')) return 'matches any interface';
+    if (interfaces.some((i) => context.wan.has(i)) && !interfaces.every((i) => context.wan.has(i))) return 'mixes WAN and LAN interfaces';
     if (interfaces.every((i) => context.wan.has(i))) {
         if (all) return [{ internet: true }];
         const sel = addressSelectors(addrs, context);
@@ -479,7 +480,9 @@ function toRule(raw: Raw, index: number, context: RuleContext): Rule {
     const action = text(raw.action);
     if (action !== 'accept' && action !== 'deny') reasons.push(`action '${action}'`);
     // Every FortiOS "...-negate" switch inverts a match; every "internet-service..." switch adds one.
-    const on = (pattern: RegExp) => Object.entries(raw).some(([key, value]) => pattern.test(key) && value === 'enable');
+    // Anything but an explicit "off" counts as on, so an unexpected value format can't hide a negation.
+    const off = (value: unknown) => value === 'disable' || value === false || value === 0 || value === '' || value === null || value === undefined || (Array.isArray(value) && value.length === 0);
+    const on = (pattern: RegExp) => Object.entries(raw).some(([key, value]) => pattern.test(key) && !off(value));
     if (on(/-negate$/)) reasons.push('negates its addresses or services');
     if (on(/^internet-service/)) reasons.push('matches internet services');
     // A consolidated policy (FortiOS 6.4+) also matches IPv6 through srcaddr6 / dstaddr6.
