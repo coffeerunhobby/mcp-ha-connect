@@ -255,6 +255,31 @@ describe('FortiGateNetworkController (read-only)', () => {
         variants.forEach(([, why], i) => expect(rules[i + 1].foreign?.reason, why).toContain(why));
     });
 
+    it('keeps an address rule ordinary only when its interfaces add nothing: LAN-side addresses inside those networks, WAN-side ones outside every LAN', async () => {
+        const base = { status: 'enable', action: 'accept', service: [{ name: 'ALL' }], schedule: 'always' };
+        const lanToWan = { ...base, srcintf: [{ name: 'lan' }], dstintf: [{ name: 'wan1' }] };
+        const { adapter } = controller({
+            'cmdb firewall/addrgrp': [{ name: 'in-lan', member: [{ name: 'node-c6' }, { name: 'printers' }] }, { name: 'mixed', member: [{ name: 'node-c6' }, { name: 'ten-net' }] }],
+            'cmdb firewall/policy': [
+                { ...lanToWan, policyid: 1, srcaddr: [{ name: 'printers' }], dstaddr: [{ name: 'dns' }] },
+                { ...lanToWan, policyid: 2, srcaddr: [{ name: 'ten-net' }], dstaddr: [{ name: 'all' }] },
+                { ...lanToWan, policyid: 3, srcaddr: [{ name: 'all' }], dstaddr: [{ name: 'node-c6' }] },
+                { ...lanToWan, policyid: 4, srcaddr: [{ name: 'in-lan' }], dstaddr: [{ name: 'all' }] },
+                { ...lanToWan, policyid: 5, srcaddr: [{ name: 'mixed' }], dstaddr: [{ name: 'all' }] },
+                { ...lanToWan, policyid: 6, srcaddr: [{ name: 'laptop-mac' }], dstaddr: [{ name: 'all' }] },
+                { ...base, policyid: 7, srcintf: [{ name: 'iot' }], dstintf: [{ name: 'lan' }], srcaddr: [{ name: 'all' }], dstaddr: [{ name: 'printers' }] },
+                { ...base, policyid: 8, srcintf: [{ name: 'iot' }], dstintf: [{ name: 'dmz' }], srcaddr: [{ name: 'all' }], dstaddr: [{ name: 'printers' }] },
+            ],
+        });
+        const rules = await adapter.listRules();
+        expect(rules.map((r) => r.foreign === undefined)).toEqual([true, false, false, true, false, true, true, false]);
+        expect(rules[0]).toMatchObject({ from: [{ addresses: ['192.168.1.32/28'] }], to: [{ addresses: ['9.9.9.9'] }] });
+        expect(rules[1].foreign?.reason).toContain('outside the networks of its interfaces');
+        expect(rules[2].foreign?.reason).toContain('inside a LAN network');
+        expect(rules[3].from).toEqual([{ group: { name: 'in-lan' } }]);
+        expect(rules[7].foreign?.reason).toContain('outside the networks of its interfaces');
+    });
+
     it('PING (echo requests only) is narrower than the model\'s icmp: foreign; ALL_ICMP is icmp', async () => {
         const base = { status: 'enable', action: 'accept', schedule: 'always', srcintf: [{ name: 'lan' }], srcaddr: [{ name: 'all' }], dstintf: [{ name: 'wan1' }], dstaddr: [{ name: 'all' }] };
         const { adapter } = controller({ 'cmdb firewall/policy': [{ ...base, policyid: 1, service: [{ name: 'PING' }] }, { ...base, policyid: 2, service: [{ name: 'ALL_ICMP' }] }] });

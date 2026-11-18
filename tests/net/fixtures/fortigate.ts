@@ -95,6 +95,8 @@ export const addresses: Raw[] = [
     { name: 'two-macs', type: 'mac', macaddr: [{ macaddr: '02:00:00:00:00:78' }, { macaddr: '02:00:00:00:00:79' }] },
     { name: 'example.com', type: 'fqdn', fqdn: 'example.com' },
     { name: 'guest-range', type: 'iprange', 'start-ip': '192.168.1.200', 'end-ip': '192.168.1.210' },
+    { name: 'ten-net', type: 'ipmask', subnet: '10.0.0.0 255.0.0.0' },
+    { name: 'dns', type: 'ipmask', subnet: '9.9.9.9 255.255.255.255' },
 ];
 
 export const addressGroups: Raw[] = [

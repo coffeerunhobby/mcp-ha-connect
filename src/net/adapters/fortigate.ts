@@ -21,7 +21,7 @@
 
 import { formatMac, normalizeMac } from '../../omadaClient/client.js';
 import { FortiGateError, type FortiGateClient } from '../../fortigateClient/index.js';
-import { inSubnet, ipToNumber } from '../../utils/ipv4.js';
+import { inSubnet, ipToNumber, parseCidr, subnetsOverlap } from '../../utils/ipv4.js';
 import {
     NetError,
     type ApplyResult,
@@ -262,10 +262,15 @@ export class FortiGateNetworkController implements NetworkController {
         const wan = new Set(interfaces.filter((raw) => text(raw.role) === 'wan').map((raw) => text(raw.name)));
         const policies = list((await this.client.cmdb<Raw[]>('firewall', 'policy')).results);
         const addresses = new Map(list((await this.client.cmdb<Raw[]>('firewall', 'address')).results).map((a) => [text(a.name), a]));
-        // Each group, and whether its listed entries say all it holds (no FQDN, range or nested group).
-        let groups = new Map<string, boolean>();
+        // Each group: whether its listed entries say all it holds (no FQDN, range or nested group), and its addresses.
+        let groups = new Map<string, GroupInfo>();
         try {
-            groups = new Map(list((await this.client.cmdb<Raw[]>('firewall', 'addrgrp')).results).map((g) => [text(g.name), groupComplete(g, addresses)]));
+            groups = new Map(
+                list((await this.client.cmdb<Raw[]>('firewall', 'addrgrp')).results).map((g) => [
+                    text(g.name),
+                    { complete: groupComplete(g, addresses), addresses: names(g.member).flatMap((m) => (addressValue(addresses.get(m))?.kind === 'address' ? addressValue(addresses.get(m))!.values : [])) },
+                ])
+            );
         } catch (error) {
             if (!(error instanceof FortiGateError && (error.kind === 'forbidden' || error.kind === 'notFound'))) throw error;
         }
@@ -438,7 +443,23 @@ interface RuleContext {
     networks: Map<string, Network>;
     wan: Set<string>;
     addresses: Map<string, Raw>;
-    groups: Map<string, boolean>;
+    groups: Map<string, GroupInfo>;
+}
+
+interface GroupInfo {
+    complete: boolean;
+    addresses: string[];
+}
+
+/** Whether an address or CIDR lies wholly inside a network (its gateway form "a.b.c.d/p"). */
+function within(address: string, network: string): boolean {
+    try {
+        const a = parseCidr(address);
+        const n = parseCidr(network);
+        return a.network >= n.network && a.broadcast <= n.broadcast;
+    } catch {
+        return false;
+    }
 }
 
 /** Whether every member of a group is an address or MAC object of one kind the model can say. */
@@ -458,22 +479,43 @@ function side(interfaces: string[], addrs: string[], context: RuleContext): Sele
     if (interfaces.every((i) => context.wan.has(i))) {
         if (all) return [{ internet: true }];
         const sel = addressSelectors(addrs, context);
-        return typeof sel === 'string' ? sel : sel;
+        if (typeof sel === 'string') return sel;
+        // Outside addresses reach the WAN by routing; one inside a LAN network would not be what the WAN side says.
+        const lans = [...context.networks.values()].map((n) => n.gateway!).filter(Boolean);
+        if (sel.addresses.some((a) => lans.some((n) => overlaps(a, n)))) return 'uses addresses inside a LAN network on its WAN side';
+        return sel.selectors;
     }
     if (!interfaces.every((i) => context.networks.has(i))) return `uses interfaces or zones the model doesn't list (${interfaces.join(', ')})`;
     if (all) return interfaces.map((i): Selector => ({ network: { id: i } }));
-    // Addresses inside LAN interfaces: the addresses say who.
-    return addressSelectors(addrs, context);
+    // Addresses on LAN interfaces: the addresses say who, as long as they lie inside those networks
+    // (then the interface limit adds nothing). MACs are only seen on their own segment.
+    const sel = addressSelectors(addrs, context);
+    if (typeof sel === 'string') return sel;
+    const own = interfaces.map((i) => context.networks.get(i)!.gateway!).filter(Boolean);
+    if (!sel.addresses.every((a) => own.some((n) => within(a, n)))) return 'uses addresses outside the networks of its interfaces';
+    return sel.selectors;
 }
 
-function addressSelectors(addrs: string[], context: RuleContext): Selector[] | string {
+function overlaps(address: string, network: string): boolean {
+    try {
+        return subnetsOverlap(address.includes('/') ? address : `${address}/32`, network);
+    } catch {
+        return true;
+    }
+}
+
+/** The selectors for a list of address objects, with every IP address or network they stand for. */
+function addressSelectors(addrs: string[], context: RuleContext): { selectors: Selector[]; addresses: string[] } | string {
     const out: Selector[] = [];
     const plain: string[] = [];
+    const covered: string[] = [];
     for (const name of addrs) {
         if (name === 'all') return 'mixes "all" with other addresses';
-        if (context.groups.has(name)) {
-            if (!context.groups.get(name)) return `uses the group '${name}', which holds members the model can't express (FQDN, range, nested group...)`;
+        const group = context.groups.get(name);
+        if (group) {
+            if (!group.complete) return `uses the group '${name}', which holds members the model can't express (FQDN, range, nested group...)`;
             out.push({ group: { name } });
+            covered.push(...group.addresses);
             continue;
         }
         const value = addressValue(context.addresses.get(name));
@@ -486,7 +528,7 @@ function addressSelectors(addrs: string[], context: RuleContext): Selector[] | s
         }
     }
     if (plain.length) out.push({ addresses: plain });
-    return out;
+    return { selectors: out, addresses: [...covered, ...plain] };
 }
 
 function toRule(raw: Raw, index: number, context: RuleContext): Rule {
