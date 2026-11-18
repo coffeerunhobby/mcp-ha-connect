@@ -277,6 +277,9 @@ export class FortiGateNetworkController implements NetworkController {
         const groups = list((await this.client.cmdb<Raw[]>('firewall', 'addrgrp')).results);
         const out: Group[] = [];
         for (const g of groups) {
+            // A group the model can't say in full (FQDN, range, nested or excluded members) is left out:
+            // its entries would understate what it matches. fortigate_read shows every group.
+            if (!groupComplete(g, addresses)) continue;
             const entries: Group['entries'] = [];
             let groupKind: Group['kind'] | undefined;
             for (const member of names(g.member)) {
@@ -385,7 +388,8 @@ function addressValue(raw: Raw | undefined): { kind: 'address' | 'mac'; values: 
     return undefined;
 }
 
-const SERVICES: Record<string, Rule['protocol']> = { ALL: 'any', ALL_TCP: 'tcp', ALL_UDP: 'udp', ALL_ICMP: 'icmp', PING: 'icmp' };
+// PING (echo requests only) is narrower than the model's icmp, so it isn't here.
+const SERVICES: Record<string, Rule['protocol']> = { ALL: 'any', ALL_TCP: 'tcp', ALL_UDP: 'udp', ALL_ICMP: 'icmp' };
 
 interface RuleContext {
     networks: Map<string, Network>;

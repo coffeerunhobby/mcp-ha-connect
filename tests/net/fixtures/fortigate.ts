@@ -105,7 +105,7 @@ export const policies: Raw[] = [
     { policyid: 1, name: 'LAN to internet', status: 'enable', srcintf: intf('lan'), dstintf: intf('wan1'), srcaddr: intf('all'), dstaddr: intf('all'), action: 'accept', service: intf('ALL'), schedule: 'always', nat: 'enable' },
     { policyid: 5, name: 'block IoT to LAN', status: 'enable', srcintf: intf('iot'), dstintf: intf('lan'), srcaddr: intf('all'), dstaddr: intf('all'), action: 'deny', service: intf('ALL'), schedule: 'always' },
     { policyid: 3, name: 'laptop web', status: 'disable', srcintf: intf('lan'), dstintf: intf('wan1'), srcaddr: intf('laptop-mac'), dstaddr: intf('all'), action: 'accept', service: intf('ALL_TCP'), schedule: 'always' },
-    { policyid: 4, name: 'servers to printers', status: 'enable', srcintf: intf('lan'), dstintf: intf('lan'), srcaddr: intf('servers'), dstaddr: intf('node-c6', 'printers'), action: 'accept', service: intf('PING'), schedule: 'always' },
+    { policyid: 4, name: 'servers to printers', status: 'enable', srcintf: intf('lan'), dstintf: intf('lan'), srcaddr: intf('servers'), dstaddr: intf('node-c6', 'printers'), action: 'accept', service: intf('ALL_ICMP'), schedule: 'always' },
     { policyid: 6, name: 'night', status: 'enable', srcintf: intf('lan'), dstintf: intf('wan1'), srcaddr: intf('all'), dstaddr: intf('all'), action: 'deny', service: intf('HTTPS'), schedule: 'school-nights' },
     { policyid: 7, name: '', status: 'enable', srcintf: intf('any'), dstintf: intf('wan1'), srcaddr: intf('example.com'), dstaddr: intf('all'), action: 'accept', service: intf('ALL'), schedule: 'always', 'internet-service': 'enable', 'srcaddr-negate': 'enable', groups: intf('staff') },
 ];

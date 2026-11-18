@@ -199,12 +199,21 @@ describe('FortiGateNetworkController (read-only)', () => {
         expect(reasons[5]).toContain('ALL_TCP, ALL_UDP');
     });
 
+    it('PING (echo requests only) is narrower than the model\'s icmp: foreign; ALL_ICMP is icmp', async () => {
+        const base = { status: 'enable', action: 'accept', schedule: 'always', srcintf: [{ name: 'lan' }], srcaddr: [{ name: 'all' }], dstintf: [{ name: 'wan1' }], dstaddr: [{ name: 'all' }] };
+        const { adapter } = controller({ 'cmdb firewall/policy': [{ ...base, policyid: 1, service: [{ name: 'PING' }] }, { ...base, policyid: 2, service: [{ name: 'ALL_ICMP' }] }] });
+        const [ping, icmp] = await adapter.listRules();
+        expect(ping.foreign?.reason).toContain('service PING');
+        expect(icmp.foreign).toBeUndefined();
+        expect(icmp.protocol).toBe('icmp');
+    });
+
     it('reads a policy on a group the model can say in full as an ordinary rule', async () => {
         const { adapter } = controller({
             'cmdb firewall/addrgrp': [{ name: 'servers', member: [{ name: 'node-c6' }, { name: 'printers' }] }, { name: 'nested', member: [{ name: 'servers' }] }],
             'cmdb firewall/policy': [
-                { policyid: 4, status: 'enable', srcintf: [{ name: 'lan' }], dstintf: [{ name: 'lan' }], srcaddr: [{ name: 'servers' }], dstaddr: [{ name: 'node-c6' }], action: 'accept', service: [{ name: 'PING' }], schedule: 'always' },
-                { policyid: 8, status: 'enable', srcintf: [{ name: 'lan' }], dstintf: [{ name: 'lan' }], srcaddr: [{ name: 'nested' }], dstaddr: [{ name: 'node-c6' }], action: 'accept', service: [{ name: 'PING' }], schedule: 'always' },
+                { policyid: 4, status: 'enable', srcintf: [{ name: 'lan' }], dstintf: [{ name: 'lan' }], srcaddr: [{ name: 'servers' }], dstaddr: [{ name: 'node-c6' }], action: 'accept', service: [{ name: 'ALL_ICMP' }], schedule: 'always' },
+                { policyid: 8, status: 'enable', srcintf: [{ name: 'lan' }], dstintf: [{ name: 'lan' }], srcaddr: [{ name: 'nested' }], dstaddr: [{ name: 'node-c6' }], action: 'accept', service: [{ name: 'ALL_ICMP' }], schedule: 'always' },
             ],
         });
         const [plain, nested] = await adapter.listRules();
@@ -234,10 +243,10 @@ describe('FortiGateNetworkController (read-only)', () => {
         expect(rules[6].foreign).toBeUndefined();
     });
 
-    it('lists address groups with their members resolved; members the model cannot say are left out', async () => {
+    it('lists the address groups the model can say in full; groups with FQDN, range, nested or excluded members are left out', async () => {
         const { adapter } = controller();
+        // 'servers' holds an FQDN (FortiOS's own "G Suite" and "Microsoft Office 365" are such groups).
         expect(await adapter.listGroups()).toEqual([
-            { id: 'servers', name: 'servers', kind: 'address', entries: [{ value: '192.168.1.50', name: 'node-c6' }, { value: '192.168.1.32/28', name: 'printers' }] },
             {
                 id: 'kids',
                 name: 'kids',
@@ -249,7 +258,11 @@ describe('FortiGateNetworkController (read-only)', () => {
                 ],
             },
         ]);
-        expect((await adapter.listGroups('mac')).map((g) => g.id)).toEqual(['kids']);
+        expect(await adapter.listGroups('address')).toEqual([]);
+        const clean = controller({ 'cmdb firewall/addrgrp': [{ name: 'servers', member: [{ name: 'node-c6' }, { name: 'printers' }] }] });
+        expect(await clean.adapter.listGroups('address')).toEqual([
+            { id: 'servers', name: 'servers', kind: 'address', entries: [{ value: '192.168.1.50', name: 'node-c6' }, { value: '192.168.1.32/28', name: 'printers' }] },
+        ]);
     });
 
     it('lists DHCP reservations (a "block" entry is not one)', async () => {

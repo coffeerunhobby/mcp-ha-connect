@@ -33,6 +33,42 @@ const DEFAULT_ROWS = 50;
 const monitor = (path: string, name: string, action?: string, query?: Query) => async (client: FortiGateClient) => (await client.monitor(path, name, action, query)).results;
 const cmdb = (path: string, name: string) => async (client: FortiGateClient) => (await client.cmdb(path, name)).results;
 
+type Row = Record<string, unknown>;
+
+/**
+ * Keeps only the named fields of each row (FortiOS settings carry 100+ fields each: 120 KB for the
+ * interfaces of an 80F), and turns lists of named references ([{name, q_origin_key}]) into names.
+ */
+export function slim(rows: unknown, fields: readonly string[]): unknown {
+    if (!Array.isArray(rows)) return rows;
+    return rows.map((row: Row) =>
+        Object.fromEntries(
+            fields
+                .filter((f) => row && f in row)
+                .map((f) => {
+                    const v = row[f];
+                    const named = Array.isArray(v) && v.every((x) => x && typeof x === 'object' && 'name' in x);
+                    return [f, named && v.length ? v.map((x: Row) => x.name) : v];
+                })
+        )
+    );
+}
+
+const pickOne = (row: unknown, fields: readonly string[]): unknown => (row && typeof row === 'object' ? (slim([row], fields) as unknown[])[0] : row);
+
+const cmdbSlim = (path: string, name: string, fields: readonly string[]) => async (client: FortiGateClient) => slim((await client.cmdb(path, name)).results, fields);
+
+const INTERFACE_FIELDS = ['name', 'alias', 'description', 'vdom', 'type', 'role', 'mode', 'ip', 'allowaccess', 'status', 'interface', 'vlanid', 'member', 'speed', 'mtu', 'device-identification', 'secondary-IP', 'ipv6'] as const;
+const ADDRESS_FIELDS = ['name', 'type', 'sub-type', 'subnet', 'start-ip', 'end-ip', 'fqdn', 'wildcard-fqdn', 'country', 'macaddr', 'interface', 'associated-interface', 'comment'] as const;
+const SERVICE_FIELDS = ['name', 'category', 'protocol', 'protocol-number', 'tcp-portrange', 'udp-portrange', 'sctp-portrange', 'icmptype', 'icmpcode', 'iprange', 'fqdn', 'comment'] as const;
+const POLICY_FIELDS = [
+    'policyid', 'name', 'status', 'srcintf', 'dstintf', 'srcaddr', 'dstaddr', 'srcaddr6', 'dstaddr6', 'srcaddr-negate', 'dstaddr-negate', 'service-negate',
+    'internet-service', 'internet-service-name', 'internet-service-negate', 'internet-service-src', 'internet-service-src-name', 'internet-service-src-negate',
+    'action', 'service', 'schedule', 'nat', 'ippool', 'poolname', 'users', 'groups', 'inspection-mode', 'utm-status', 'av-profile', 'webfilter-profile', 'dnsfilter-profile',
+    'ips-sensor', 'application-list', 'ssl-ssh-profile', 'logtraffic', 'comments',
+] as const;
+const VERSION_FIELDS = ['version', 'major', 'minor', 'patch', 'build', 'maturity', 'release-type', 'source'] as const;
+
 export const FORTIGATE_RESOURCES: Record<string, Resource> = {
     '/system/status': {
         description: 'Model, serial, hostname and FortiOS version',
@@ -42,19 +78,34 @@ export const FORTIGATE_RESOURCES: Record<string, Resource> = {
             return { ...((status.results as object) ?? {}), serial: status.serial, version: status.version, build: status.build };
         },
     },
-    '/system/resources': { description: 'CPU, memory, sessions and disk usage now', permission: Permission.QUERY, fetch: monitor('system', 'resource', 'usage') },
-    '/system/firmware': { description: 'The running FortiOS version and the versions FortiGuard offers', permission: Permission.QUERY, fetch: monitor('system', 'firmware') },
+    '/system/resources': {
+        description: 'CPU, memory, sessions and disk usage now',
+        permission: Permission.QUERY,
+        // Only "current": the history behind each value is 40 KB.
+        fetch: async (client) => {
+            const usage = ((await client.monitor('system', 'resource', 'usage')).results ?? {}) as Row;
+            return Object.fromEntries(Object.entries(usage).map(([k, v]) => [k, Array.isArray(v) ? v.map((x: Row) => ({ current: x?.current })) : v]));
+        },
+    },
+    '/system/firmware': {
+        description: 'The running FortiOS version and the versions FortiGuard offers',
+        permission: Permission.QUERY,
+        fetch: async (client) => {
+            const fw = ((await client.monitor('system', 'firmware')).results ?? {}) as Row;
+            return { current: pickOne(fw.current, VERSION_FIELDS), available: slim(fw.available ?? [], VERSION_FIELDS) };
+        },
+    },
     '/system/license': { description: 'FortiGuard licenses and contracts', permission: Permission.QUERY, fetch: monitor('license', 'status') },
     '/system/interfaces': { description: 'Every interface now: link, speed, address, traffic counters', permission: Permission.QUERY, fetch: monitor('system', 'interface', undefined, { include_vlan: true }) },
-    '/config/interfaces': { description: 'Interface settings: type, role, address, allowed admin access, VLAN, members', permission: Permission.QUERY, fetch: cmdb('system', 'interface') },
+    '/config/interfaces': { description: 'Interface settings: type, role, address, allowed admin access, VLAN, members', permission: Permission.QUERY, fetch: cmdbSlim('system', 'interface', INTERFACE_FIELDS) },
     '/config/dhcp-servers': { description: 'DHCP servers: range, lease time, DNS, reserved addresses', permission: Permission.QUERY, fetch: cmdb('system.dhcp', 'server') },
     '/network/dhcp-leases': { description: 'Current DHCP leases (address, MAC, host name, expiry)', permission: Permission.QUERY, fetch: monitor('system', 'dhcp') },
     '/network/arp': { description: 'The ARP table: devices seen on each interface', permission: Permission.QUERY, fetch: monitor('network', 'arp') },
     '/network/routes': { description: 'The IPv4 routing table in use', permission: Permission.QUERY, fetch: monitor('router', 'ipv4') },
-    '/firewall/policies': { description: 'Firewall policies in evaluation order', permission: Permission.QUERY, fetch: cmdb('firewall', 'policy') },
-    '/firewall/addresses': { description: 'Firewall address objects', permission: Permission.QUERY, fetch: cmdb('firewall', 'address') },
+    '/firewall/policies': { description: 'Firewall policies in evaluation order', permission: Permission.QUERY, fetch: cmdbSlim('firewall', 'policy', POLICY_FIELDS) },
+    '/firewall/addresses': { description: 'Firewall address objects', permission: Permission.QUERY, fetch: cmdbSlim('firewall', 'address', ADDRESS_FIELDS) },
     '/firewall/address-groups': { description: 'Firewall address groups', permission: Permission.QUERY, fetch: cmdb('firewall', 'addrgrp') },
-    '/firewall/services': { description: 'Custom firewall services (protocols and ports)', permission: Permission.QUERY, fetch: cmdb('firewall.service', 'custom') },
+    '/firewall/services': { description: 'Firewall services (protocols and ports)', permission: Permission.QUERY, fetch: cmdbSlim('firewall.service', 'custom', SERVICE_FIELDS) },
     '/firewall/service-groups': { description: 'Firewall service groups', permission: Permission.QUERY, fetch: cmdb('firewall.service', 'group') },
     '/firewall/sessions': {
         description: 'Active sessions (who talks to what), newest first; limit = rows (default 50, max 200)',

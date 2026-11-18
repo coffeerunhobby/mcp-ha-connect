@@ -44,11 +44,11 @@ describe('fortigate_read', () => {
     });
 
     it('reads a QUERY path with a read-only role and returns the results', async () => {
-        const { read, calls } = setup(() => [{ policyid: 1, name: 'LAN to internet' }]);
-        const result = await read({ path: '/firewall/policies' }, Role.READONLY);
+        const { read, calls } = setup(() => [{ ip: '192.168.1.110', mac: '02:00:00:00:00:10', interface: 'internal' }]);
+        const result = await read({ path: '/network/dhcp-leases' }, Role.READONLY);
         expect(result.isError).toBeFalsy();
-        expect(body(result)).toEqual({ path: '/firewall/policies', data: [{ policyid: 1, name: 'LAN to internet' }] });
-        expect(calls).toEqual([{ kind: 'cmdb', segments: ['firewall', 'policy'], query: undefined }]);
+        expect(body(result)).toEqual({ path: '/network/dhcp-leases', data: [{ ip: '192.168.1.110', mac: '02:00:00:00:00:10', interface: 'internal' }] });
+        expect(calls).toEqual([{ kind: 'monitor', segments: ['system', 'dhcp'], query: undefined }]);
     });
 
     it.each(['/firewall/sessions', '/vpn/ssl', '/log/events'])('%s needs ADMIN, checked before any call', async (path) => {
@@ -77,7 +77,7 @@ describe('fortigate_read', () => {
 
     it('redacts encrypted FortiOS values and secret-looking fields', async () => {
         const { read } = setup(() => [{ name: 'wan2', mode: 'pppoe', username: 'isp-user', password: 'ENC AAAAbbbbCCCC', 'eap-password': 'plain', 'auth-key': 'ENC xyz', alias: 'ENC is just a word here?' }]);
-        const data = body(await read({ path: '/config/interfaces' }, Role.READONLY)).data as Array<Record<string, unknown>>;
+        const data = body(await read({ path: '/vpn/ipsec' }, Role.READONLY)).data as Array<Record<string, unknown>>;
         expect(data[0].password).toBe('<redacted>');
         expect(data[0]['eap-password']).toBe('<redacted>');
         expect(data[0]['auth-key']).toBe('<redacted>');
@@ -102,6 +102,32 @@ describe('fortigate_read', () => {
         expect(calls.map((c) => [c.segments.join('/'), c.query])).toEqual([
             ['firewall/sessions', { count: 20, start: 0 }],
             ['firewall/session', { count: 20, start: 0 }],
+        ]);
+    });
+
+    it('trims the large answers to the fields that matter: resources now, firmware versions, interface, address, service and policy settings', async () => {
+        const answers: Record<string, unknown> = {
+            'system/resource/usage': { cpu: [{ current: 4, historical: { '1-min': { values: [[1, 2]] } } }], mem: [{ current: 61, historical: {} }] },
+            'system/firmware': {
+                current: { version: 'v7.4.4', major: 7, minor: 4, patch: 4, build: 2662, notes: 'https://docs.example/notes', 'platform-id': 'FGT80F' },
+                available: [{ version: 'v7.4.9', major: 7, minor: 4, patch: 9, build: 2829, maturity: 'M', 'release-type': 'GA', source: 'fortiguard', notes: 'x'.repeat(5000), id: 'a' }],
+            },
+            'system/interface': [{ name: 'internal', q_origin_key: 'internal', type: 'hard-switch', role: 'lan', ip: '192.168.1.99 255.255.255.0', allowaccess: 'ping https', 'dhcp-relay-ip': '', 'cli-conn-status': 0, member: [{ name: 'internal1', q_origin_key: 'internal1' }] }],
+            'firewall/address': [{ name: 'node-c6', q_origin_key: 'node-c6', uuid: 'u', type: 'ipmask', subnet: '192.168.1.50 255.255.255.255', 'clearpass-spt': 'unknown', macaddr: [] }],
+            'firewall.service/custom': [{ name: 'HTTPS', q_origin_key: 'HTTPS', uuid: 'u', protocol: 'TCP/UDP/SCTP', 'tcp-portrange': '443', 'udp-portrange': '', 'tcp-halfclose-timer': 0, category: 'Web Access' }],
+            'firewall/policy': [{ policyid: 1, q_origin_key: 1, uuid: 'u', 'uuid-idx': 645, name: '', status: 'enable', srcintf: [{ name: 'internal', q_origin_key: 'internal' }], dstintf: [{ name: 'wan1', q_origin_key: 'wan1' }], srcaddr: [{ name: 'all', q_origin_key: 'all' }], dstaddr: [{ name: 'all', q_origin_key: 'all' }], action: 'accept', service: [{ name: 'ALL', q_origin_key: 'ALL' }], schedule: 'always', nat: 'enable', nat64: 'disable', 'ztna-status': 'disable' }],
+        };
+        const { read } = setup((_kind, segments) => answers[segments.slice(0, segments.length === 3 ? 3 : 2).join('/')]);
+        expect(body(await read({ path: '/system/resources' }, Role.READONLY)).data).toEqual({ cpu: [{ current: 4 }], mem: [{ current: 61 }] });
+        expect(body(await read({ path: '/system/firmware' }, Role.READONLY)).data).toEqual({
+            current: { version: 'v7.4.4', major: 7, minor: 4, patch: 4, build: 2662 },
+            available: [{ version: 'v7.4.9', major: 7, minor: 4, patch: 9, build: 2829, maturity: 'M', 'release-type': 'GA', source: 'fortiguard' }],
+        });
+        expect(body(await read({ path: '/config/interfaces' }, Role.READONLY)).data).toEqual([{ name: 'internal', type: 'hard-switch', role: 'lan', ip: '192.168.1.99 255.255.255.0', allowaccess: 'ping https', member: ['internal1'] }]);
+        expect(body(await read({ path: '/firewall/addresses' }, Role.READONLY)).data).toEqual([{ name: 'node-c6', type: 'ipmask', subnet: '192.168.1.50 255.255.255.255', macaddr: [] }]);
+        expect(body(await read({ path: '/firewall/services' }, Role.READONLY)).data).toEqual([{ name: 'HTTPS', protocol: 'TCP/UDP/SCTP', 'tcp-portrange': '443', 'udp-portrange': '', category: 'Web Access' }]);
+        expect(body(await read({ path: '/firewall/policies' }, Role.READONLY)).data).toEqual([
+            { policyid: 1, name: '', status: 'enable', srcintf: ['internal'], dstintf: ['wan1'], srcaddr: ['all'], dstaddr: ['all'], action: 'accept', service: ['ALL'], schedule: 'always', nat: 'enable' },
         ]);
     });
 
