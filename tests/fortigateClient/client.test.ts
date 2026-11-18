@@ -98,6 +98,29 @@ describe('FortiGateClient', () => {
         expect(sent).toHaveLength(1);
     });
 
+    it('a 401 after the token has worked is a missing permission (some FortiOS builds answer 401 for 403): that call fails, the client stays on', async () => {
+        const sent = fortigate((url) => (url.pathname.endsWith('/status') ? json(envelope('system', 'status', systemStatus)) : json({ status: 'error', http_status: 401 }, 401)));
+        const c = client();
+        await c.check();
+        const denied = await failure(c.cmdb('firewall', 'policy'));
+        expect(denied.kind).toBe('forbidden');
+        expect(denied.message).toContain('HTTP 401');
+        expect(c.disabled).toBeUndefined();
+        await c.check(); // a success in between: the next 401 is again one refusal
+        expect((await failure(c.cmdb('firewall', 'policy'))).kind).toBe('forbidden');
+        expect(sent).toHaveLength(4);
+    });
+
+    it('two 401s in a row even after the token worked switch the client off (the token was revoked or changed)', async () => {
+        const sent = fortigate((url, n) => (n === 0 ? json(envelope('system', 'status', systemStatus)) : json({ status: 'error', http_status: 401 }, 401)));
+        const c = client();
+        await c.check();
+        expect((await failure(c.cmdb('firewall', 'policy'))).kind).toBe('forbidden');
+        expect((await failure(c.cmdb('firewall', 'address'))).kind).toBe('refused');
+        expect((await failure(c.monitor('system', 'status'))).kind).toBe('disabled');
+        expect(sent).toHaveLength(3);
+    });
+
     it('403 (the profile lacks it) and 404 (no such path) fail only that call', async () => {
         const sent = fortigate((url) => (url.pathname.endsWith('/policy') ? json({ status: 'error', http_status: 403 }, 403) : new Response('<html>not found</html>', { status: 404 })));
         const c = client();

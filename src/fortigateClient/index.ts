@@ -10,7 +10,9 @@
  * - A refused token (HTTP 401: wrong token, or this host isn't one of the admin's trusted hosts)
  *   switches the client off for good: FortiOS counts failed admin logins and can lock the source
  *   address out, so a refused token is never sent again until the setting is fixed and the
- *   server restarted. 403 (the admin's profile lacks the permission) only fails that call.
+ *   server restarted. 403 (the admin's profile lacks the permission) only fails that call, and so
+ *   does a single 401 right after a success (some builds answer 401 for 403); a second 401 with
+ *   no success in between switches the client off.
  *
  * The token is never logged or put in an error message; only the HTTP status and FortiOS's
  * numeric error code reach errors.
@@ -72,6 +74,8 @@ export class FortiGateClient {
     private readonly timeout: number;
     private readonly dispatcher?: Dispatcher;
     private disabledMessage?: string;
+    /** A call has succeeded with this token since the last 401. */
+    private tokenWorked = false;
 
     constructor(config: FortiGateClientConfig) {
         const url = new URL(config.baseUrl);
@@ -161,6 +165,13 @@ export class FortiGateClient {
             throw new FortiGateError(`The FortiGate is ${reason}`, 'unreachable');
         }
 
+        if (response.status === 401 && this.tokenWorked) {
+            // Some FortiOS builds answer 401 instead of 403 when a valid token's profile lacks the
+            // permission (FortiOS 7.0.1 known issue). After a success that is one refused call; a
+            // second 401 with no success in between means the token itself is refused now.
+            this.tokenWorked = false;
+            throw new FortiGateError(`The FortiGate refused ${label} (HTTP 401 after the token worked: the API admin's profile probably doesn't allow it)`, 'forbidden');
+        }
         if (response.status === 401) {
             const message =
                 'The FortiGate refused the API token (wrong FORTIGATE_TOKEN, or this server is not one of the REST API admin\'s trusted hosts). The FortiGate tools stay off until the setting is fixed and the server restarted; a refused token is never sent again, because failed logins can lock this address out.';
@@ -182,6 +193,7 @@ export class FortiGateClient {
         if (!response.ok || (body.status !== undefined && body.status !== 'success')) {
             throw new FortiGateError(`The FortiGate refused ${label} (HTTP ${response.status}${errorCode(body.error)})`);
         }
+        this.tokenWorked = true;
         logger.debug('FortiGate call', { call: label });
         return {
             results: body.results as T,

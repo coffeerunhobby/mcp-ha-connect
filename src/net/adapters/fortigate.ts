@@ -339,11 +339,31 @@ export class FortiGateNetworkController implements NetworkController {
             const fw = ((await this.client.monitor<Raw>('system', 'firmware')).results ?? {}) as Raw;
             const cur = (fw.current ?? {}) as Raw;
             current = text(cur.version) || current;
-            const offers = list(fw.available)
-                .filter((o) => text(o.version))
+            const newer = list(fw.available)
+                .filter((o) => text(o.version) && compareVersions(text(o.version), current) > 0)
                 .sort((a, b) => compareVersions(text(b.version), text(a.version)));
-            const best = offers[0];
-            if (best && compareVersions(text(best.version), current) > 0) available = { version: text(best.version) };
+            // The newest on the running branch (7.4.x for 7.4.4) is the usual upgrade; newer branches are named.
+            const branchOf = (v: string) => (v.match(/\d+/g) ?? []).slice(0, 2).join('.');
+            const branch = branchOf(current);
+            const sameBranch = newer.find((o) => branchOf(text(o.version)) === branch);
+            // Otherwise the newest Mature release, else the newest.
+            const best = sameBranch ?? newer.find((o) => text(o.maturity) === 'M') ?? newer[0];
+            if (best) {
+                const others: string[] = [];
+                for (const o of newer) {
+                    const b = branchOf(text(o.version));
+                    if (b !== branch && !others.some((x) => branchOf(x) === b)) others.push(text(o.version));
+                }
+                const kind = (o: Raw) => (text(o.maturity) === 'M' ? 'Mature' : text(o.maturity) === 'F' ? 'Feature' : '');
+                const label = (v: string) => {
+                    const k = kind(newer.find((o) => text(o.version) === v) ?? {});
+                    return k ? `${v} (${k})` : v;
+                };
+                const where = sameBranch ? `the newest on the running ${branch} branch` : `on a newer branch (${branchOf(text(best.version))})`;
+                const also = sameBranch && others.length ? ` Newer branches offered: ${others.map(label).join(', ')}.` : '';
+                const k = kind(best);
+                available = { version: text(best.version), notes: `${k ? `${k} release, ` : ''}${where}.${also}` };
+            }
         } catch (error) {
             // Without FortiGuard access (or the permission) only the running version is known.
             if (!(error instanceof FortiGateError && (error.kind === 'forbidden' || error.kind === 'notFound' || error.kind === 'device'))) throw error;

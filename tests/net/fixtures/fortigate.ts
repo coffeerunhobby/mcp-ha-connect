@@ -111,10 +111,14 @@ export const policies: Raw[] = [
 ];
 
 export const firmware = {
-    current: { version: 'v7.4.4', major: 7, minor: 4, patch: 4, build: 2662, 'platform-id': 'FGT80F' },
+    current: { version: 'v7.4.4', major: 7, minor: 4, patch: 4, build: 2662, maturity: 'F', 'platform-id': 'FGT80F' },
+    // As a FortiGate 80F on 7.4.4 was offered on 2026-11-18 (excerpt): newest first, every branch.
     available: [
-        { id: 'a', version: 'v7.2.10', major: 7, minor: 2, patch: 10, build: 1706, source: 'fortiguard' },
-        { id: 'b', version: 'v7.4.9', major: 7, minor: 4, patch: 9, build: 2829, source: 'fortiguard' },
-        { id: 'c', version: 'v7.4.10', major: 7, minor: 4, patch: 10, build: 2900, source: 'fortiguard' },
+        { id: 'a', version: 'v8.0.2', major: 8, minor: 0, patch: 2, build: 251, maturity: 'F', source: 'fortiguard' },
+        { id: 'b', version: 'v7.6.8', major: 7, minor: 6, patch: 8, build: 3700, maturity: 'M', source: 'fortiguard' },
+        { id: 'c', version: 'v7.4.13', major: 7, minor: 4, patch: 13, build: 2900, maturity: 'M', source: 'fortiguard' },
+        { id: 'd', version: 'v7.4.9', major: 7, minor: 4, patch: 9, build: 2829, maturity: 'M', source: 'fortiguard' },
+        { id: 'e', version: 'v7.4.3', major: 7, minor: 4, patch: 3, build: 2573, maturity: 'F', source: 'fortiguard' },
+        { id: 'f', version: 'v7.2.10', major: 7, minor: 2, patch: 10, build: 1706, maturity: 'M', source: 'fortiguard' },
     ],
 };

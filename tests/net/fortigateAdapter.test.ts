@@ -280,11 +280,25 @@ describe('FortiGateNetworkController (read-only)', () => {
         ]);
     });
 
-    it('reports the running firmware and the newest offered one; nothing is upgradable here', async () => {
+    it('offers the newest version on the running branch (7.4.13 Mature for 7.4.4), and names newer branches; nothing is upgradable here', async () => {
         const { adapter } = controller();
         expect(await adapter.listFirmware()).toEqual([
-            { device: { id: 'FGT80FTK00000001' }, name: 'FGT80F-Home', model: 'FortiGate 80F', current: 'v7.4.4', available: { version: 'v7.4.10' }, upgradable: false },
+            {
+                device: { id: 'FGT80FTK00000001' },
+                name: 'FGT80F-Home',
+                model: 'FortiGate 80F',
+                current: 'v7.4.4',
+                available: { version: 'v7.4.13', notes: 'Mature release, the newest on the running 7.4 branch. Newer branches offered: v8.0.2 (Feature), v7.6.8 (Mature).' },
+                upgradable: false,
+            },
         ]);
+    });
+
+    it('offers a newer branch when the running one has nothing newer', async () => {
+        const { adapter } = controller({
+            'monitor system/firmware': { current: { version: 'v7.4.13' }, available: [{ version: 'v8.0.2', maturity: 'F' }, { version: 'v7.6.0', maturity: 'F' }, { version: 'v7.6.8', maturity: 'M' }, { version: 'v7.4.13', maturity: 'M' }] },
+        });
+        expect((await adapter.listFirmware())[0].available).toEqual({ version: 'v7.6.8', notes: 'Mature release, on a newer branch (7.6).' });
     });
 
     it('reports only the running version when the firmware list is not available', async () => {
