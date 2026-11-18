@@ -301,8 +301,9 @@ export class FortiGateNetworkController implements NetworkController {
         for (const server of dhcpServers) {
             for (const r of list(server['reserved-address'])) {
                 const mac = macOf(r.mac);
+                // "reserved" (the default) fixes the address; "assign" and "block" are MAC access rules.
                 const action = text(r.action) || 'reserved';
-                if (!mac || action === 'block' || !text(r.ip)) continue;
+                if (!mac || action !== 'reserved' || !text(r.ip) || text(r.ip) === '0.0.0.0') continue;
                 out.push({ mac, ip: text(r.ip), network: { id: text(server.interface) }, ...(text(r.description) ? { description: text(r.description) } : {}) });
             }
         }
@@ -429,6 +430,7 @@ function groupComplete(group: Raw, addresses: Map<string, Raw>): boolean {
 /** One side of a policy (interfaces + addresses) as selectors, or why it can't be. */
 function side(interfaces: string[], addrs: string[], context: RuleContext): Selector[] | string {
     const all = addrs.length === 1 && addrs[0] === 'all';
+    if (!interfaces.length) return 'names no interface';
     if (interfaces.some((i) => i === 'any')) return 'matches any interface';
     if (interfaces.some((i) => context.wan.has(i)) && !interfaces.every((i) => context.wan.has(i))) return 'mixes WAN and LAN interfaces';
     if (interfaces.every((i) => context.wan.has(i))) {

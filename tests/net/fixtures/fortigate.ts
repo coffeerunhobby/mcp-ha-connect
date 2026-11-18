@@ -56,7 +56,10 @@ export const dhcpServers: Raw[] = [
         'dns-service': 'default',
         'ip-range': [{ id: 1, 'start-ip': '192.168.1.110', 'end-ip': '192.168.1.210' }],
         'reserved-address': [
-            { id: 1, type: 'mac', ip: '192.168.1.50', mac: '02:00:00:00:00:50', action: 'assign', description: 'node-c6' },
+            { id: 1, type: 'mac', ip: '192.168.1.50', mac: '02:00:00:00:00:50', action: 'reserved', description: 'node-c6' },
+            // "assign" only lets this MAC get an address from the range (the MAC access list): not a reservation.
+            { id: 3, type: 'mac', ip: '0.0.0.0', mac: '02:00:00:00:00:52', action: 'assign', description: 'allowed laptop' },
+            { id: 4, type: 'mac', ip: '192.168.1.53', mac: '02:00:00:00:00:53', description: 'action left out: reserved' },
             { id: 2, type: 'mac', ip: '192.168.1.51', mac: '02:00:00:00:00:51', action: 'block', description: 'blocked laptop' },
         ],
     },

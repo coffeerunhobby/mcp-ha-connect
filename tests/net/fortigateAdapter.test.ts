@@ -209,6 +209,8 @@ describe('FortiGateNetworkController (read-only)', () => {
                 { ...base, policyid: 2, 'srcaddr-negate': true },
                 { ...base, policyid: 3, 'internet-service': 1 },
                 { ...base, policyid: 4, 'dstaddr-negate': 'disable', 'internet-service': false },
+                { ...base, policyid: 5, dstintf: [] },
+                { ...base, policyid: 6, srcintf: undefined },
             ],
         });
         const rules = await adapter.listRules();
@@ -216,6 +218,8 @@ describe('FortiGateNetworkController (read-only)', () => {
         expect(rules[1].foreign?.reason).toContain('negates');
         expect(rules[2].foreign?.reason).toContain('internet services');
         expect(rules[3].foreign).toBeUndefined();
+        expect(rules[4].foreign?.reason).toContain('destination names no interface');
+        expect(rules[5].foreign?.reason).toContain('source names no interface');
     });
 
     it('reads the real factory policy of a FortiGate 80F on 7.4.4 (174 fields, empty internet-service lists) as an ordinary rule', async () => {
@@ -294,9 +298,12 @@ describe('FortiGateNetworkController (read-only)', () => {
         ]);
     });
 
-    it('lists DHCP reservations (a "block" entry is not one)', async () => {
+    it('lists DHCP reservations: action "reserved" (the default); "assign" and "block" entries are MAC access rules, not reservations', async () => {
         const { adapter } = controller();
-        expect(await adapter.listReservations()).toEqual([{ mac: '02-00-00-00-00-50', ip: '192.168.1.50', network: { id: 'lan' }, description: 'node-c6' }]);
+        expect(await adapter.listReservations()).toEqual([
+            { mac: '02-00-00-00-00-50', ip: '192.168.1.50', network: { id: 'lan' }, description: 'node-c6' },
+            { mac: '02-00-00-00-00-53', ip: '192.168.1.53', network: { id: 'lan' }, description: 'action left out: reserved' },
+        ]);
     });
 
     it('merges DHCP leases and the ARP table into clients; online = in the ARP table', async () => {
