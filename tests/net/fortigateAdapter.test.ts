@@ -128,6 +128,13 @@ describe('FortiGateNetworkController (read-only)', () => {
         expect(ports.map((p) => p.port)).toEqual(ports.map((_, i) => i + 1));
     });
 
+    it('reads link state from the interface monitor as an object by name (7.4) or as a list', async () => {
+        const { adapter } = controller({ 'monitor system/interface': Object.values(fx.liveInterfaces) });
+        expect((await adapter.listPorts()).map((p) => p.name)).toContain('internal2 (down)');
+        const negated = controller({ 'cmdb firewall/policy': [{ ...fx.policies[0], 'dstaddr6-negate': 'enable' }] });
+        expect((await negated.adapter.listRules())[0].foreign?.reason).toContain('negates');
+    });
+
     it('lists ports without a virtual-switch table (other models / profiles)', async () => {
         const { adapter } = controller({
             'cmdb system/virtual-switch': () => {
@@ -206,7 +213,7 @@ describe('FortiGateNetworkController (read-only)', () => {
         const { adapter } = controller({
             'cmdb firewall/policy': [
                 { ...base, policyid: 1, srcintf: [{ name: 'lan' }, { name: 'wan1' }] },
-                { ...base, policyid: 2, 'srcaddr-negate': true },
+                { ...base, policyid: 2, 'srcaddr-negate': true, 'dstaddr6-negate': 'enable' },
                 { ...base, policyid: 3, 'internet-service': 1 },
                 { ...base, policyid: 4, 'dstaddr-negate': 'disable', 'internet-service': false },
                 { ...base, policyid: 5, dstintf: [] },

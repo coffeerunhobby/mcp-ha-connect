@@ -225,7 +225,9 @@ export class FortiGateNetworkController implements NetworkController {
     async listPorts(device?: PortRef['device']): Promise<Port[]> {
         const { serial } = await this.device(device);
         const { interfaces } = await this.snapshot();
-        const live = (await this.client.monitor<Record<string, Raw>>('system', 'interface', undefined, { include_vlan: false })).results ?? {};
+        // FortiOS 7.4 answers an object keyed by interface name; accept a list of records too.
+        const answer = (await this.client.monitor<Record<string, Raw> | Raw[]>('system', 'interface', undefined, { include_vlan: false })).results ?? {};
+        const live: Record<string, Raw> = Array.isArray(answer) ? Object.fromEntries(list(answer).map((r) => [text(r.name), r])) : answer;
         let switches: Raw[] = [];
         try {
             switches = list((await this.client.cmdb<Raw[]>('system', 'virtual-switch')).results);
