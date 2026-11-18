@@ -276,7 +276,9 @@ export class FortiGateNetworkController implements NetworkController {
         } catch (error) {
             if (!(error instanceof FortiGateError && (error.kind === 'forbidden' || error.kind === 'notFound'))) throw error;
         }
-        return policies.map((raw, i) => toRule(raw, i, { networks, wan, addresses, groups }));
+        // Interfaces carrying further subnets than the primary one their network shows.
+        const secondary = new Set(interfaces.filter((raw) => text(raw['secondary-IP']) === 'enable' || list(raw.secondaryip).length > 0).map((raw) => text(raw.name)));
+        return policies.map((raw, i) => toRule(raw, i, { networks, wan, addresses, groups, secondary }));
     }
 
     async listGroups(kind?: Group['kind']): Promise<Group[]> {
@@ -446,6 +448,7 @@ interface RuleContext {
     wan: Set<string>;
     addresses: Map<string, Raw>;
     groups: Map<string, GroupInfo>;
+    secondary: Set<string>;
 }
 
 interface GroupInfo {
@@ -488,6 +491,7 @@ function side(interfaces: string[], addrs: string[], context: RuleContext): Sele
         return sel.selectors;
     }
     if (!interfaces.every((i) => context.networks.has(i))) return `uses interfaces or zones the model doesn't list (${interfaces.join(', ')})`;
+    if (interfaces.some((i) => context.secondary.has(i))) return 'uses an interface with secondary addresses (its network shows only the primary subnet)';
     if (all) return interfaces.map((i): Selector => ({ network: { id: i } }));
     // Addresses on LAN interfaces: the addresses say who, as long as they lie inside those networks
     // (then the interface limit adds nothing). MACs are only seen on their own segment.

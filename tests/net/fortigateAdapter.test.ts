@@ -287,6 +287,15 @@ describe('FortiGateNetworkController (read-only)', () => {
         expect(rules[7].foreign?.reason).toContain('outside the networks of its interfaces');
     });
 
+    it('a policy on an interface with secondary addresses is foreign (its network lists only the primary subnet)', async () => {
+        const interfaces = fx.interfaces.map((i) => (i.name === 'iot' ? { ...i, 'secondary-IP': 'enable', secondaryip: [{ id: 1, ip: '192.168.21.1 255.255.255.0' }] } : i));
+        const base = { status: 'enable', action: 'accept', service: [{ name: 'ALL' }], schedule: 'always', dstintf: [{ name: 'wan1' }], dstaddr: [{ name: 'all' }], srcaddr: [{ name: 'all' }] };
+        const { adapter } = controller({ 'cmdb system/interface': interfaces, 'cmdb firewall/policy': [{ ...base, policyid: 1, srcintf: [{ name: 'iot' }] }, { ...base, policyid: 2, srcintf: [{ name: 'lan' }] }] });
+        const [iot, lan] = await adapter.listRules();
+        expect(iot.foreign?.reason).toContain('secondary addresses');
+        expect(lan.foreign).toBeUndefined();
+    });
+
     it('PING (echo requests only) is narrower than the model\'s icmp: foreign; ALL_ICMP is icmp', async () => {
         const base = { status: 'enable', action: 'accept', schedule: 'always', srcintf: [{ name: 'lan' }], srcaddr: [{ name: 'all' }], dstintf: [{ name: 'wan1' }], dstaddr: [{ name: 'all' }] };
         const { adapter } = controller({ 'cmdb firewall/policy': [{ ...base, policyid: 1, service: [{ name: 'PING' }] }, { ...base, policyid: 2, service: [{ name: 'ALL_ICMP' }] }] });
