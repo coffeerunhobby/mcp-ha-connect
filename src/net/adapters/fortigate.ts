@@ -281,7 +281,11 @@ export class FortiGateNetworkController implements NetworkController {
             groups = new Map(
                 list((await this.client.cmdb<Raw[]>('firewall', 'addrgrp')).results).map((g) => [
                     text(g.name),
-                    { complete: groupComplete(g, addresses), addresses: names(g.member).flatMap((m) => (addressValue(addresses.get(m))?.kind === 'address' ? addressValue(addresses.get(m))!.values : [])) },
+                    {
+                        complete: groupComplete(g, addresses),
+                        addresses: names(g.member).flatMap((m) => (addressValue(addresses.get(m))?.kind === 'address' ? addressValue(addresses.get(m))!.values : [])),
+                        macs: names(g.member).some((m) => addressValue(addresses.get(m))?.kind === 'mac'),
+                    },
                 ])
             );
         } catch (error) {
@@ -465,6 +469,8 @@ interface RuleContext {
 interface GroupInfo {
     complete: boolean;
     addresses: string[];
+    /** Holds MAC objects. */
+    macs: boolean;
 }
 
 /** Whether an address or CIDR lies wholly inside a network (its gateway form "a.b.c.d/p"). */
@@ -510,6 +516,8 @@ function side(interfaces: string[], addrs: string[], context: RuleContext): Sele
     if (typeof sel === 'string') return sel;
     const own = interfaces.map((i) => context.networks.get(i)!.gateway!).filter(Boolean);
     if (!sel.addresses.every((a) => own.some((n) => within(a, n)))) return 'uses addresses outside the networks of its interfaces';
+    // A device (MAC) matches wherever it is in the model; here only on these interfaces.
+    if (sel.macs && ![...context.networks.keys()].every((n) => interfaces.includes(n))) return 'matches a device by MAC only on some networks (the model\'s device rule holds on every network)';
     return sel.selectors;
 }
 
@@ -522,10 +530,11 @@ function overlaps(address: string, network: string): boolean {
 }
 
 /** The selectors for a list of address objects, with every IP address or network they stand for. */
-function addressSelectors(addrs: string[], context: RuleContext): { selectors: Selector[]; addresses: string[] } | string {
+function addressSelectors(addrs: string[], context: RuleContext): { selectors: Selector[]; addresses: string[]; macs: boolean } | string {
     const out: Selector[] = [];
     const plain: string[] = [];
     const covered: string[] = [];
+    let macs = false;
     for (const name of addrs) {
         if (name === 'all') return 'mixes "all" with other addresses';
         const group = context.groups.get(name);
@@ -533,6 +542,7 @@ function addressSelectors(addrs: string[], context: RuleContext): { selectors: S
             if (!group.complete) return `uses the group '${name}', which holds members the model can't express (FQDN, range, nested group...)`;
             out.push({ group: { name } });
             covered.push(...group.addresses);
+            macs ||= group.macs;
             continue;
         }
         const value = addressValue(context.addresses.get(name));
@@ -540,12 +550,13 @@ function addressSelectors(addrs: string[], context: RuleContext): { selectors: S
         if (value.kind === 'mac') {
             if (value.values.length !== 1) return `uses a MAC address object with several MACs ('${name}')`;
             out.push({ device: value.values[0] });
+            macs = true;
         } else {
             plain.push(...value.values);
         }
     }
     if (plain.length) out.push({ addresses: plain });
-    return { selectors: out, addresses: [...covered, ...plain] };
+    return { selectors: out, addresses: [...covered, ...plain], macs };
 }
 
 function toRule(raw: Raw, index: number, context: RuleContext): Rule {

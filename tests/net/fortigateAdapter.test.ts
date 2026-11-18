@@ -195,7 +195,9 @@ describe('FortiGateNetworkController (read-only)', () => {
         });
         expect(rules[1]).toMatchObject({ action: 'block', from: [{ network: { id: 'iot' } }], to: [{ network: { id: 'lan' } }] });
         expect(rules[1].foreign).toBeUndefined();
-        expect(rules[2]).toMatchObject({ enabled: false, from: [{ device: '02-00-00-00-00-77' }], protocol: 'tcp' });
+        // A MAC on lan only, while the device could also be on dmz, iot or fortilink: foreign.
+        expect(rules[2]).toMatchObject({ enabled: false, from: [], protocol: 'tcp' });
+        expect(rules[2].foreign?.reason).toContain('only on some networks');
         expect(rules[3]).toMatchObject({ from: [], to: [{ addresses: ['192.168.1.50', '192.168.1.32/28'] }], protocol: 'icmp' });
         // 'servers' also holds an FQDN, which its listed entries leave out: the rule matches more than they say.
         expect(rules[3].foreign?.reason).toContain("group 'servers'");
@@ -297,7 +299,8 @@ describe('FortiGateNetworkController (read-only)', () => {
             ],
         });
         const rules = await adapter.listRules();
-        expect(rules.map((r) => r.foreign === undefined)).toEqual([true, false, false, true, false, true, true, false]);
+        // Policy 6 (a MAC on lan only, with other LAN networks around) is foreign too.
+        expect(rules.map((r) => r.foreign === undefined)).toEqual([true, false, false, true, false, false, true, false]);
         expect(rules[0]).toMatchObject({ from: [{ addresses: ['192.168.1.32/28'] }], to: [{ addresses: ['9.9.9.9'] }] });
         expect(rules[1].foreign?.reason).toContain('outside the networks of its interfaces');
         expect(rules[2].foreign?.reason).toContain('inside a LAN network');
@@ -312,6 +315,15 @@ describe('FortiGateNetworkController (read-only)', () => {
         const [iot, lan] = await adapter.listRules();
         expect(iot.foreign?.reason).toContain('secondary addresses');
         expect(lan.foreign).toBeUndefined();
+    });
+
+    it('a device (MAC) rule is ordinary only when its interfaces cover every LAN-side network', async () => {
+        const one = fx.interfaces.filter((i) => ['wan1', 'lan', 'internal1'].includes(String(i.name)));
+        const policy = { policyid: 3, status: 'enable', srcintf: [{ name: 'lan' }], dstintf: [{ name: 'wan1' }], srcaddr: [{ name: 'laptop-mac' }], dstaddr: [{ name: 'all' }], action: 'accept', service: [{ name: 'ALL' }], schedule: 'always' };
+        const { adapter } = controller({ 'cmdb system/interface': one, 'cmdb firewall/policy': [policy] });
+        const [rule] = await adapter.listRules();
+        expect(rule.foreign).toBeUndefined();
+        expect(rule.from).toEqual([{ device: '02-00-00-00-00-77' }]);
     });
 
     it('PING (echo requests only) is narrower than the model\'s icmp: foreign; ALL_ICMP is icmp', async () => {
