@@ -10,9 +10,9 @@
  * - A refused token (HTTP 401: wrong token, or this host isn't one of the admin's trusted hosts)
  *   switches the client off for good: FortiOS counts failed admin logins and can lock the source
  *   address out, so a refused token is never sent again until the setting is fixed and the
- *   server restarted. 403 (the admin's profile lacks the permission) only fails that call, and so
- *   does a single 401 right after a success (some builds answer 401 for 403); a second 401 with
- *   no success in between switches the client off.
+ *   server restarted. 403 (the admin's profile lacks the permission) only fails that call. Some
+ *   builds answer 401 for 403: once the token has worked, a 401 is checked with one identity call
+ *   (system/status); only if that is refused too is the token refused.
  *
  * The token is never logged or put in an error message; only the HTTP status and FortiOS's
  * numeric error code reach errors.
@@ -74,7 +74,7 @@ export class FortiGateClient {
     private readonly timeout: number;
     private readonly dispatcher?: Dispatcher;
     private disabledMessage?: string;
-    /** A call has succeeded with this token since the last 401. */
+    /** A call has succeeded with this token. */
     private tokenWorked = false;
 
     constructor(config: FortiGateClientConfig) {
@@ -165,12 +165,18 @@ export class FortiGateClient {
             throw new FortiGateError(`The FortiGate is ${reason}`, 'unreachable');
         }
 
-        if (response.status === 401 && this.tokenWorked) {
+        if (response.status === 401 && this.tokenWorked && !(api === 'monitor' && segments.join('/') === 'system/status')) {
             // Some FortiOS builds answer 401 instead of 403 when a valid token's profile lacks the
-            // permission (FortiOS 7.0.1 known issue). After a success that is one refused call; a
-            // second 401 with no success in between means the token itself is refused now.
-            this.tokenWorked = false;
-            throw new FortiGateError(`The FortiGate refused ${label} (HTTP 401 after the token worked: the API admin's profile probably doesn't allow it)`, 'forbidden');
+            // permission (FortiOS 7.0.1 known issue). The token has worked before: ask once for the
+            // identity (any admin may read it). It answers: a missing permission, only this call fails.
+            // It is refused too: the token is, and that call has switched the client off.
+            try {
+                await this.get('monitor', ['system', 'status']);
+            } catch (error) {
+                if (error instanceof FortiGateError && (error.kind === 'refused' || error.kind === 'disabled')) throw error;
+                throw new FortiGateError(`The FortiGate refused ${label} (HTTP 401), and whether the token still works couldn't be checked`, 'forbidden');
+            }
+            throw new FortiGateError(`The FortiGate refused ${label} (HTTP 401 while the token works: the API admin's profile probably doesn't allow it)`, 'forbidden');
         }
         if (response.status === 401) {
             const message =

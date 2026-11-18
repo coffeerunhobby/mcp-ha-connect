@@ -98,27 +98,35 @@ describe('FortiGateClient', () => {
         expect(sent).toHaveLength(1);
     });
 
-    it('a 401 after the token has worked is a missing permission (some FortiOS builds answer 401 for 403): that call fails, the client stays on', async () => {
+    it('a 401 after the token has worked is checked once against the identity call: it answers, so it was a missing permission (some FortiOS builds answer 401 for 403)', async () => {
         const sent = fortigate((url) => (url.pathname.endsWith('/status') ? json(envelope('system', 'status', systemStatus)) : json({ status: 'error', http_status: 401 }, 401)));
         const c = client();
         await c.check();
         const denied = await failure(c.cmdb('firewall', 'policy'));
         expect(denied.kind).toBe('forbidden');
         expect(denied.message).toContain('HTTP 401');
+        // Two unreadable paths in a row don't switch a working token off.
+        expect((await failure(c.cmdb('firewall', 'address'))).kind).toBe('forbidden');
         expect(c.disabled).toBeUndefined();
-        await c.check(); // a success in between: the next 401 is again one refusal
-        expect((await failure(c.cmdb('firewall', 'policy'))).kind).toBe('forbidden');
-        expect(sent).toHaveLength(4);
+        expect(sent.map((x) => new URL(x.url).pathname.split('/').slice(-2).join('/'))).toEqual(['system/status', 'firewall/policy', 'system/status', 'firewall/address', 'system/status']);
     });
 
-    it('two 401s in a row even after the token worked switch the client off (the token was revoked or changed)', async () => {
-        const sent = fortigate((url, n) => (n === 0 ? json(envelope('system', 'status', systemStatus)) : json({ status: 'error', http_status: 401 }, 401)));
+    it('a 401 after the token worked, confirmed by a refused identity call, switches the client off (the token was revoked or changed)', async () => {
+        const sent = fortigate((_url, n) => (n === 0 ? json(envelope('system', 'status', systemStatus)) : json({ status: 'error', http_status: 401 }, 401)));
         const c = client();
         await c.check();
-        expect((await failure(c.cmdb('firewall', 'policy'))).kind).toBe('forbidden');
-        expect((await failure(c.cmdb('firewall', 'address'))).kind).toBe('refused');
+        expect((await failure(c.cmdb('firewall', 'policy'))).kind).toBe('refused');
         expect((await failure(c.monitor('system', 'status'))).kind).toBe('disabled');
         expect(sent).toHaveLength(3);
+        expect(vi.mocked(logger.error)).toHaveBeenCalledTimes(1);
+    });
+
+    it('a 401 on the identity call itself after the token worked switches the client off at once', async () => {
+        const sent = fortigate((_url, n) => (n === 0 ? json(envelope('system', 'status', systemStatus)) : json({ status: 'error', http_status: 401 }, 401)));
+        const c = client();
+        await c.check();
+        expect((await failure(c.check())).kind).toBe('refused');
+        expect(sent).toHaveLength(2);
     });
 
     it('403 (the profile lacks it) and 404 (no such path) fail only that call', async () => {
