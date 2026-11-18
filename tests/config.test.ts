@@ -109,6 +109,19 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, RUIJIE_BASE_URL: 'not a url' })).toThrow('RUIJIE_BASE_URL must be a valid URL');
   });
 
+  it('reads the FortiGate settings: off and strict by default, https only, the pin normalized', () => {
+    const base = { HA_URL: 'http://ha.test:8123', HA_TOKEN: 't' };
+    const off = loadConfig(base);
+    expect(off).toMatchObject({ fortigatePluginEnabled: false, fortigateStrictSsl: true, fortigateBaseUrl: undefined, fortigateCertSha256: undefined });
+
+    const pin = 'AB:CD' + ':EF'.repeat(30);
+    const on = loadConfig({ ...base, FORTIGATE_PLUGIN_ENABLED: 'true', FORTIGATE_BASE_URL: 'https://192.0.2.99:8443/', FORTIGATE_TOKEN: 'tok', FORTIGATE_CERT_SHA256: pin, FORTIGATE_VDOM: 'root', FORTIGATE_TIMEOUT: '9000' });
+    expect(on).toMatchObject({ fortigatePluginEnabled: true, fortigateBaseUrl: 'https://192.0.2.99:8443', fortigateToken: 'tok', fortigateCertSha256: 'abcd' + 'ef'.repeat(30), fortigateVdom: 'root', fortigateTimeout: 9000 });
+    expect(() => loadConfig({ ...base, FORTIGATE_BASE_URL: 'http://192.0.2.99' })).toThrow('FORTIGATE_BASE_URL must be https://');
+    expect(() => loadConfig({ ...base, FORTIGATE_CERT_SHA256: 'abcd' })).toThrow('FORTIGATE_CERT_SHA256 must be a SHA-256 fingerprint');
+    expect(() => loadConfig({ ...base, FORTIGATE_VDOM: 'root/x' })).toThrow('FORTIGATE_VDOM must be a VDOM name');
+  });
+
   it('reads the Ruijie certificate pin (https only) and the change switches: no pin, changes and firmware upgrades on by default', () => {
     const base = { HA_URL: 'http://ha.test:8123', HA_TOKEN: 't', RUIJIE_BASE_URL: 'https://192.0.2.1' };
     expect(loadConfig(base)).toMatchObject({ ruijieCertSha256: undefined, ruijieReadOnly: false, ruijieFirmwareUpgrade: true });

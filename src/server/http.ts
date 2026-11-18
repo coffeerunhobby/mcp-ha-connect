@@ -10,6 +10,7 @@ import { EventSubscriber } from '../haClient/events.js';
 import type { LocalAIClient } from '../localAI/index.js';
 import type { OmadaClient } from '../omadaClient/index.js';
 import type { RuijieClient } from '../ruijieClient/index.js';
+import type { FortiGateClient } from '../fortigateClient/index.js';
 import { logger } from '../utils/logger.js';
 import { handleStreamRequest, type StreamTransportState, type StreamTransportOptions } from './stream.js';
 import { handleEventSubscription } from './eventSubscription.js';
@@ -329,12 +330,13 @@ export interface HttpServerOptions {
   haClient?: HaClient;
   omadaClient?: OmadaClient;
   ruijieClient?: RuijieClient;
+  fortigateClient?: FortiGateClient;
   config: EnvironmentConfig;
   aiClient?: LocalAIClient;
 }
 
 export async function startHttpServer(options: HttpServerOptions): Promise<void> {
-  const { haClient: client, omadaClient, ruijieClient, config, aiClient } = options;
+  const { haClient: client, omadaClient, ruijieClient, fortigateClient, config, aiClient } = options;
 
   // v1.7: resolve the ACTIVE chat-face bindings once at startup — the operator's
   // MCP_CHAT_TOOLS slice ∩ code-side chat-eligible bindings (unset = legacy 8).
@@ -528,7 +530,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const existingState = sessionId ? sessions.get(sessionId) : undefined;
 
         const body = req.method !== 'GET' ? await parseBody(req) : undefined;
-        const streamOptions: StreamTransportOptions = { haClient: client, omadaClient, ruijieClient, aiClient, config, ownerQuestions };
+        const streamOptions: StreamTransportOptions = { haClient: client, omadaClient, ruijieClient, fortigateClient, aiClient, config, ownerQuestions };
         const state = await handleStreamRequest(streamOptions, req, res, body, existingState);
 
         if (state && config.stateful && sessionId) {

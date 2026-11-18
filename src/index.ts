@@ -33,16 +33,17 @@ async function main(): Promise<void> {
 
     // Connect the upstreams. One that doesn't answer yet doesn't stop the server:
     // it is retried in the background (see upstreams.ts).
-    const { haClient, omadaClient, ruijieClient, aiClient } = await connectUpstreams(config);
+    const { haClient, omadaClient, ruijieClient, fortigateClient, aiClient } = await connectUpstreams(config);
 
     // Start server in appropriate mode
     if (config.useHttp) {
-      await startHttpServer({ haClient, omadaClient, ruijieClient, aiClient, config });
+      await startHttpServer({ haClient, omadaClient, ruijieClient, fortigateClient, aiClient, config });
     } else {
       await startStdioServer({
         haClient,
         omadaClient,
         ruijieClient,
+        fortigateClient,
         aiClient,
         restActions: config.restActions,
         toolRegistrationMode: config.toolRegistrationMode,

@@ -29,6 +29,7 @@ const envSchema = z
     aiPluginEnabled: createBooleanStringSchema(false),
     omadaPluginEnabled: createBooleanStringSchema(false),
     ruijiePluginEnabled: createBooleanStringSchema(false),
+    fortigatePluginEnabled: createBooleanStringSchema(false),
 
     // Home Assistant Client Configuration (optional if using Omada only)
     haUrl: z.string().url({ message: 'HA_URL must be a valid URL' }).optional(),
@@ -58,6 +59,17 @@ const envSchema = z
     ruijieReadOnly: createBooleanStringSchema(false),
     ruijieFirmwareUpgrade: createBooleanStringSchema(true),
     ruijieTimeout: numericStringSchema,
+
+    // FortiGate (FortiOS REST API, read-only; optional)
+    fortigateBaseUrl: z.string().url({ message: 'FORTIGATE_BASE_URL must be a valid URL' }).optional(),
+    fortigateToken: z.string().min(1).optional(),
+    fortigateStrictSsl: createBooleanStringSchema(true),
+    fortigateCertSha256: z
+        .string()
+        .optional()
+        .refine((v) => v === undefined || normalizeFingerprint(v) !== undefined, { message: 'FORTIGATE_CERT_SHA256 must be a SHA-256 fingerprint (64 hex digits, colons allowed)' }),
+    fortigateVdom: z.string().regex(/^[A-Za-z0-9._-]{1,64}$/, { message: 'FORTIGATE_VDOM must be a VDOM name' }).optional(),
+    fortigateTimeout: numericStringSchema,
 
     // Pre-registered REST actions for the invokeAction tool (optional; raw JSON,
     // parsed + validated by parseRestActions after the env parse)
@@ -136,6 +148,9 @@ const envSchema = z
     if (data.ruijieCertSha256 !== undefined && !data.ruijieBaseUrl?.toLowerCase().startsWith('https:')) {
       ctx.addIssue({ code: 'custom', message: 'RUIJIE_CERT_SHA256 needs an https:// RUIJIE_BASE_URL (a pin checks the TLS certificate)', path: ['ruijieCertSha256'] });
     }
+    if (data.fortigateBaseUrl !== undefined && !data.fortigateBaseUrl.toLowerCase().startsWith('https:')) {
+      ctx.addIssue({ code: 'custom', message: 'FORTIGATE_BASE_URL must be https:// (the API token would travel in clear text)', path: ['fortigateBaseUrl'] });
+    }
     const invalidOrigin = data.httpAllowedOrigins?.find((origin) => !isValidOrigin(origin));
     if (invalidOrigin !== undefined) {
       ctx.addIssue({
@@ -199,6 +214,7 @@ export interface EnvironmentConfig {
   aiPluginEnabled: boolean;
   omadaPluginEnabled: boolean;
   ruijiePluginEnabled: boolean;
+  fortigatePluginEnabled: boolean;
 
   // Home Assistant Client Configuration (optional if using Omada only)
   baseUrl?: string;
@@ -228,6 +244,16 @@ export interface EnvironmentConfig {
   /** Whether net_upgradeFirmware may install firmware on the Ruijie router. */
   ruijieFirmwareUpgrade: boolean;
   ruijieTimeout?: number;
+
+  // FortiGate (optional, read-only)
+  fortigateBaseUrl?: string;
+  /** The REST API admin's token (never logged). */
+  fortigateToken?: string;
+  fortigateStrictSsl: boolean;
+  /** The FortiGate certificate's SHA-256 fingerprint: trusted exactly, instead of a CA. */
+  fortigateCertSha256?: string;
+  fortigateVdom?: string;
+  fortigateTimeout?: number;
 
   // AI Provider Configuration
   aiProvider: AIProviderType;
@@ -294,6 +320,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     aiPluginEnabled: env.AI_PLUGIN_ENABLED,
     omadaPluginEnabled: env.OMADA_PLUGIN_ENABLED,
     ruijiePluginEnabled: env.RUIJIE_PLUGIN_ENABLED,
+    fortigatePluginEnabled: env.FORTIGATE_PLUGIN_ENABLED,
 
     // Home Assistant Client Configuration
     haUrl: env.HA_URL,
@@ -319,6 +346,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     ruijieReadOnly: env.RUIJIE_READ_ONLY,
     ruijieFirmwareUpgrade: env.RUIJIE_FIRMWARE_UPGRADE,
     ruijieTimeout: env.RUIJIE_TIMEOUT,
+
+    // FortiGate
+    fortigateBaseUrl: env.FORTIGATE_BASE_URL,
+    fortigateToken: env.FORTIGATE_TOKEN,
+    fortigateStrictSsl: env.FORTIGATE_STRICT_SSL,
+    fortigateCertSha256: env.FORTIGATE_CERT_SHA256,
+    fortigateVdom: env.FORTIGATE_VDOM,
+    fortigateTimeout: env.FORTIGATE_TIMEOUT,
 
     // Pre-registered REST actions
     restActions: env.MCP_REST_ACTIONS,
@@ -407,6 +442,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     aiPluginEnabled: parsed.data.aiPluginEnabled,
     omadaPluginEnabled: parsed.data.omadaPluginEnabled,
     ruijiePluginEnabled: parsed.data.ruijiePluginEnabled,
+    fortigatePluginEnabled: parsed.data.fortigatePluginEnabled,
 
     // Home Assistant Client Configuration (optional)
     baseUrl: parsed.data.haUrl?.replace(/\/$/, ''),
@@ -432,6 +468,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     ruijieReadOnly: parsed.data.ruijieReadOnly,
     ruijieFirmwareUpgrade: parsed.data.ruijieFirmwareUpgrade,
     ruijieTimeout: parsed.data.ruijieTimeout,
+
+    // FortiGate (optional)
+    fortigateBaseUrl: parsed.data.fortigateBaseUrl?.replace(/\/$/, ''),
+    fortigateToken: parsed.data.fortigateToken,
+    fortigateStrictSsl: parsed.data.fortigateStrictSsl,
+    fortigateCertSha256: parsed.data.fortigateCertSha256 === undefined ? undefined : normalizeFingerprint(parsed.data.fortigateCertSha256),
+    fortigateVdom: parsed.data.fortigateVdom,
+    fortigateTimeout: parsed.data.fortigateTimeout,
 
     // Pre-registered REST actions (throws on malformed JSON — config typos fail loudly)
     restActions: parseRestActions(parsed.data.restActions),

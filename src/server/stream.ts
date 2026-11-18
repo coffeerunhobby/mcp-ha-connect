@@ -11,6 +11,7 @@ import type { HaClient } from '../haClient/index.js';
 import type { LocalAIClient } from '../localAI/index.js';
 import type { OmadaClient } from '../omadaClient/index.js';
 import type { RuijieClient } from '../ruijieClient/index.js';
+import type { FortiGateClient } from '../fortigateClient/index.js';
 import { logger } from '../utils/logger.js';
 import { createServer } from './common.js';
 import type { OwnerQuestionService } from '../ownerQuestions/service.js';
@@ -28,6 +29,7 @@ export interface StreamTransportOptions {
   haClient?: HaClient;
   omadaClient?: OmadaClient;
   ruijieClient?: RuijieClient;
+  fortigateClient?: FortiGateClient;
   aiClient?: LocalAIClient;
   config: EnvironmentConfig;
   ownerQuestions?: OwnerQuestionService;
@@ -98,11 +100,12 @@ export function buildTransportSecurityOptions(config: EnvironmentConfig): Transp
  * This implements the MCP protocol version 2025-03-26
  */
 export function createStreamTransport(options: StreamTransportOptions, callerPermissions?: number): StreamTransportState {
-  const { haClient, omadaClient, ruijieClient, aiClient, config, ownerQuestions } = options;
+  const { haClient, omadaClient, ruijieClient, fortigateClient, aiClient, config, ownerQuestions } = options;
   const mcpServer = createServer({
     haClient,
     omadaClient,
     ruijieClient,
+    fortigateClient,
     aiClient,
     ownerQuestions,
     restActions: config.restActions,

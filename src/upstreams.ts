@@ -19,6 +19,7 @@ import { LocalAIClient } from './localAI/index.js';
 import { OmadaClient } from './omadaClient/index.js';
 import { checkConfiguredSite } from './omadaClient/site.js';
 import { RuijieClient, RuijieError } from './ruijieClient/index.js';
+import { FortiGateClient, FortiGateError } from './fortigateClient/index.js';
 import { logger } from './utils/logger.js';
 
 export interface BackoffOptions {
@@ -75,6 +76,7 @@ export interface Upstreams {
   haClient?: HaClient;
   omadaClient?: OmadaClient;
   ruijieClient?: RuijieClient;
+  fortigateClient?: FortiGateClient;
   aiClient?: LocalAIClient;
   /** Stops the background probes (tests; the process otherwise just exits). */
   stop(): void;
@@ -85,6 +87,7 @@ export interface UpstreamFactories {
   ha(config: EnvironmentConfig): HaClient;
   omada(config: EnvironmentConfig): OmadaClient;
   ruijie(config: EnvironmentConfig): RuijieClient;
+  fortigate(config: EnvironmentConfig): FortiGateClient;
   ai(config: EnvironmentConfig): LocalAIClient;
 }
 
@@ -117,6 +120,16 @@ export const defaultFactories: UpstreamFactories = {
       firmwareUpgrade: config.ruijieFirmwareUpgrade,
       serverAddresses: config.serverAddresses,
       timeout: config.ruijieTimeout,
+    }),
+  fortigate: (config) =>
+    new FortiGateClient({
+      baseUrl: config.fortigateBaseUrl!,
+      token: config.fortigateToken!,
+      strictSsl: config.fortigateStrictSsl,
+      certSha256: config.fortigateCertSha256,
+      vdom: config.fortigateVdom,
+      serverAddresses: config.serverAddresses,
+      timeout: config.fortigateTimeout,
     }),
   ai: (config) => new LocalAIClient(config),
 };
@@ -249,6 +262,44 @@ export async function connectUpstreams(
     }
   } else {
     logger.info('Ruijie plugin disabled');
+  }
+
+  // FortiGate (read-only)
+  if (config.fortigatePluginEnabled) {
+    if (config.fortigateBaseUrl && config.fortigateToken) {
+      let fortigateClient: FortiGateClient | undefined;
+      try {
+        fortigateClient = factories.fortigate(config);
+        const client = fortigateClient;
+        // A refused token is final (the client has switched itself off and logged why); only an
+        // unreachable FortiGate is tried again.
+        const check = async () => {
+          try {
+            const device = await client.check();
+            logger.info('Connected to FortiGate', device);
+          } catch (error) {
+            if (error instanceof FortiGateError && (error.kind === 'refused' || error.kind === 'disabled')) return;
+            throw error;
+          }
+        };
+        try {
+          await check();
+        } catch (error) {
+          logger.warn('FortiGate not reachable; its tools stay registered and work once it answers. Retrying in the background', {
+            error: errorMessage(error),
+          });
+          probes.push(retryInBackground('FortiGate', check, backoff));
+        }
+      } catch (error) {
+        logger.warn('FortiGate client could not be created - FortiGate tools will be disabled', { error: errorMessage(error) });
+        fortigateClient = undefined;
+      }
+      upstreams.fortigateClient = fortigateClient;
+    } else {
+      logger.warn('FortiGate plugin enabled but required config not set (FORTIGATE_BASE_URL, FORTIGATE_TOKEN)');
+    }
+  } else {
+    logger.info('FortiGate plugin disabled');
   }
 
   // Local AI

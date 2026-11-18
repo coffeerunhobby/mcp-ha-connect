@@ -13,6 +13,7 @@ import { registerAllTools } from '../../src/tools/index.js';
 import { defaultFactories } from '../../src/upstreams.js';
 import { RuijieClient as RealRuijieClient } from '../../src/ruijieClient/index.js';
 import type { RuijieClient } from '../../src/ruijieClient/index.js';
+import { FortiGateClient } from '../../src/fortigateClient/index.js';
 
 const adapter = vi.hoisted(() => ({ options: [] as unknown[] }));
 vi.mock('../../src/net/adapters/omada.js', () => ({
@@ -54,6 +55,35 @@ describe('net_ protection settings', () => {
 
         expect(names.filter((n) => n.startsWith('net_'))).toHaveLength(26);
         expect(names).toHaveLength(26); // nothing else: no Omada tools, no analyzeSensors without an AI client
+    });
+
+    it('registers the net_ tools and fortigate_read for a FortiGate alone, with "fortigate" as a controller', async () => {
+        const names: string[] = [];
+        const schemas = new Map<string, { shape: Record<string, { safeParse: (v: unknown) => { success: boolean } }> }>();
+        const server = {
+            registerTool: vi.fn((name: string, config: { inputSchema?: unknown }) => {
+                names.push(name);
+                schemas.set(name, config.inputSchema as never);
+            }),
+        } as unknown as McpServer;
+
+        registerAllTools({ server, fortigateClient: { host: '192.0.2.99', serverAddresses: [] } as unknown as FortiGateClient });
+
+        expect(names.filter((n) => n.startsWith('net_'))).toHaveLength(26);
+        expect(names.filter((n) => !n.startsWith('net_'))).toEqual(['fortigate_read']);
+        expect(schemas.get('net_listNetworks')!.shape.controller.safeParse('fortigate').success).toBe(true);
+        expect(schemas.get('net_listNetworks')!.shape.controller.safeParse('ruijie').success).toBe(false);
+    });
+
+    it('builds the FortiGate client from the settings (pin, VDOM, this server\'s addresses)', () => {
+        const env = { HA_URL: 'http://ha.test:8123', HA_TOKEN: 't', FORTIGATE_BASE_URL: 'https://192.0.2.99', FORTIGATE_TOKEN: 'tok', MCP_SERVER_ADDRESSES: '192.168.0.18' };
+        const plain = defaultFactories.fortigate(loadConfig(env));
+        expect(plain).toBeInstanceOf(FortiGateClient);
+        expect(plain).toMatchObject({ host: '192.0.2.99', serverAddresses: ['192.168.0.18'] });
+        expect((plain as unknown as { dispatcher: unknown }).dispatcher).toBeUndefined();
+        const pinned = defaultFactories.fortigate(loadConfig({ ...env, FORTIGATE_CERT_SHA256: 'ab'.repeat(32), FORTIGATE_VDOM: 'root' }));
+        expect((pinned as unknown as { dispatcher: unknown; vdom: string }).dispatcher).toBeDefined();
+        expect((pinned as unknown as { vdom: string }).vdom).toBe('root');
     });
 
     it('builds the Ruijie client with the pin and the switches from the settings', () => {

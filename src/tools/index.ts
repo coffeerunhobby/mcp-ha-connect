@@ -7,6 +7,7 @@ import type { HaClient } from '../haClient/index.js';
 import type { LocalAIClient } from '../localAI/index.js';
 import type { OmadaClient } from '../omadaClient/index.js';
 import type { RuijieClient } from '../ruijieClient/index.js';
+import type { FortiGateClient } from '../fortigateClient/index.js';
 import { logger } from '../utils/logger.js';
 
 // Tool registration functions by domain
@@ -15,6 +16,8 @@ import { registerOmadaTools, type OmadaRegistrationMode } from './omada/index.js
 import { registerNetTools } from './net/index.js';
 import { OmadaNetworkController } from '../net/adapters/omada.js';
 import { RuijieNetworkController } from '../net/adapters/ruijie.js';
+import { FortiGateNetworkController } from '../net/adapters/fortigate.js';
+import { registerFortiGateTools } from './fortigate/index.js';
 import type { NetworkController } from '../net/model.js';
 import { registerAITools } from './ai/index.js';
 import { registerInfraTools, type RestAction } from './infra/index.js';
@@ -27,6 +30,7 @@ export interface RegisterToolsOptions {
   omadaClient?: OmadaClient;
   /** A Ruijie / Reyee router (its net_ tools take controller: "ruijie"). */
   ruijieClient?: RuijieClient;
+  fortigateClient?: FortiGateClient;
   aiClient?: LocalAIClient;
   /** Pre-registered REST actions for invokeAction (empty/undefined = tool not registered). */
   restActions?: Record<string, RestAction>;
@@ -40,7 +44,7 @@ export interface RegisterToolsOptions {
  * Register all available tools based on configured clients
  */
 export function registerAllTools(options: RegisterToolsOptions): void {
-  const { server, haClient, omadaClient, ruijieClient, aiClient, restActions, toolRegistrationMode, ownerQuestions } = options;
+  const { server, haClient, omadaClient, ruijieClient, fortigateClient, aiClient, restActions, toolRegistrationMode, ownerQuestions } = options;
   logger.debug('Registering all tools');
 
   let totalTools = 0;
@@ -62,6 +66,10 @@ export function registerAllTools(options: RegisterToolsOptions): void {
     netControllers.push(new OmadaNetworkController(omadaClient, { controllerHost: omadaClient.controllerHost, serverHosts: omadaClient.serverAddresses }));
   }
   if (ruijieClient) netControllers.push(new RuijieNetworkController(ruijieClient, { serverHosts: ruijieClient.serverAddresses }));
+  if (fortigateClient) {
+    netControllers.push(new FortiGateNetworkController(fortigateClient, { serverHosts: fortigateClient.serverAddresses }));
+    totalTools += registerFortiGateTools(server, fortigateClient);
+  }
   // Vendor-neutral net_* tools, through every configured adapter (same in eager and graph mode).
   totalTools += registerNetTools(server, netControllers);
 
@@ -77,6 +85,7 @@ export function registerAllTools(options: RegisterToolsOptions): void {
     haEnabled: !!haClient,
     omadaEnabled: !!omadaClient,
     ruijieEnabled: !!ruijieClient,
+    fortigateEnabled: !!fortigateClient,
     aiEnabled: !!aiClient,
     infraEnabled: Object.keys(restActions ?? {}).length > 0,
   });

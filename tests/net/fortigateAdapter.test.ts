@@ -1,0 +1,287 @@
+/**
+ * The FortiGate adapter (read-only) on FortiOS 7.4 answer shapes (tests/net/fixtures/fortigate.ts):
+ * networks, ports, policies as rules (and which are foreign), groups, reservations, clients,
+ * firmware, and the refusal of every change.
+ */
+
+import { describe, it, expect } from 'vitest';
+
+import { FortiGateError, type FortiGateClient } from '../../src/fortigateClient/index.js';
+import { FortiGateNetworkController, compareVersions, maskToPrefix, toCidr } from '../../src/net/adapters/fortigate.js';
+import { NetError } from '../../src/net/model.js';
+
+import * as fx from './fixtures/fortigate.js';
+
+type Answer = unknown | (() => never);
+
+/** A fake client answering cmdb/monitor calls from the fixtures (or overrides; a function throws). */
+function controller(over: Record<string, Answer> = {}, options: { host?: string; serverHosts?: string[] } = {}) {
+    const answers: Record<string, Answer> = {
+        'cmdb system/interface': fx.interfaces,
+        'cmdb system.dhcp/server': fx.dhcpServers,
+        'cmdb system/virtual-switch': fx.virtualSwitch,
+        'cmdb firewall/policy': fx.policies,
+        'cmdb firewall/address': fx.addresses,
+        'cmdb firewall/addrgrp': fx.addressGroups,
+        'monitor system/status': fx.systemStatus,
+        'monitor system/interface': fx.liveInterfaces,
+        'monitor system/dhcp': fx.dhcpLeases,
+        'monitor network/arp': fx.arp,
+        'monitor system/firmware': fx.firmware,
+        ...over,
+    };
+    const calls: string[] = [];
+    const answer = (key: string) => {
+        calls.push(key);
+        if (!(key in answers)) throw new Error(`unexpected call ${key}`);
+        const a = answers[key];
+        if (typeof a === 'function') (a as () => never)();
+        return { results: a, serial: 'FGT80FTK00000001', version: 'v7.4.4', build: 2662 };
+    };
+    const client = {
+        host: options.host ?? '192.168.0.126',
+        serverAddresses: options.serverHosts ?? [],
+        cmdb: async (path: string, name: string) => answer(`cmdb ${path}/${name}`),
+        monitor: async (path: string, name: string) => answer(`monitor ${path}/${name}`),
+    } as unknown as FortiGateClient;
+    return { adapter: new FortiGateNetworkController(client, { serverHosts: options.serverHosts }), calls };
+}
+
+const forbidden = () => {
+    throw new FortiGateError('no', 'forbidden');
+};
+
+describe('FortiGate helpers', () => {
+    it('reads FortiOS address/mask pairs', () => {
+        expect(maskToPrefix('255.255.255.0')).toBe(24);
+        expect(maskToPrefix('255.255.255.255')).toBe(32);
+        expect(maskToPrefix('0.0.0.0')).toBe(0);
+        expect(maskToPrefix('255.0.255.0')).toBeUndefined();
+        expect(maskToPrefix('nonsense')).toBeUndefined();
+        expect(toCidr('192.168.1.99 255.255.255.0')).toBe('192.168.1.99/24');
+        expect(toCidr('0.0.0.0 0.0.0.0')).toBeUndefined();
+        expect(toCidr('192.168.1.1')).toBeUndefined();
+        expect(toCidr('300.1.1.1 255.255.255.0')).toBeUndefined();
+    });
+
+    it('compares FortiOS versions by number, not as text', () => {
+        expect(compareVersions('v7.4.10', 'v7.4.9')).toBeGreaterThan(0);
+        expect(compareVersions('v7.2.10', 'v7.4.4')).toBeLessThan(0);
+        expect(compareVersions('v7.4.4', 'v7.4.4')).toBe(0);
+    });
+});
+
+describe('FortiGateNetworkController (read-only)', () => {
+    it('lists the routed LAN-side interfaces as networks, with their DHCP; WAN, tunnels and unaddressed ports are left out', async () => {
+        const { adapter } = controller();
+        const networks = await adapter.listNetworks();
+        expect(networks.map((n) => n.id)).toEqual(['dmz', 'lan', 'iot', 'fortilink']);
+        const lan = networks.find((n) => n.id === 'lan')!;
+        expect(lan).toEqual({
+            id: 'lan',
+            name: 'Home LAN',
+            purpose: 'normal',
+            vlan: 1,
+            gateway: '192.168.1.99/24',
+            dhcp: { enabled: true, range: { from: '192.168.1.110', to: '192.168.1.210' }, leaseMinutes: 10080 },
+            ipv6: false,
+            isolated: false,
+            protected: false,
+        });
+        expect(networks.find((n) => n.id === 'iot')).toMatchObject({ vlan: 20, gateway: '192.168.20.1/24', dhcp: { enabled: false, leaseMinutes: 60, dns: ['1.1.1.1'] } });
+        expect(networks.find((n) => n.id === 'dmz')).toMatchObject({ dhcp: { enabled: false } });
+    });
+
+    it('marks the network holding this server as protected', async () => {
+        const { adapter } = controller({}, { serverHosts: ['192.168.20.5', 'not-an-address'] });
+        const networks = await adapter.listNetworks();
+        expect(networks.filter((n) => n.protected).map((n) => n.id)).toEqual(['iot']);
+        expect((await adapter.protectedResources()).networks).toEqual([{ id: 'iot' }]);
+    });
+
+    it('still lists networks when the API profile may not read DHCP', async () => {
+        const { adapter } = controller({ 'cmdb system.dhcp/server': forbidden });
+        expect((await adapter.listNetworks()).find((n) => n.id === 'lan')?.dhcp).toEqual({ enabled: false });
+    });
+
+    it('passes other errors on (an unreachable FortiGate is not "no DHCP")', async () => {
+        const { adapter } = controller({
+            'cmdb system.dhcp/server': () => {
+                throw new FortiGateError('down', 'unreachable');
+            },
+        });
+        await expect(adapter.listNetworks()).rejects.toThrow('down');
+    });
+
+    it('lists the physical ports with the network each carries; the WAN ports and the one this server uses are protected', async () => {
+        const { adapter } = controller();
+        const ports = await adapter.listPorts();
+        expect(ports.map((p) => p.name)).toEqual(['a', 'b', 'dmz', 'internal1', 'internal2 (down)', 'internal3', 'internal4', 'internal5', 'internal6', 'wan1', 'wan2 (down)']);
+        const internal1 = ports.find((p) => p.name === 'internal1')!;
+        expect(internal1).toMatchObject({ device: { id: 'FGT80FTK00000001' }, uplink: false, networks: { native: { id: 'lan' }, tagged: [{ id: 'iot' }] } });
+        expect(internal1.protected).toBeUndefined();
+        expect(ports.find((p) => p.name === 'wan1')).toMatchObject({ uplink: true, protected: 'This server reaches the FortiGate through this port', networks: { tagged: 'none' } });
+        expect(ports.find((p) => p.name === 'wan2 (down)')).toMatchObject({ uplink: true, protected: 'WAN port' });
+        expect(ports.find((p) => p.name === 'a')?.networks).toEqual({ tagged: 'none' });
+        expect(ports.map((p) => p.port)).toEqual(ports.map((_, i) => i + 1));
+    });
+
+    it('lists ports without a virtual-switch table (other models / profiles)', async () => {
+        const { adapter } = controller({
+            'cmdb system/virtual-switch': () => {
+                throw new FortiGateError('no', 'notFound');
+            },
+        });
+        const ports = await adapter.listPorts();
+        expect(ports.find((p) => p.name === 'internal1')?.networks).toEqual({ tagged: 'none' });
+    });
+
+    it('accepts only this FortiGate as the device', async () => {
+        const { adapter } = controller();
+        expect(await adapter.listPorts({ name: 'FGT80F-Home' })).toHaveLength(11);
+        expect(await adapter.listPorts({ id: 'fgt80ftk00000001' })).toHaveLength(11);
+        await expect(adapter.listPorts({ name: 'other-switch' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('reads policies as rules in evaluation order; what the model cannot say is foreign', async () => {
+        const { adapter } = controller();
+        const rules = await adapter.listRules();
+        expect(rules.map((r) => [r.id, r.position])).toEqual([
+            ['1', 1],
+            ['5', 2],
+            ['3', 3],
+            ['4', 4],
+            ['6', 5],
+            ['7', 6],
+        ]);
+        expect(rules[0]).toEqual({
+            id: '1',
+            name: 'LAN to internet',
+            action: 'allow',
+            from: [{ network: { id: 'lan' } }],
+            to: [{ internet: true }],
+            protocol: 'any',
+            replies: 'allow',
+            schedule: { kind: 'always' },
+            enabled: true,
+            position: 1,
+        });
+        expect(rules[1]).toMatchObject({ action: 'block', from: [{ network: { id: 'iot' } }], to: [{ network: { id: 'lan' } }] });
+        expect(rules[1].foreign).toBeUndefined();
+        expect(rules[2]).toMatchObject({ enabled: false, from: [{ device: '02-00-00-00-00-77' }], protocol: 'tcp' });
+        expect(rules[3]).toMatchObject({ from: [], to: [{ addresses: ['192.168.1.50', '192.168.1.32/28'] }], protocol: 'icmp' });
+        // 'servers' also holds an FQDN, which its listed entries leave out: the rule matches more than they say.
+        expect(rules[3].foreign?.reason).toContain("group 'servers'");
+        expect(rules[4].foreign?.reason).toMatch(/service HTTPS.*schedule 'school-nights'/);
+        const seventh = rules[5].foreign?.reason ?? '';
+        for (const why of ['any interface', 'negates', 'internet services', 'user groups']) expect(seventh).toContain(why);
+        expect(rules[5].name).toBe('policy 7');
+    });
+
+    it('marks policies on unknown interfaces, mixed "all", FQDN addresses and several MACs as foreign', async () => {
+        const base = { status: 'enable', action: 'accept', service: [{ name: 'ALL' }], schedule: 'always', dstintf: [{ name: 'wan1' }], dstaddr: [{ name: 'all' }] };
+        const { adapter } = controller({
+            'cmdb firewall/policy': [
+                { ...base, policyid: 1, srcintf: [{ name: 'zone-office' }], srcaddr: [{ name: 'all' }] },
+                { ...base, policyid: 2, srcintf: [{ name: 'lan' }], srcaddr: [{ name: 'all' }, { name: 'node-c6' }] },
+                { ...base, policyid: 3, srcintf: [{ name: 'lan' }], srcaddr: [{ name: 'guest-range' }] },
+                { ...base, policyid: 4, srcintf: [{ name: 'lan' }], srcaddr: [{ name: 'two-macs' }] },
+                { ...base, policyid: 5, srcintf: [{ name: 'lan' }], srcaddr: [{ name: 'all' }], action: 'ipsec' },
+                { ...base, policyid: 6, srcintf: [{ name: 'lan' }], srcaddr: [{ name: 'all' }], service: [{ name: 'ALL_TCP' }, { name: 'ALL_UDP' }] },
+            ],
+        });
+        const reasons = (await adapter.listRules()).map((r) => r.foreign?.reason ?? '');
+        expect(reasons[0]).toContain('zones');
+        expect(reasons[1]).toContain('mixes "all"');
+        expect(reasons[2]).toContain("'guest-range'");
+        expect(reasons[3]).toContain('several MACs');
+        expect(reasons[4]).toContain("action 'ipsec'");
+        expect(reasons[5]).toContain('ALL_TCP, ALL_UDP');
+    });
+
+    it('reads a policy on a group the model can say in full as an ordinary rule', async () => {
+        const { adapter } = controller({
+            'cmdb firewall/addrgrp': [{ name: 'servers', member: [{ name: 'node-c6' }, { name: 'printers' }] }, { name: 'nested', member: [{ name: 'servers' }] }],
+            'cmdb firewall/policy': [
+                { policyid: 4, status: 'enable', srcintf: [{ name: 'lan' }], dstintf: [{ name: 'lan' }], srcaddr: [{ name: 'servers' }], dstaddr: [{ name: 'node-c6' }], action: 'accept', service: [{ name: 'PING' }], schedule: 'always' },
+                { policyid: 8, status: 'enable', srcintf: [{ name: 'lan' }], dstintf: [{ name: 'lan' }], srcaddr: [{ name: 'nested' }], dstaddr: [{ name: 'node-c6' }], action: 'accept', service: [{ name: 'PING' }], schedule: 'always' },
+            ],
+        });
+        const [plain, nested] = await adapter.listRules();
+        expect(plain.foreign).toBeUndefined();
+        expect(plain.from).toEqual([{ group: { name: 'servers' } }]);
+        expect(nested.foreign?.reason).toContain("group 'nested'");
+    });
+
+    it('lists address groups with their members resolved; members the model cannot say are left out', async () => {
+        const { adapter } = controller();
+        expect(await adapter.listGroups()).toEqual([
+            { id: 'servers', name: 'servers', kind: 'address', entries: [{ value: '192.168.1.50', name: 'node-c6' }, { value: '192.168.1.32/28', name: 'printers' }] },
+            {
+                id: 'kids',
+                name: 'kids',
+                kind: 'mac',
+                entries: [
+                    { value: '02-00-00-00-00-77', name: 'laptop-mac' },
+                    { value: '02-00-00-00-00-78', name: 'two-macs' },
+                    { value: '02-00-00-00-00-79', name: 'two-macs' },
+                ],
+            },
+        ]);
+        expect((await adapter.listGroups('mac')).map((g) => g.id)).toEqual(['kids']);
+    });
+
+    it('lists DHCP reservations (a "block" entry is not one)', async () => {
+        const { adapter } = controller();
+        expect(await adapter.listReservations()).toEqual([{ mac: '02-00-00-00-00-50', ip: '192.168.1.50', network: { id: 'lan' }, description: 'node-c6' }]);
+    });
+
+    it('merges DHCP leases and the ARP table into clients; online = in the ARP table', async () => {
+        const { adapter } = controller();
+        const clients = await adapter.listClients();
+        expect(clients).toEqual([
+            { mac: '02-00-00-00-00-10', name: 'phone', ip: '192.168.1.110', network: { id: 'lan' }, online: false },
+            { mac: '02-00-00-00-00-50', name: 'node-c6', ip: '192.168.1.50', network: { id: 'lan' }, online: true },
+            { mac: '02-00-00-00-00-01', ip: '192.168.0.1', network: { id: 'wan1' }, online: true },
+        ]);
+    });
+
+    it('reports the running firmware and the newest offered one; nothing is upgradable here', async () => {
+        const { adapter } = controller();
+        expect(await adapter.listFirmware()).toEqual([
+            { device: { id: 'FGT80FTK00000001' }, name: 'FGT80F-Home', model: 'FortiGate 80F', current: 'v7.4.4', available: { version: 'v7.4.10' }, upgradable: false },
+        ]);
+    });
+
+    it('reports only the running version when the firmware list is not available', async () => {
+        const { adapter } = controller({ 'monitor system/firmware': forbidden });
+        const [fw] = await adapter.listFirmware();
+        expect(fw.current).toBe('v7.4.4');
+        expect(fw.available).toBeUndefined();
+    });
+
+    it('offers nothing older than what runs', async () => {
+        const { adapter } = controller({ 'monitor system/firmware': { current: { version: 'v7.4.10' }, available: [{ version: 'v7.2.10' }] } });
+        expect((await adapter.listFirmware())[0].available).toBeUndefined();
+    });
+
+    it('has no Wi-Fi, port profiles or mDNS repeater, and every capability is unsupported', async () => {
+        const { adapter } = controller();
+        expect(await adapter.listWifi()).toEqual([]);
+        expect(await adapter.listPortProfiles()).toEqual([]);
+        expect((await adapter.getMdnsRepeater()).foreign).toBeDefined();
+        const caps = await adapter.capabilities();
+        expect(caps.vendor).toBe('fortigate');
+        expect(JSON.stringify(caps)).not.toMatch(/native|emulated/);
+        expect(adapter.id).toBe('fortigate:192.168.0.126');
+    });
+
+    it('refuses every change without calling the FortiGate', async () => {
+        const { adapter, calls } = controller();
+        const plan = adapter.plan({ op: 'delete', kind: 'rule', ref: { id: '1' } });
+        await expect(plan).rejects.toBeInstanceOf(NetError);
+        await expect(plan).rejects.toMatchObject({ code: 'UNSUPPORTED', details: { capability: 'rule' } });
+        await expect(adapter.apply()).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+        expect(calls).toEqual([]);
+    });
+});

@@ -11,6 +11,7 @@ import type { HaClient } from '../src/haClient/index.js';
 import type { LocalAIClient } from '../src/localAI/index.js';
 import type { OmadaClient } from '../src/omadaClient/index.js';
 import { RuijieError, type RuijieClient } from '../src/ruijieClient/index.js';
+import { FortiGateError, type FortiGateClient } from '../src/fortigateClient/index.js';
 import { connectUpstreams, DEFAULT_BACKOFF, OMADA_SITE_DISABLED_MESSAGE, retryInBackground, type UpstreamFactories, type Upstreams } from '../src/upstreams.js';
 import { logger } from '../src/utils/logger.js';
 
@@ -43,13 +44,15 @@ function fakes() {
   const omada = { listSites: vi.fn(down), disable: vi.fn() };
   const ai = { checkHealth: vi.fn(async () => false), getProviderName: () => 'ollama' };
   const ruijie = { check: vi.fn(async (): Promise<{ model: string; version: string }> => Promise.reject(new RuijieError('The Ruijie router is not reachable', 'unreachable'))) };
+  const fortigate = { check: vi.fn(async (): Promise<{ model: string; hostname: string; version: string }> => Promise.reject(new FortiGateError('The FortiGate is not reachable', 'unreachable'))) };
   const factories: UpstreamFactories = {
     ha: () => ha as unknown as HaClient,
     omada: () => omada as unknown as OmadaClient,
     ruijie: () => ruijie as unknown as RuijieClient,
+    fortigate: () => fortigate as unknown as FortiGateClient,
     ai: () => ai as unknown as LocalAIClient,
   };
-  return { ha, omada, ai, ruijie, factories };
+  return { ha, omada, ai, ruijie, fortigate, factories };
 }
 
 const logged = (level: 'info' | 'warn' | 'error', text: string) =>
@@ -307,5 +310,75 @@ describe('retryInBackground', () => {
     release();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(attempt).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('connectUpstreams: the FortiGate', () => {
+  let upstreams: Upstreams | undefined;
+  const only = (over: Partial<EnvironmentConfig> = {}) =>
+    config({ haPluginEnabled: false, omadaPluginEnabled: false, aiPluginEnabled: false, fortigatePluginEnabled: true, fortigateBaseUrl: 'https://192.0.2.99', fortigateToken: 'tok', ...over });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+  });
+  afterEach(() => {
+    upstreams?.stop();
+    upstreams = undefined;
+    vi.useRealTimers();
+  });
+
+  it('connects and logs the model, hostname and version', async () => {
+    const { fortigate, factories } = fakes();
+    fortigate.check.mockResolvedValue({ model: 'FortiGate 80F', hostname: 'FGT80F-Home', version: 'v7.4.4' });
+    upstreams = await connectUpstreams(only(), factories);
+    expect(upstreams.fortigateClient).toBeDefined();
+    expect(vi.mocked(logger.info)).toHaveBeenCalledWith('Connected to FortiGate', { model: 'FortiGate 80F', hostname: 'FGT80F-Home', version: 'v7.4.4' });
+  });
+
+  it('keeps the client when the FortiGate is unreachable and retries until it answers', async () => {
+    const { fortigate, factories } = fakes();
+    upstreams = await connectUpstreams(only(), factories);
+    expect(upstreams.fortigateClient).toBeDefined();
+    expect(logged('warn', 'FortiGate not reachable')).toBe(true);
+    await vi.advanceTimersByTimeAsync(DEFAULT_BACKOFF.initialMs);
+    expect(fortigate.check).toHaveBeenCalledTimes(2);
+    fortigate.check.mockResolvedValue({ model: 'FortiGate 80F', hostname: 'h', version: 'v' });
+    await vi.advanceTimersByTimeAsync(2 * DEFAULT_BACKOFF.initialMs);
+    expect(fortigate.check).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(10 * DEFAULT_BACKOFF.maxMs);
+    expect(fortigate.check).toHaveBeenCalledTimes(3);
+  });
+
+  it('never sends a refused token again, at startup or later', async () => {
+    const atStart = fakes();
+    atStart.fortigate.check.mockRejectedValue(new FortiGateError('refused', 'refused'));
+    upstreams = await connectUpstreams(only(), atStart.factories);
+    expect(upstreams.fortigateClient).toBeDefined();
+    await vi.advanceTimersByTimeAsync(10 * DEFAULT_BACKOFF.maxMs);
+    expect(atStart.fortigate.check).toHaveBeenCalledTimes(1);
+    upstreams.stop();
+
+    const later = fakes();
+    upstreams = await connectUpstreams(only(), later.factories);
+    later.fortigate.check.mockRejectedValue(new FortiGateError('off', 'disabled'));
+    await vi.advanceTimersByTimeAsync(DEFAULT_BACKOFF.initialMs);
+    await vi.advanceTimersByTimeAsync(10 * DEFAULT_BACKOFF.maxMs);
+    expect(later.fortigate.check).toHaveBeenCalledTimes(2);
+  });
+
+  it('builds no client when the plugin is off, its settings are missing, or the client can\'t be built', async () => {
+    const { factories } = fakes();
+    upstreams = await connectUpstreams(only({ fortigatePluginEnabled: false }), factories);
+    expect(upstreams.fortigateClient).toBeUndefined();
+    expect(logged('info', 'FortiGate plugin disabled')).toBe(true);
+
+    upstreams = await connectUpstreams(only({ fortigateToken: undefined }), factories);
+    expect(upstreams.fortigateClient).toBeUndefined();
+    expect(logged('warn', 'required config not set (FORTIGATE_BASE_URL, FORTIGATE_TOKEN)')).toBe(true);
+
+    upstreams = await connectUpstreams(only(), { ...factories, fortigate: () => { throw new Error('bad'); } });
+    expect(upstreams.fortigateClient).toBeUndefined();
+    expect(logged('warn', 'FortiGate client could not be created')).toBe(true);
   });
 });

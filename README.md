@@ -86,11 +86,11 @@ high-value questions an LLM can actually answer about your network:
 > above through two tools — `omada_browse` + `omada_read` — keeping the tool-schema budget
 > small for low-context models. See the Omada tool tables below for the full eager surface.
 
-## Available Tools (115 Total)
+## Available Tools (116 Total)
 
 With every plugin on in the default eager mode: Home Assistant 38 (including the 3 owner-question tools, when
-`MCP_OWNER_QUESTIONS_ENABLED` is on), Omada 49, `net_` 26, AI 1 and `invokeAction` 1 (only with `MCP_REST_ACTIONS`).
-In graph mode the Omada reads collapse into `omada_browse` + `omada_read` (Omada 26, 92 in total).
+`MCP_OWNER_QUESTIONS_ENABLED` is on), Omada 49, `net_` 26, FortiGate 1 (`fortigate_read`), AI 1 and `invokeAction` 1 (only with `MCP_REST_ACTIONS`).
+In graph mode the Omada reads collapse into `omada_browse` + `omada_read` (Omada 26, 93 in total).
 
 ### Home Assistant Tools (38)
 
@@ -325,6 +325,24 @@ with a key that is shipped in the page, so only HTTPS really protects it, and th
 best pinned: the RG-EG105G-V3 ships OpenSSL's sample identity, valid until 2122, likely the same on every unit). A refused login is never retried, because wrong passwords lock
 the router's login: the Ruijie tools then refuse until the setting is fixed and the server restarted.
 
+### FortiGate Tools (1)
+
+Registered with `FORTIGATE_PLUGIN_ENABLED=true`. The FortiGate is **read-only** for now: the `net_` tools list its
+networks (routed LAN-side interfaces, with their DHCP servers), physical ports, firewall policies (in evaluation order;
+those the model can't say, e.g. zones, named schedules, internet services, users, custom services, are `foreign`),
+address groups, DHCP reservations, clients (DHCP leases and ARP) and firmware with `controller: "fortigate"`; every change
+is refused. `fortigate_read` reads what the `net_` model doesn't cover:
+
+| Tool | Description |
+|------|-------------|
+| `fortigate_read` | One of a fixed list of FortiGate resources: `/system/status`, `/system/resources`, `/system/firmware`, `/system/license`, `/system/interfaces`, `/config/interfaces`, `/config/dhcp-servers`, `/network/dhcp-leases`, `/network/arp`, `/network/routes`, `/firewall/policies`, `/firewall/addresses`, `/firewall/address-groups`, `/firewall/services`, `/firewall/service-groups`, `/vpn/ipsec` (QUERY); `/firewall/sessions`, `/vpn/ssl`, `/log/events` (ADMIN: they show who talks to what). Encrypted FortiOS values (`ENC ...`) and secret-looking fields are redacted |
+
+It uses the FortiOS REST API with a REST API admin's token (System > Administrators > REST API Admin; set its trusted
+hosts to this server only), sent as an `Authorization: Bearer` header, never in the URL, over `https://` only. Pin the
+FortiGate's self-signed certificate with `FORTIGATE_CERT_SHA256`. A refused token (HTTP 401: a wrong token, or this
+server not among the trusted hosts) switches the FortiGate tools off until the setting is fixed and the server
+restarted: it is never sent again, since FortiOS can lock out an address after failed admin logins.
+
 ### AI Tools (1)
 
 Registered only with `AI_PLUGIN_ENABLED=true` and an `AI_PROVIDER` other than `none`.
@@ -543,6 +561,18 @@ Clients only see the tools they may use: `tools/list` is filtered by the caller'
 | `RUIJIE_READ_ONLY` | `false` | `true`: every change through the tools is refused (reads only) |
 | `RUIJIE_FIRMWARE_UPGRADE` | `true` | `false`: firmware is still listed, but `net_upgradeFirmware` is refused |
 | `RUIJIE_TIMEOUT` | `15000` | Request timeout (ms) |
+
+### Optional - FortiGate
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FORTIGATE_PLUGIN_ENABLED` | `false` | Enable the FortiGate (read-only: its `net_` tools take `controller: "fortigate"`, plus `fortigate_read`) |
+| `FORTIGATE_BASE_URL` | - | The FortiGate's HTTPS admin address, e.g. `https://192.168.1.99` (a port is allowed). `https://` only: the token would otherwise travel in clear text |
+| `FORTIGATE_TOKEN` | - | The REST API admin's token (sent as a Bearer header). A refused token is never sent again |
+| `FORTIGATE_CERT_SHA256` | - | **Recommended.** The FortiGate certificate's SHA-256 fingerprint (colons allowed): exactly that certificate is trusted, any other ends the connection before the token is sent. Replaces `FORTIGATE_STRICT_SSL` |
+| `FORTIGATE_STRICT_SSL` | `true` | Validate the certificate against the system CAs; `false` accepts any certificate (this client only). Prefer `FORTIGATE_CERT_SHA256` |
+| `FORTIGATE_VDOM` | - | The VDOM to read; default the token's own (`root`) |
+| `FORTIGATE_TIMEOUT` | `15000` | Request timeout (ms) |
 
 ## Advanced Configuration Examples
 

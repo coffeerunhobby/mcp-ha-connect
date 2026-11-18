@@ -8,6 +8,7 @@ import type { HaClient } from '../haClient/index.js';
 import type { LocalAIClient } from '../localAI/index.js';
 import type { OmadaClient } from '../omadaClient/index.js';
 import type { RuijieClient } from '../ruijieClient/index.js';
+import type { FortiGateClient } from '../fortigateClient/index.js';
 import { logger } from '../utils/logger.js';
 import { setLocalFullTrust } from '../tools/common.js';
 import type { OmadaRegistrationMode } from '../tools/omada/index.js';
@@ -18,6 +19,7 @@ export interface StdioServerOptions {
   haClient?: HaClient;
   omadaClient?: OmadaClient;
   ruijieClient?: RuijieClient;
+  fortigateClient?: FortiGateClient;
   aiClient?: LocalAIClient;
   /** Pre-registered REST actions for invokeAction (empty/undefined = tool not registered). */
   restActions?: Record<string, RestAction>;
