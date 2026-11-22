@@ -184,6 +184,9 @@ export class EventSubscriber extends EventEmitter {
         });
 
         this.ws.on('message', (data: WebSocket.Data) => {
+          if (this.ws !== ws) {
+            return; // a replaced socket: only the current one speaks for this subscriber
+          }
           try {
             const message = JSON.parse(data.toString());
             this.handleMessage(message, resolve, reject);

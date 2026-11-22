@@ -426,6 +426,22 @@ describe('EventSubscriber', () => {
         expect(fake.sockets).toHaveLength(2);
     });
 
+    it('a late message from a replaced socket is ignored', async () => {
+        fake = await fakeHa();
+        subscriber = new EventSubscriber({ baseUrl: fake.url, token: 't', connectTimeout: 300, maxReconnectAttempts: 0 });
+        await subscriber.connect();
+        const old = (subscriber as unknown as { ws: WebSocket }).ws;
+        fake.muted.add(fake.sockets[0]);
+        subscriber.disconnect();
+        fake.silent = true; // the new connection hangs in its handshake
+        const second = subscriber.connect();
+        second.catch(() => undefined);
+        await until(() => fake.received.filter((m) => m.type === 'auth').length === 2);
+        old.emit('message', Buffer.from(JSON.stringify({ type: 'auth_ok' })));
+        expect(subscriber.isConnected()).toBe(false);
+        expect((subscriber as unknown as { heartbeatTimer: unknown }).heartbeatTimer).toBeNull();
+    });
+
     it('disconnect() fails the commands still waiting at once', async () => {
         fake = await fakeHa();
         fake.onCommand = () => undefined; // never answers
