@@ -1,5 +1,5 @@
 # Dependencies
-node_modules/
+node_modules
 # package-lock.json is intentionally COMMITTED — `npm ci` (CI + Docker) requires it
 # and it pins the audited transitive dependency tree. Do NOT re-add it here.
 
