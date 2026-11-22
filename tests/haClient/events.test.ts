@@ -393,6 +393,65 @@ describe('EventSubscriber', () => {
         expect(fake.received.filter((m) => m.type === 'subscribe_events')).toHaveLength(1);
     });
 
+    it('a socket that closes after its replacement connected leaves the new one alone', async () => {
+        fake = await fakeHa();
+        subscriber = new EventSubscriber({ baseUrl: fake.url, token: 't', reconnectInterval: 10 });
+        await subscriber.connect();
+        const old = (subscriber as unknown as { ws: WebSocket }).ws;
+        fake.muted.add(fake.sockets[0]); // HA never completes the close handshake
+        subscriber.disconnect();
+        await subscriber.connect();
+        old.emit('close', 1006, Buffer.from('')); // the old socket's close, late
+        old.emit('error', new Error('late'));
+        await new Promise((r) => setTimeout(r, 100));
+        expect(subscriber.isConnected()).toBe(true);
+        expect(fake.sockets).toHaveLength(2);
+        await expect(subscriber.sendCommand({ type: 'get_config' })).resolves.toBeNull();
+    });
+
+    it('a late error from a replaced socket does not let a second connect start alongside', async () => {
+        fake = await fakeHa();
+        subscriber = new EventSubscriber({ baseUrl: fake.url, token: 't', connectTimeout: 300, maxReconnectAttempts: 0 });
+        await subscriber.connect();
+        const old = (subscriber as unknown as { ws: WebSocket }).ws;
+        fake.muted.add(fake.sockets[0]);
+        subscriber.disconnect();
+        fake.silent = true; // the new connection hangs in its handshake
+        const second = subscriber.connect();
+        second.catch(() => undefined);
+        old.emit('error', new Error('late')); // while the new socket is still opening
+        const third = subscriber.connect(); // still in progress: no new socket
+        third.catch(() => undefined);
+        await new Promise((r) => setTimeout(r, 50));
+        expect(fake.sockets).toHaveLength(2);
+    });
+
+    it('disconnect() fails the commands still waiting at once', async () => {
+        fake = await fakeHa();
+        fake.onCommand = () => undefined; // never answers
+        subscriber = new EventSubscriber({ baseUrl: fake.url, token: 't', commandTimeout: 5000 });
+        await subscriber.connect();
+        const pending = subscriber.sendCommand({ type: 'get_config' });
+        await until(() => fake.received.some((m) => m.type === 'get_config'));
+        const started = Date.now();
+        subscriber.disconnect();
+        await expect(pending).rejects.toThrow('WebSocket connection closed');
+        expect(Date.now() - started).toBeLessThan(1000);
+    });
+
+    it('disconnect() during a connect lets the next connect() start a new one', async () => {
+        fake = await fakeHa();
+        fake.silent = true; // never answers auth
+        subscriber = new EventSubscriber({ baseUrl: fake.url, token: 't', connectTimeout: 5000 });
+        const first = subscriber.connect();
+        first.catch(() => undefined);
+        await until(() => fake.received.some((m) => m.type === 'auth'));
+        subscriber.disconnect();
+        fake.silent = false;
+        await subscriber.connect();
+        expect(subscriber.isConnected()).toBe(true);
+    });
+
     it('keeps retrying with a capped delay instead of giving up', async () => {
         fake = await fakeHa();
         const url = fake.url;

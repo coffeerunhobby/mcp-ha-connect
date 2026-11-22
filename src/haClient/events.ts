@@ -194,20 +194,26 @@ export class EventSubscriber extends EventEmitter {
 
         this.ws.on('close', (code, reason) => {
           logger.info('WebSocket connection closed', { code, reason: reason.toString() });
+          // Closed before authenticating: fail the connect attempt (no-op once resolved).
+          const closedEarly = new Error('Home Assistant closed the WebSocket before authentication');
+          if (this.ws !== ws) {
+            // A socket already replaced (or disconnected): the current one's state is not its to reset.
+            reject(closedEarly);
+            return;
+          }
           this.clearConnectTimer();
-          if (this.ws === ws) this.stopHeartbeat();
+          this.stopHeartbeat();
           this.authenticated = false;
           this.isConnecting = false;
           this.rejectPendingCommands(new Error('WebSocket connection closed'));
-          // Closed before authenticating: fail the connect attempt (no-op once resolved).
-          reject(new Error('Home Assistant closed the WebSocket before authentication'));
+          reject(closedEarly);
           this.handleDisconnect();
         });
 
         this.ws.on('error', (error) => {
           // The detail (often the internal address) stays in the server log.
           logger.error('WebSocket error', { error: error.message });
-          this.isConnecting = false;
+          if (this.ws === ws) this.isConnecting = false;
           reject(new Error('Could not connect to the Home Assistant WebSocket'));
         });
       } catch (error) {
@@ -750,7 +756,10 @@ export class EventSubscriber extends EventEmitter {
       this.ws = null;
     }
 
+    // The old socket's close event no longer touches this subscriber's state (see connect).
     this.authenticated = false;
+    this.isConnecting = false;
+    this.rejectPendingCommands(new Error('WebSocket connection closed'));
     this.subscriptions.clear();
     logger.info('Disconnected from Home Assistant WebSocket');
   }
