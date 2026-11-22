@@ -80,6 +80,14 @@ export interface EventSubscriberConfig {
   commandTimeout?: number;
   /** Delay before re-sending subscriptions that failed for a transient reason (ms). Default 30 s. */
   resubscribeRetryDelay?: number;
+  /**
+   * Interval of Home Assistant `ping`s on an authenticated connection (ms); 0 turns them off.
+   * Default 30 s. Without them a peer that vanishes without closing the TCP connection
+   * (a Home Assistant restart) leaves the socket looking open forever, and events stop.
+   */
+  pingInterval?: number;
+  /** How long a ping waits for its `pong` before the connection is dropped and reopened (ms). Default 10 s. */
+  pongTimeout?: number;
 }
 
 /**
@@ -104,11 +112,17 @@ export class EventSubscriber extends EventEmitter {
   private resubscribeTimer: ReturnType<typeof setTimeout> | null = null;
   private isConnecting = false;
   private shouldReconnect = true;
+  /** Heartbeat of the authenticated connection: the ping timer, the unanswered ping and its deadline. */
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private pongTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingPingId: number | null = null;
 
   private readonly config: EventSubscriberConfig;
   private readonly reconnectInterval: number;
   private readonly maxReconnectAttempts: number;
   private readonly maxReconnectDelay: number;
+  private readonly pingInterval: number;
+  private readonly pongTimeout: number;
 
   constructor(config: EventSubscriberConfig) {
     super();
@@ -118,6 +132,8 @@ export class EventSubscriber extends EventEmitter {
     // server permanently deaf to events (the delay is capped, see handleDisconnect).
     this.maxReconnectAttempts = config.maxReconnectAttempts ?? Number.POSITIVE_INFINITY;
     this.maxReconnectDelay = config.maxReconnectDelay ?? 60000;
+    this.pingInterval = config.pingInterval ?? 30000;
+    this.pongTimeout = config.pongTimeout ?? 10000;
   }
 
   /**
@@ -151,10 +167,11 @@ export class EventSubscriber extends EventEmitter {
         const ws = this.ws;
         // A connection that never authenticates must not hang its caller.
         this.clearConnectTimer();
-    if (this.resubscribeTimer) {
-      clearTimeout(this.resubscribeTimer);
-      this.resubscribeTimer = null;
-    }
+        this.stopHeartbeat();
+        if (this.resubscribeTimer) {
+          clearTimeout(this.resubscribeTimer);
+          this.resubscribeTimer = null;
+        }
         this.connectTimer = setTimeout(() => {
           this.connectTimer = null;
           reject(new Error('Timed out connecting to the Home Assistant WebSocket'));
@@ -178,6 +195,7 @@ export class EventSubscriber extends EventEmitter {
         this.ws.on('close', (code, reason) => {
           logger.info('WebSocket connection closed', { code, reason: reason.toString() });
           this.clearConnectTimer();
+          if (this.ws === ws) this.stopHeartbeat();
           this.authenticated = false;
           this.isConnecting = false;
           this.rejectPendingCommands(new Error('WebSocket connection closed'));
@@ -223,6 +241,7 @@ export class EventSubscriber extends EventEmitter {
         this.clearConnectTimer();
         this.authenticated = true;
         this.isConnecting = false;
+        this.startHeartbeat();
         this.emit('connected');
         resolveConnect();
         // HA forgets subscriptions with the connection: (re)send every registered
@@ -239,6 +258,12 @@ export class EventSubscriber extends EventEmitter {
 
       case 'result':
         this.handleResult(message);
+        break;
+
+      case 'pong':
+        if (this.pendingPingId !== null && message.id === this.pendingPingId) {
+          this.clearPongTimer();
+        }
         break;
 
       case 'event':
@@ -470,6 +495,62 @@ export class EventSubscriber extends EventEmitter {
   }
 
   /**
+   * Ping Home Assistant regularly on the current authenticated connection. A ping
+   * left unanswered past its deadline drops the connection, so the close handler
+   * reconnects and resubscribes: a peer that vanished without a FIN or RST would
+   * otherwise leave the socket open forever, with no events and no reconnect.
+   */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    const ws = this.ws;
+    if (!ws || this.pingInterval <= 0) {
+      return;
+    }
+    this.heartbeatTimer = setInterval(() => this.sendPing(ws), this.pingInterval);
+    this.heartbeatTimer.unref?.();
+  }
+
+  private sendPing(ws: WebSocket): void {
+    if (this.ws !== ws || this.pendingPingId !== null) {
+      return; // an old connection, or the last ping is still waiting for its pong
+    }
+    const id = this.messageId++;
+    try {
+      this.sendMessage({ id, type: 'ping' });
+    } catch {
+      return; // not open: its close handler reconnects
+    }
+    this.pendingPingId = id;
+    this.pongTimer = setTimeout(() => {
+      this.pongTimer = null;
+      this.pendingPingId = null;
+      if (this.ws !== ws) {
+        return;
+      }
+      logger.warn('No pong from Home Assistant in time; dropping the WebSocket to reconnect', {
+        timeoutMs: this.pongTimeout,
+      });
+      ws.terminate();
+    }, this.pongTimeout);
+  }
+
+  private clearPongTimer(): void {
+    if (this.pongTimer) {
+      clearTimeout(this.pongTimer);
+      this.pongTimer = null;
+    }
+    this.pendingPingId = null;
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    this.clearPongTimer();
+  }
+
+  /**
    * Handle disconnection and attempt reconnect
    */
   private handleDisconnect(): void {
@@ -662,6 +743,7 @@ export class EventSubscriber extends EventEmitter {
       this.reconnectTimer = null;
     }
     this.clearConnectTimer();
+    this.stopHeartbeat();
 
     if (this.ws) {
       this.ws.close();

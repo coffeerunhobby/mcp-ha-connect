@@ -16,6 +16,10 @@ interface FakeHa {
     url: string;
     received: Array<Record<string, unknown>>;
     sockets: WebSocket[];
+    /** Stop answering anything while keeping the connection open (a half-open peer). */
+    silent: boolean;
+    /** Sockets that stop answering (the rest of the fake keeps working). */
+    muted: Set<WebSocket>;
     /** Reply to a command; default: success with an empty result. */
     onCommand: (message: Record<string, unknown>, socket: WebSocket) => void;
     close: () => Promise<void>;
@@ -28,6 +32,8 @@ async function fakeHa(): Promise<FakeHa> {
         url: `http://127.0.0.1:${(wss.address() as AddressInfo).port}`,
         received: [],
         sockets: [],
+        silent: false,
+        muted: new Set(),
         onCommand: (message, socket) => socket.send(JSON.stringify({ id: message.id, type: 'result', success: true, result: null })),
         close: () =>
             new Promise((resolve) => {
@@ -41,8 +47,11 @@ async function fakeHa(): Promise<FakeHa> {
         socket.on('message', (raw) => {
             const message = JSON.parse(raw.toString()) as Record<string, unknown>;
             fake.received.push(message);
+            if (fake.silent || fake.muted.has(socket)) return;
             if (message.type === 'auth') {
                 socket.send(JSON.stringify({ type: 'auth_ok' }));
+            } else if (message.type === 'ping') {
+                socket.send(JSON.stringify({ id: message.id, type: 'pong' }));
             } else {
                 fake.onCommand(message, socket);
             }
@@ -174,7 +183,7 @@ describe('EventSubscriber', () => {
 
         // HA comes up with a non-admin token: the subscription is refused.
         const wss = new WebSocketServer({ port });
-        fake = { url, received: [], sockets: [], onCommand: () => undefined, close: () => new Promise((r) => { for (const c of wss.clients) c.terminate(); wss.close(() => r()); }) };
+        fake = { url, received: [], sockets: [], silent: false, muted: new Set(), onCommand: () => undefined, close: () => new Promise((r) => { for (const c of wss.clients) c.terminate(); wss.close(() => r()); }) };
         wss.on('connection', (socket) => {
             fake.sockets.push(socket);
             socket.send(JSON.stringify({ type: 'auth_required' }));
@@ -394,6 +403,141 @@ describe('EventSubscriber', () => {
         // Many more attempts than the old hard limit of 10, still trying.
         await new Promise((r) => setTimeout(r, 400));
         expect((subscriber as unknown as { reconnectAttempts: number }).reconnectAttempts).toBeGreaterThan(10);
+    });
+});
+
+describe('EventSubscriber heartbeat (a peer that vanishes without closing)', () => {
+    let fake: FakeHa;
+    let subscriber: EventSubscriber;
+
+    afterEach(async () => {
+        vi.restoreAllMocks();
+        subscriber?.disconnect();
+        await fake?.close();
+    });
+
+    const pings = () => fake.received.filter((m) => m.type === 'ping');
+
+    it('drops a connection that stops answering pings, reconnects and resubscribes', async () => {
+        fake = await fakeHa();
+        subscriber = new EventSubscriber({ baseUrl: fake.url, token: 't', reconnectInterval: 10, pingInterval: 30, pongTimeout: 30 });
+        const seen: HaEvent[] = [];
+        await subscriber.subscribeEventType('mobile_app_notification_action', (e) => seen.push(e));
+
+        // HA restarts and its old socket is never closed on our side.
+        fake.muted.add(fake.sockets[0]);
+        await until(() => fake.received.filter((m) => m.type === 'subscribe_events').length === 2);
+
+        const resubscribe = fake.received.filter((m) => m.type === 'subscribe_events')[1];
+        sendEvent(fake.sockets[1], resubscribe.id as number, 'mobile_app_notification_action', { action: 'tap' });
+        await until(() => seen.length === 1);
+        expect(seen[0].data.action).toBe('tap');
+    });
+
+    it('keeps a connection whose pings are answered', async () => {
+        fake = await fakeHa();
+        subscriber = new EventSubscriber({ baseUrl: fake.url, token: 't', reconnectInterval: 10, pingInterval: 20, pongTimeout: 15 });
+        await subscriber.connect();
+
+        await until(() => pings().length >= 5);
+        expect(fake.sockets).toHaveLength(1);
+        expect(subscriber.isConnected()).toBe(true);
+        // Each ping has its own message id, never reused by a command.
+        const ids = pings().map((m) => m.id);
+        expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it('logs the missed pong as a warning', async () => {
+        const warn = vi.spyOn(logger, 'warn');
+        fake = await fakeHa();
+        subscriber = new EventSubscriber({ baseUrl: fake.url, token: 't', reconnectInterval: 1000, pingInterval: 20, pongTimeout: 20 });
+        await subscriber.connect();
+        fake.silent = true;
+
+        await until(() => warn.mock.calls.some(([msg]) => String(msg).includes('pong')));
+        const [msg, meta] = warn.mock.calls.find(([m]) => String(m).includes('pong'))!;
+        expect(msg).toMatch(/reconnect/i);
+        expect(meta).toEqual({ timeoutMs: 20 });
+    });
+
+    it('a pong answering an earlier ping does not keep a silent connection alive', async () => {
+        fake = await fakeHa();
+        subscriber = new EventSubscriber({ baseUrl: fake.url, token: 't', reconnectInterval: 10, pingInterval: 20, pongTimeout: 40 });
+        await subscriber.connect();
+        await until(() => pings().length >= 1);
+        const firstId = pings()[0].id;
+        fake.muted.add(fake.sockets[0]);
+        // Answer only with a stale id: the outstanding ping is still unanswered.
+        const socket = fake.sockets[0];
+        const timer = setInterval(() => socket.readyState === 1 && socket.send(JSON.stringify({ id: firstId, type: 'pong' })), 5);
+        try {
+            await until(() => fake.sockets.length === 2);
+        } finally {
+            clearInterval(timer);
+        }
+    });
+
+    it('sends no second ping while one is outstanding', async () => {
+        fake = await fakeHa();
+        subscriber = new EventSubscriber({ baseUrl: fake.url, token: 't', reconnectInterval: 1000, pingInterval: 10, pongTimeout: 200 });
+        await subscriber.connect();
+        fake.silent = true;
+        const before = pings().length;
+        await new Promise((r) => setTimeout(r, 120));
+        expect(pings().length - before).toBeLessThanOrEqual(1);
+        expect(fake.sockets).toHaveLength(1);
+    });
+
+    it('stops pinging after disconnect()', async () => {
+        fake = await fakeHa();
+        subscriber = new EventSubscriber({ baseUrl: fake.url, token: 't', reconnectInterval: 10, pingInterval: 10, pongTimeout: 10 });
+        await subscriber.connect();
+        await until(() => pings().length >= 1);
+        subscriber.disconnect();
+        const timers = subscriber as unknown as { heartbeatTimer: unknown; pongTimer: unknown };
+        expect(timers.heartbeatTimer).toBeNull();
+        expect(timers.pongTimer).toBeNull();
+        await new Promise((r) => setTimeout(r, 20)); // a ping already on the wire
+        const count = pings().length;
+        await new Promise((r) => setTimeout(r, 80));
+        expect(pings().length).toBe(count);
+        expect(fake.sockets).toHaveLength(1);
+    });
+
+    it('stops the heartbeat when Home Assistant closes the connection', async () => {
+        fake = await fakeHa();
+        subscriber = new EventSubscriber({ baseUrl: fake.url, token: 't', maxReconnectAttempts: 0, pingInterval: 10, pongTimeout: 1000 });
+        await subscriber.connect();
+        await until(() => pings().length >= 1);
+        fake.sockets[0].terminate();
+        await until(() => !subscriber.isConnected());
+        const timers = subscriber as unknown as { heartbeatTimer: unknown; pongTimer: unknown };
+        expect(timers.heartbeatTimer).toBeNull();
+        expect(timers.pongTimer).toBeNull();
+    });
+
+    it('pingInterval 0 turns the heartbeat off', async () => {
+        fake = await fakeHa();
+        subscriber = new EventSubscriber({ baseUrl: fake.url, token: 't', reconnectInterval: 10, pingInterval: 0, pongTimeout: 10 });
+        await subscriber.connect();
+        fake.silent = true;
+        await new Promise((r) => setTimeout(r, 80));
+        expect(pings()).toHaveLength(0);
+        expect(fake.sockets).toHaveLength(1);
+    });
+
+    it('does not ping before authentication', async () => {
+        fake = await fakeHa();
+        fake.silent = true; // never answers auth
+        subscriber = new EventSubscriber({ baseUrl: fake.url, token: 't', connectTimeout: 100, maxReconnectAttempts: 0, pingInterval: 10, pongTimeout: 10 });
+        await expect(subscriber.connect()).rejects.toThrow(/Timed out/);
+        expect(pings()).toHaveLength(0);
+    });
+
+    it('defaults to a 30 s ping and a 10 s pong deadline', () => {
+        const s = new EventSubscriber({ baseUrl: 'http://127.0.0.1:1', token: 't' }) as unknown as { pingInterval: number; pongTimeout: number };
+        expect(s.pingInterval).toBe(30000);
+        expect(s.pongTimeout).toBe(10000);
     });
 });
 

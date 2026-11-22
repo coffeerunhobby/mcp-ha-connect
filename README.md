@@ -684,6 +684,11 @@ eventSource.addEventListener('state_changed', (event) => {
 
 See [docs/SSE_API.md](docs/SSE_API.md) for complete SSE documentation.
 
+SSE events and owner-question taps come from one WebSocket to Home Assistant. It reconnects and
+resubscribes by itself when Home Assistant closes it, and pings Home Assistant every 30 s: when a
+pong is missing for 10 s (a restart that never closed the connection), it drops the connection and
+reconnects, logging `No pong from Home Assistant in time`.
+
 ### Mode 3: Docker Standalone
 
 ```bash
