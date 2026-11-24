@@ -1,7 +1,7 @@
 /**
  * The FortiGate adapter (read-only) on FortiOS 7.4 answer shapes (tests/net/fixtures/fortigate.ts):
  * networks, ports, policies as rules (and which are foreign), groups, reservations, clients,
- * firmware, and the refusal of every change.
+ * firmware, and the refusal of every change but reservations (tests/net/fortigateReservations.test.ts).
  */
 
 import { readFileSync } from 'node:fs';
@@ -443,23 +443,25 @@ describe('FortiGateNetworkController (read-only)', () => {
         expect((await adapter.listFirmware())[0].available).toBeUndefined();
     });
 
-    it('has no Wi-Fi, port profiles or mDNS repeater, and every capability is unsupported', async () => {
+    it('has no Wi-Fi, port profiles or mDNS repeater, and every capability but reservations is unsupported', async () => {
         const { adapter } = controller();
         expect(await adapter.listWifi()).toEqual([]);
         expect(await adapter.listPortProfiles()).toEqual([]);
         expect((await adapter.getMdnsRepeater()).foreign).toBeDefined();
         const caps = await adapter.capabilities();
         expect(caps.vendor).toBe('fortigate');
-        expect(JSON.stringify(caps)).not.toMatch(/native|emulated/);
+        expect(caps.reservations).toBe('native');
+        expect(JSON.stringify({ ...caps, reservations: 'x' })).not.toMatch(/native|emulated/);
         expect(adapter.id).toBe('fortigate:192.168.0.126');
     });
 
-    it('refuses every change without calling the FortiGate', async () => {
+    it('refuses every change but reservations without calling the FortiGate', async () => {
         const { adapter, calls } = controller();
-        const plan = adapter.plan({ op: 'delete', kind: 'rule', ref: { id: '1' } });
+        const change = { op: 'delete', kind: 'rule', ref: { id: '1' } } as const;
+        const plan = adapter.plan(change);
         await expect(plan).rejects.toBeInstanceOf(NetError);
         await expect(plan).rejects.toMatchObject({ code: 'UNSUPPORTED', details: { capability: 'rule' } });
-        await expect(adapter.apply()).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+        await expect(adapter.apply({ change, vendor: 'fortigate', steps: [], effects: [], wouldLockOut: [], basis: 'x' })).rejects.toMatchObject({ code: 'UNSUPPORTED' });
         expect(calls).toEqual([]);
     });
 });

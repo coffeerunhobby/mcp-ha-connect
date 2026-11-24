@@ -183,3 +183,99 @@ describe('FortiGateClient', () => {
         expect(client({ baseUrl: 'https://192.0.2.99:8443/' }).host).toBe('192.0.2.99');
     });
 });
+
+describe('FortiGateClient writes (cmdb POST / PUT / DELETE)', () => {
+    beforeEach(() => vi.clearAllMocks());
+    afterEach(() => vi.restoreAllMocks());
+
+    const ok = (method: string, mkey: unknown) => json({ http_method: method, revision: 'r2', revision_changed: true, old_revision: 'r1', mkey, status: 'success', http_status: 200, vdom: 'root' });
+    const RES = ['system.dhcp', 'server', '1', 'reserved-address'];
+
+    it('sends a JSON body with the Bearer token, the VDOM and no redirects, and returns the new key', async () => {
+        const sent = fortigate(() => ok('POST', 7));
+        const result = await client({ vdom: 'root' }).cmdbWrite('POST', RES, { type: 'mac', mac: '02:00:00:00:00:01', ip: '192.168.1.50', action: 'reserved' });
+        expect(result).toEqual({ mkey: '7' });
+        expect(sent).toHaveLength(1);
+        expect(sent[0].url).toBe('https://192.0.2.99/api/v2/cmdb/system.dhcp/server/1/reserved-address?vdom=root');
+        expect(sent[0].url).not.toContain(TOKEN);
+        expect(sent[0].init.method).toBe('POST');
+        expect(sent[0].init.redirect).toBe('manual');
+        const headers = sent[0].init.headers as Record<string, string>;
+        expect(headers.Authorization).toBe(`Bearer ${TOKEN}`);
+        expect(headers['Content-Type']).toBe('application/json');
+        expect(JSON.parse(String(sent[0].init.body))).toEqual({ type: 'mac', mac: '02:00:00:00:00:01', ip: '192.168.1.50', action: 'reserved' });
+    });
+
+    it('PUT and DELETE address one entry; DELETE sends no body', async () => {
+        const sent = fortigate((_url, n) => ok(n === 0 ? 'PUT' : 'DELETE', 3));
+        await client().cmdbWrite('PUT', [...RES, '3'], { ip: '192.168.1.52' });
+        await client().cmdbWrite('DELETE', [...RES, '3']);
+        expect(sent.map((s) => `${String(s.init.method)} ${s.url}`)).toEqual([
+            'PUT https://192.0.2.99/api/v2/cmdb/system.dhcp/server/1/reserved-address/3',
+            'DELETE https://192.0.2.99/api/v2/cmdb/system.dhcp/server/1/reserved-address/3',
+        ]);
+        expect(sent[1].init.body).toBeUndefined();
+        expect((sent[1].init.headers as Record<string, string>)['Content-Type']).toBeUndefined();
+    });
+
+    it('a FortiOS refusal carries only the HTTP status and its numeric error code', async () => {
+        fortigate(() => json({ http_method: 'POST', revision_changed: false, cli_error: ['duplicate 02:00:00:00:00:01 at 192.0.2.10'], error: -15, status: 'error', http_status: 500 }, 500));
+        const f = await failure(client().cmdbWrite('POST', RES, { ip: '192.168.1.50' }));
+        expect(f).toEqual({ kind: 'device', message: 'The FortiGate refused cmdb system.dhcp/server/1/reserved-address (HTTP 500, error -15)' });
+    });
+
+    it('a 404 on a write is notFound, a 403 forbidden', async () => {
+        fortigate((_url, n) => json({ status: 'error', http_status: n ? 403 : 404 }, n ? 403 : 404));
+        expect((await failure(client().cmdbWrite('DELETE', [...RES, '77']))).kind).toBe('notFound');
+        expect((await failure(client().cmdbWrite('DELETE', [...RES, '77']))).kind).toBe('forbidden');
+    });
+
+    it('a write answered "success" without a key still counts as done', async () => {
+        fortigate(() => json({ http_method: 'DELETE', status: 'success', http_status: 200 }));
+        expect(await client().cmdbWrite('DELETE', [...RES, '3'])).toEqual({});
+    });
+
+    it('a write that timed out or lost its answer may or may not be done; a refused connection was not sent', async () => {
+        vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(Object.assign(new Error('timeout'), { name: 'TimeoutError' }));
+        const timedOut = await client().cmdbWrite('POST', RES, {}).catch((e: unknown) => e as FortiGateError);
+        expect(timedOut).toMatchObject({ kind: 'unreachable', maybeDone: true });
+        vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }));
+        const refused = await client().cmdbWrite('POST', RES, {}).catch((e: unknown) => e as FortiGateError);
+        expect(refused).toMatchObject({ kind: 'unreachable', maybeDone: false });
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({ status: 200, ok: true, text: () => Promise.reject(new Error('reset')) } as unknown as Response);
+        const cut = await client().cmdbWrite('PUT', [...RES, '1'], {}).catch((e: unknown) => e as FortiGateError);
+        expect(cut).toMatchObject({ kind: 'unreachable', maybeDone: true });
+    });
+
+    it('a read that failed is never "maybe done"', async () => {
+        vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(Object.assign(new Error('timeout'), { name: 'TimeoutError' }));
+        const e = await client().cmdb('system', 'interface').catch((x: unknown) => x as FortiGateError);
+        expect(e).toMatchObject({ kind: 'unreachable', maybeDone: false });
+    });
+
+    it('a refused token on a write switches the client off like on a read', async () => {
+        const sent = fortigate(() => json({ status: 'error', http_status: 401 }, 401));
+        const c = client();
+        expect((await failure(c.cmdbWrite('POST', RES, {}))).kind).toBe('refused');
+        expect((await failure(c.cmdbWrite('POST', RES, {}))).kind).toBe('disabled');
+        expect(sent).toHaveLength(1);
+    });
+
+    it('FORTIGATE_READ_ONLY refuses every write without calling; reads still work', async () => {
+        const sent = fortigate(() => json(envelope('system', 'status', systemStatus)));
+        const c = client({ readOnly: true });
+        expect(c.readOnly).toBe(true);
+        expect(await failure(c.cmdbWrite('DELETE', [...RES, '1']))).toEqual({ kind: 'readOnly', message: expect.stringMatching(/FORTIGATE_READ_ONLY/) });
+        expect(sent).toHaveLength(0);
+        await c.monitor('system', 'status');
+        expect(sent).toHaveLength(1);
+        expect(client().readOnly).toBe(false);
+    });
+
+    it('refuses path segments that are not plain FortiOS names, without calling', async () => {
+        const sent = fortigate(() => ok('POST', 1));
+        expect((await failure(client().cmdbWrite('POST', ['system.dhcp', 'server', '1/../2', 'reserved-address'], {}))).kind).toBe('notFound');
+        expect((await failure(client().cmdbWrite('PUT', ['system.dhcp'], {}))).kind).toBe('notFound');
+        expect(sent).toHaveLength(0);
+    });
+});

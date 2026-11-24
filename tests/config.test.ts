@@ -112,7 +112,8 @@ describe('loadConfig', () => {
   it('reads the FortiGate settings: off and strict by default, https only, the pin normalized', () => {
     const base = { HA_URL: 'http://ha.test:8123', HA_TOKEN: 't' };
     const off = loadConfig(base);
-    expect(off).toMatchObject({ fortigatePluginEnabled: false, fortigateStrictSsl: true, fortigateBaseUrl: undefined, fortigateCertSha256: undefined });
+    expect(off).toMatchObject({ fortigatePluginEnabled: false, fortigateStrictSsl: true, fortigateBaseUrl: undefined, fortigateCertSha256: undefined, fortigateReadOnly: false });
+    expect(loadConfig({ ...base, FORTIGATE_READ_ONLY: 'true' })).toMatchObject({ fortigateReadOnly: true });
 
     const pin = 'AB:CD' + ':EF'.repeat(30);
     const on = loadConfig({ ...base, FORTIGATE_PLUGIN_ENABLED: 'true', FORTIGATE_BASE_URL: 'https://192.0.2.99:8443/', FORTIGATE_TOKEN: 'tok', FORTIGATE_CERT_SHA256: pin, FORTIGATE_VDOM: 'root', FORTIGATE_TIMEOUT: '9000' });

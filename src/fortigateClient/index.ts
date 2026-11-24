@@ -1,5 +1,6 @@
 /**
- * Client for a FortiGate's REST API (FortiOS 7.x), read-only:
+ * Client for a FortiGate's REST API (FortiOS 7.x): reads, and cmdb writes (POST / PUT / DELETE)
+ * for the adapter's changes (2.7.0; FORTIGATE_READ_ONLY=true refuses every write without sending):
  *
  * - Auth: a REST API admin's token (System > Administrators > REST API Admin), sent as
  *   `Authorization: Bearer <token>` on every call. Never as the `access_token` query parameter:
@@ -7,6 +8,10 @@
  * - Calls: GET /api/v2/cmdb/<path>/<name> (settings) and GET /api/v2/monitor/<path>/<name>
  *   (live state), plus GET /api/v2/log/... Every answer is an envelope
  *   {http_method, results, vdom, path, name, status: "success", http_status, serial, version, build}.
+ *   Writes go to /api/v2/cmdb/<path>/<name>[/<key>[/<child table>[/<child key>]]] (a child table such
+ *   as system.dhcp/server/1/reserved-address, as the FortiGate's own GUI does); a write's answer has
+ *   no results, only {status, mkey, revision, revision_changed}. A write is never repeated: one whose
+ *   answer never came (timeout, cut off) may or may not be done (`maybeDone`).
  * - A refused token (HTTP 401: wrong token, or this host isn't one of the admin's trusted hosts)
  *   switches the client off for good: FortiOS counts failed admin logins and can lock the source
  *   address out, so a refused token is never sent again until the setting is fixed and the
@@ -38,18 +43,28 @@ export interface FortiGateClientConfig {
     serverAddresses?: string[];
     /** Milliseconds per request (default 15000). */
     timeout?: number;
+    /** FORTIGATE_READ_ONLY: every write is refused without being sent. */
+    readOnly?: boolean;
 }
 
-/** A FortiGate call that failed: `refused` = the token was refused (the client is off now), `forbidden` = the profile lacks it. */
+/**
+ * A FortiGate call that failed: `refused` = the token was refused (the client is off now),
+ * `forbidden` = the profile lacks it, `readOnly` = a write while FORTIGATE_READ_ONLY is set.
+ * `maybeDone`: a write was sent but its answer never came, so the FortiGate may have done it.
+ */
 export class FortiGateError extends Error {
     constructor(
         message: string,
-        readonly kind: 'refused' | 'forbidden' | 'notFound' | 'unreachable' | 'device' | 'disabled' = 'device'
+        readonly kind: 'refused' | 'forbidden' | 'notFound' | 'unreachable' | 'device' | 'disabled' | 'readOnly' = 'device',
+        readonly maybeDone = false
     ) {
         super(message);
         this.name = 'FortiGateError';
     }
 }
+
+/** Connection errors that mean nothing reached the FortiGate. */
+const NOT_SENT = new Set(['ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN', PIN_MISMATCH]);
 
 /** What every FortiOS REST answer carries around its results. */
 export interface FortiEnvelope<T> {
@@ -68,6 +83,8 @@ export class FortiGateClient {
     readonly host: string;
     /** Where this server runs, so nothing cuts it off; empty when not configured. */
     readonly serverAddresses: string[];
+    /** FORTIGATE_READ_ONLY: writes are refused without being sent. */
+    readonly readOnly: boolean;
     private readonly baseUrl: string;
     private readonly token: string;
     private readonly vdom?: string;
@@ -91,12 +108,26 @@ export class FortiGateClient {
         this.vdom = config.vdom;
         this.timeout = config.timeout ?? 15_000;
         this.serverAddresses = config.serverAddresses ?? [];
+        this.readOnly = config.readOnly ?? false;
         this.dispatcher = config.certSha256 !== undefined ? createPinnedDispatcher(config.certSha256) : createTlsDispatcher(config.strictSsl, config.baseUrl);
     }
 
     /** Settings: GET /api/v2/cmdb/<path>/<name>. */
     async cmdb<T = Record<string, unknown>[]>(path: string, name: string, query?: Record<string, string | number | boolean>): Promise<FortiEnvelope<T>> {
         return await this.get<T>('cmdb', [path, name], query);
+    }
+
+    /**
+     * A settings change: POST (add to a table), PUT (change an entry) or DELETE (remove one) on
+     * /api/v2/cmdb/<path>/<name>[/...]. Sent once, never repeated. Returns the entry's key, when
+     * the FortiGate names it (POST answers the new entry's).
+     */
+    async cmdbWrite(method: 'POST' | 'PUT' | 'DELETE', segments: string[], body?: Record<string, unknown>): Promise<{ mkey?: string }> {
+        if (this.readOnly) throw new FortiGateError('The FortiGate is read-only here (FORTIGATE_READ_ONLY=true); nothing was sent', 'readOnly');
+        if (segments.length < 2) throw new FortiGateError('Not a FortiOS API path', 'notFound');
+        const answer = await this.request<unknown>(method, 'cmdb', segments, undefined, method === 'DELETE' ? undefined : (body ?? {}));
+        const mkey = answer.mkey;
+        return typeof mkey === 'string' || typeof mkey === 'number' ? { mkey: String(mkey) } : {};
     }
 
     /** Live state: GET /api/v2/monitor/<path>/<name>[/<action>]. */
@@ -127,6 +158,18 @@ export class FortiGateClient {
     }
 
     private async get<T>(api: 'cmdb' | 'monitor' | 'log', segments: string[], query?: Record<string, string | number | boolean>): Promise<FortiEnvelope<T>> {
+        const answer = await this.request<T>('GET', api, segments, query);
+        return answer.envelope;
+    }
+
+    private async request<T>(
+        method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+        api: 'cmdb' | 'monitor' | 'log',
+        segments: string[],
+        query?: Record<string, string | number | boolean>,
+        body?: Record<string, unknown>
+    ): Promise<{ envelope: FortiEnvelope<T>; mkey?: unknown }> {
+        const write = method !== 'GET';
         if (this.disabledMessage) throw new FortiGateError(this.disabledMessage, 'disabled');
         for (const segment of segments) {
             if (!SEGMENT.test(segment)) throw new FortiGateError('Not a FortiOS API path', 'notFound');
@@ -143,8 +186,9 @@ export class FortiGateClient {
         const search = params.size ? `?${params.toString()}` : '';
 
         const init: FetchInitWithDispatcher = {
-            method: 'GET',
-            headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/json' },
+            method,
+            headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/json', ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+            ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
             signal: AbortSignal.timeout(this.timeout),
             // A redirect would carry the token elsewhere (or downgrade to a login page): never followed.
             redirect: 'manual',
@@ -154,18 +198,20 @@ export class FortiGateClient {
         try {
             response = await tlsAwareFetch(this.baseUrl + path + search, init);
         } catch (error) {
-            if ((error instanceof Error ? (error.cause as { code?: unknown } | undefined)?.code : undefined) === PIN_MISMATCH) {
+            const code = error instanceof Error ? (error.cause as { code?: unknown } | undefined)?.code : undefined;
+            if (code === PIN_MISMATCH) {
                 throw new FortiGateError("The FortiGate's certificate doesn't match FORTIGATE_CERT_SHA256; nothing was sent to it", 'unreachable');
             }
             const reason = error instanceof Error && error.name === 'TimeoutError' ? 'timed out' : 'not reachable';
-            throw new FortiGateError(`The FortiGate is ${reason}`, 'unreachable');
+            // A write that may have left: only a connection that never opened is sure not to have.
+            throw new FortiGateError(`The FortiGate is ${reason}`, 'unreachable', write && !(typeof code === 'string' && NOT_SENT.has(code)));
         }
         let raw: string;
         try {
             raw = await response.text();
         } catch (error) {
             const reason = error instanceof Error && error.name === 'TimeoutError' ? 'timed out' : 'not reachable';
-            throw new FortiGateError(`The FortiGate is ${reason}`, 'unreachable');
+            throw new FortiGateError(`The FortiGate is ${reason}`, 'unreachable', write);
         }
 
         if (response.status === 401 && this.tokenWorked && !(api === 'monitor' && segments.join('/') === 'system/status')) {
@@ -192,25 +238,34 @@ export class FortiGateClient {
         if (response.status === 404) throw new FortiGateError(`This FortiGate has no ${label} (HTTP 404; another FortiOS version?)`, 'notFound');
         if (response.status >= 300 && response.status < 400) throw new FortiGateError(`The FortiGate redirected ${label} (HTTP ${response.status}); not followed`);
 
-        let body: Record<string, unknown>;
+        let answer: Record<string, unknown>;
         try {
-            body = JSON.parse(raw) as Record<string, unknown>;
+            answer = JSON.parse(raw) as Record<string, unknown>;
         } catch {
-            if (response.ok) throw new FortiGateError("The FortiGate's answer was cut off", 'unreachable');
+            if (response.ok) throw new FortiGateError("The FortiGate's answer was cut off", 'unreachable', write);
             throw new FortiGateError(`The FortiGate answered ${label} with HTTP ${response.status}`);
         }
-        if (!response.ok || (body.status !== undefined && body.status !== 'success')) {
-            throw new FortiGateError(`The FortiGate refused ${label} (HTTP ${response.status}${errorCode(body.error)})`);
+        if (!response.ok || (answer.status !== undefined && answer.status !== 'success')) {
+            throw new FortiGateError(`The FortiGate refused ${label} (HTTP ${response.status}${errorCode(answer.error)})`);
         }
-        if (!('results' in body)) throw new FortiGateError(`The FortiGate answered ${label} without results`);
+        if (write) {
+            // A write answers {status, mkey, revision}: no results.
+            if (answer.status !== 'success') throw new FortiGateError(`The FortiGate answered ${label} without saying it was done`, 'unreachable', true);
+            this.tokenWorked = true;
+            logger.info('FortiGate change', { call: `${method} ${label}` });
+            return { envelope: { results: undefined as T }, mkey: answer.mkey };
+        }
+        if (!('results' in answer)) throw new FortiGateError(`The FortiGate answered ${label} without results`);
         this.tokenWorked = true;
         logger.debug('FortiGate call', { call: label });
         return {
-            results: body.results as T,
-            ...(typeof body.serial === 'string' ? { serial: body.serial } : {}),
-            ...(typeof body.version === 'string' ? { version: body.version } : {}),
-            ...(typeof body.build === 'number' ? { build: body.build } : {}),
-            ...(typeof body.vdom === 'string' ? { vdom: body.vdom } : {}),
+            envelope: {
+                results: answer.results as T,
+                ...(typeof answer.serial === 'string' ? { serial: answer.serial } : {}),
+                ...(typeof answer.version === 'string' ? { version: answer.version } : {}),
+                ...(typeof answer.build === 'number' ? { build: answer.build } : {}),
+                ...(typeof answer.vdom === 'string' ? { vdom: answer.vdom } : {}),
+            },
         };
     }
 }

@@ -295,7 +295,7 @@ one is set in the controller's web UI. Reads need `QUERY`, changes `CONFIGURE`.
 | `net_listFirmware` | The firmware each network device runs and, when the vendor offers one, the newer version with its release notes and whether `net_upgradeFirmware` can install it |
 | `net_upgradeFirmware` | **ADMIN.** Install the version the vendor offers for a device, only from the vendor's own download server; the device restarts keeping its settings, so everything behind it is offline for a few minutes (always needs a dry run first, then `allowLockout` and its `basis`). Ruijie routers only for now; on Omada firmware is listed, upgrades stay in the controller web UI |
 | `net_listReservations` | DHCP reservations: which device (MAC) always gets which address, on which network |
-| `net_setReservation` / `net_deleteReservation` | Reserve an address for a device (create, or change its reservation) or remove its reservation. The address must be a free host address in a routed network (the one given, or the one holding it): not the gateway, network or broadcast address, not reserved for or used right now by another device. An online device moved to another address loses its connections at its next DHCP renewal, so that needs `allowLockout`; a removed reservation changes nothing until the lease runs out. On Omada the reservations of the controller and this server (`MCP_SERVER_ADDRESSES`) are never moved or removed (pinning them to the address they have is fine), and their addresses are never reserved for another device; while where either is can't be told (address unresolvable, or `MCP_SERVER_ADDRESSES` not set), no existing reservation is moved or removed. A description is kept on Omada; Ruijie keeps none (at most 300 reservations there) |
+| `net_setReservation` / `net_deleteReservation` | Reserve an address for a device (create, or change its reservation) or remove its reservation. The address must be a free host address in a routed network (the one given, or the one holding it): not the gateway, network or broadcast address, not reserved for or used right now by another device. An online device moved to another address loses its connections at its next DHCP renewal, so that needs `allowLockout`; a removed reservation changes nothing until the lease runs out. On Omada the reservations of the controller and this server (`MCP_SERVER_ADDRESSES`), on a FortiGate this server's, are never moved or removed (pinning them to the address they have is fine), and their addresses are never reserved for another device; while where either is can't be told (address unresolvable, or `MCP_SERVER_ADDRESSES` not set; on a FortiGate only when it is reached from one of its LAN networks), no existing reservation is moved or removed. A description is kept on Omada and FortiGate; Ruijie keeps none (at most 300 reservations there) |
 
 On Omada, a network isolation flag (use a block rule instead), a "guest" network type, switching IPv6 on, and WPA2/WPA3
 mixed mode are not available through the API and are refused. Rules are gateway ACLs (the gateway routes between the
@@ -327,11 +327,25 @@ the router's login: the Ruijie tools then refuse until the setting is fixed and 
 
 ### FortiGate Tools (1)
 
-Registered with `FORTIGATE_PLUGIN_ENABLED=true`. The FortiGate is **read-only** for now: the `net_` tools list its
+Registered with `FORTIGATE_PLUGIN_ENABLED=true`. The `net_` tools list its
 networks (routed LAN-side interfaces, with their DHCP servers), physical ports, firewall policies (in evaluation order;
 those the model can't say, e.g. zones, named schedules, internet services, users, custom services, are `foreign`),
-address groups, DHCP reservations, clients (DHCP leases and ARP) and firmware with `controller: "fortigate"`; every change
-is refused. `fortigate_read` reads what the `net_` model doesn't cover:
+address groups, DHCP reservations, clients (DHCP leases and ARP) and firmware with `controller: "fortigate"`.
+
+**Changes: DHCP reservations only** (since 2.7.0; every other change is refused). `net_setReservation` and
+`net_deleteReservation` write the reserved-address table of the network's DHCP server, the way the FortiGate's own
+GUI does, with a description if you give one; live-tested on a FortiGate 80F with FortiOS 7.4.4. As on the other
+controllers: a dry run first (with a `basis`), an online device moved to another address needs `allowLockout`, the
+change is planned again right before it is written (anything changed meanwhile is a `CONFLICT`, nothing written), and
+read back afterwards. Refused with the reason: a network without a DHCP server, with its server switched off or with
+several; an address outside the subnet the server hands out; an address another entry holds (also FortiOS's MAC
+access `block` / `assign` entries and option-82 reservations); a device with such a MAC access entry, or one reserved
+on several servers already. Moving a reservation to another network adds the new one before removing the old one;
+if the removal fails, the change is done with a warning naming what is left. This server's own reservation is never
+moved or removed, nor its address reserved for another device (see `net_setReservation` above). The REST API admin needs write access
+to the DHCP settings for this (a read-only profile gets HTTP 403); `FORTIGATE_READ_ONLY=true` refuses every change.
+
+`fortigate_read` reads what the `net_` model doesn't cover:
 
 | Tool | Description |
 |------|-------------|
@@ -566,12 +580,13 @@ Clients only see the tools they may use: `tools/list` is filtered by the caller'
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `FORTIGATE_PLUGIN_ENABLED` | `false` | Enable the FortiGate (read-only: its `net_` tools take `controller: "fortigate"`, plus `fortigate_read`) |
+| `FORTIGATE_PLUGIN_ENABLED` | `false` | Enable the FortiGate (its `net_` tools take `controller: "fortigate"`, plus `fortigate_read`) |
 | `FORTIGATE_BASE_URL` | - | The FortiGate's HTTPS admin address, e.g. `https://192.168.1.99` (a port is allowed). `https://` only: the token would otherwise travel in clear text |
 | `FORTIGATE_TOKEN` | - | The REST API admin's token (sent as a Bearer header). A refused token is never sent again |
 | `FORTIGATE_CERT_SHA256` | - | **Recommended.** The FortiGate certificate's SHA-256 fingerprint (colons allowed): exactly that certificate is trusted, any other ends the connection before the token is sent. Replaces `FORTIGATE_STRICT_SSL` |
 | `FORTIGATE_STRICT_SSL` | `true` | Validate the certificate against the system CAs; `false` accepts any certificate (this client only). Prefer `FORTIGATE_CERT_SHA256` |
 | `FORTIGATE_VDOM` | - | The VDOM to read; default the token's own (`root`) |
+| `FORTIGATE_READ_ONLY` | `false` | `true`: every change through the tools is refused (reads only); today that is DHCP reservations |
 | `FORTIGATE_TIMEOUT` | `15000` | Request timeout (ms) |
 
 ## Advanced Configuration Examples

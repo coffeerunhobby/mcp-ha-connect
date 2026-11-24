@@ -60,7 +60,7 @@ const envSchema = z
     ruijieFirmwareUpgrade: createBooleanStringSchema(true),
     ruijieTimeout: numericStringSchema,
 
-    // FortiGate (FortiOS REST API, read-only; optional)
+    // FortiGate (FortiOS REST API; optional)
     fortigateBaseUrl: z.string().url({ message: 'FORTIGATE_BASE_URL must be a valid URL' }).optional(),
     fortigateToken: z.string().min(1).optional(),
     fortigateStrictSsl: createBooleanStringSchema(true),
@@ -69,6 +69,7 @@ const envSchema = z
         .optional()
         .refine((v) => v === undefined || normalizeFingerprint(v) !== undefined, { message: 'FORTIGATE_CERT_SHA256 must be a SHA-256 fingerprint (64 hex digits, colons allowed)' }),
     fortigateVdom: z.string().regex(/^[A-Za-z0-9._-]{1,64}$/, { message: 'FORTIGATE_VDOM must be a VDOM name' }).optional(),
+    fortigateReadOnly: createBooleanStringSchema(false),
     fortigateTimeout: numericStringSchema,
 
     // Pre-registered REST actions for the invokeAction tool (optional; raw JSON,
@@ -253,6 +254,8 @@ export interface EnvironmentConfig {
   /** The FortiGate certificate's SHA-256 fingerprint: trusted exactly, instead of a CA. */
   fortigateCertSha256?: string;
   fortigateVdom?: string;
+  /** FORTIGATE_READ_ONLY: every change through the tools is refused. */
+  fortigateReadOnly: boolean;
   fortigateTimeout?: number;
 
   // AI Provider Configuration
@@ -353,6 +356,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     fortigateStrictSsl: env.FORTIGATE_STRICT_SSL,
     fortigateCertSha256: env.FORTIGATE_CERT_SHA256,
     fortigateVdom: env.FORTIGATE_VDOM,
+    fortigateReadOnly: env.FORTIGATE_READ_ONLY,
     fortigateTimeout: env.FORTIGATE_TIMEOUT,
 
     // Pre-registered REST actions
@@ -475,6 +479,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EnvironmentCon
     fortigateStrictSsl: parsed.data.fortigateStrictSsl,
     fortigateCertSha256: parsed.data.fortigateCertSha256 === undefined ? undefined : normalizeFingerprint(parsed.data.fortigateCertSha256),
     fortigateVdom: parsed.data.fortigateVdom,
+    fortigateReadOnly: parsed.data.fortigateReadOnly,
     fortigateTimeout: parsed.data.fortigateTimeout,
 
     // Pre-registered REST actions (throws on malformed JSON — config typos fail loudly)

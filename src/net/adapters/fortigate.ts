@@ -1,5 +1,6 @@
 /**
- * FortiGate adapter for the vendor-neutral net_* tools, READ-ONLY (FortiOS 7.x REST API).
+ * FortiGate adapter for the vendor-neutral net_* tools (FortiOS 7.x REST API). It reads everything
+ * below; of the changes it makes only DHCP reservations so far (2.7.0), the rest is refused.
  *
  * What it reads (src/fortigateClient):
  * - networks: cmdb system/interface (routed LAN interfaces: physical, hardware switch, VLAN,
@@ -16,12 +17,23 @@
  * - reservations: the DHCP servers' reserved addresses; clients: DHCP leases + the ARP table.
  * - firmware: monitor system/firmware (running and offered versions).
  *
- * Every change is refused (UNSUPPORTED): writes come only once the owner decides on them.
+ * Changes (2.7.0): DHCP reservations, through the reserved-address child table of the network's
+ * DHCP server, as the FortiGate's GUI writes them (mapped live on a FortiGate 80F, FortiOS 7.4.4):
+ * POST system.dhcp/server/<id>/reserved-address {type: "mac", mac, ip, action: "reserved",
+ * description}, PUT .../reserved-address/<entry> to change one, DELETE to remove it. FortiOS itself
+ * refuses a MAC or address twice in one server (error -15) and an address outside the server's
+ * subnet (-8); the plan refuses those first, with the reason. Moving a reservation to another
+ * network adds it there before removing the old one, so the device is never without one. Every
+ * change is planned again right before writing (CONFLICT if anything changed) and read back.
+ * FORTIGATE_READ_ONLY=true refuses them all. Everything else is refused (UNSUPPORTED).
  */
+
+import { createHash } from 'node:crypto';
 
 import { formatMac, normalizeMac } from '../../omadaClient/client.js';
 import { FortiGateError, type FortiGateClient } from '../../fortigateClient/index.js';
 import { inSubnet, ipToNumber, parseCidr, subnetsOverlap } from '../../utils/ipv4.js';
+import { checkReservationDelete, checkReservationSet } from '../reservations.js';
 import {
     NetError,
     type ApplyResult,
@@ -47,7 +59,10 @@ import {
 
 type Raw = Record<string, unknown>;
 
-export const FORTIGATE_READ_ONLY = 'The FortiGate is read-only through these tools for now; make changes in its web UI.';
+export const FORTIGATE_READ_ONLY = 'The FortiGate changes only DHCP reservations through these tools for now; make other changes in its web UI.';
+export const FORTIGATE_READ_ONLY_SETTING = 'The FortiGate is read-only here (FORTIGATE_READ_ONLY=true); nothing is changed through these tools.';
+/** The vendor object a reservation step writes. */
+const RESERVATION_OBJECT = 'fortigate.system.dhcp/server.reserved-address';
 
 export interface FortiGateAdapterOptions {
     /** Defaults to "fortigate:<host>". */
@@ -103,6 +118,10 @@ export class FortiGateNetworkController implements NetworkController {
     readonly vendor = 'fortigate' as const;
     readonly id: string;
     private readonly serverAddresses: number[];
+    /** What each plan will write, kept for apply() (a plan is planned again there first). */
+    private readonly executors = new WeakMap<Plan, () => Promise<ApplyResult>>();
+    /** Changes run one at a time, each planned again against the state the last one left. */
+    private queue: Promise<unknown> = Promise.resolve();
 
     constructor(
         private readonly client: FortiGateClient,
@@ -126,7 +145,7 @@ export class FortiGateNetworkController implements NetworkController {
             ports: { profiles: 'unsupported', assign: 'unsupported' },
             rules: { between: 'unsupported', toInternet: 'unsupported', deviceMatch: 'unsupported', wifiMatch: 'unsupported', stateful: 'unsupported', schedule: 'unsupported' },
             groups: { address: 'unsupported', mac: 'unsupported' },
-            reservations: 'unsupported',
+            reservations: this.client.readOnly ? 'unsupported' : 'native',
             mdnsRepeater: 'unsupported',
             firmware: 'unsupported',
         };
@@ -327,7 +346,8 @@ export class FortiGateNetworkController implements NetworkController {
                 const mac = macOf(r.mac);
                 // "reserved" (the default) fixes the address; "assign" and "block" are MAC access rules.
                 const action = text(r.action) || 'reserved';
-                if (!mac || action !== 'reserved' || !text(r.ip) || text(r.ip) === '0.0.0.0') continue;
+                // An option-82 entry reserves an address for a switch port (circuit/remote id), not a device.
+                if (!mac || action !== 'reserved' || (text(r.type) || 'mac') !== 'mac' || !text(r.ip) || text(r.ip) === '0.0.0.0') continue;
                 out.push({ mac, ip: text(r.ip), network: { id: text(server.interface) }, ...(text(r.description) ? { description: text(r.description) } : {}) });
             }
         }
@@ -397,11 +417,227 @@ export class FortiGateNetworkController implements NetworkController {
     }
 
     async plan(change: Change): Promise<Plan> {
-        throw new NetError('UNSUPPORTED', FORTIGATE_READ_ONLY, { capability: change.kind });
+        if (change.kind !== 'reservation') throw new NetError('UNSUPPORTED', FORTIGATE_READ_ONLY, { capability: change.kind });
+        if (this.client.readOnly) throw new NetError('UNSUPPORTED', FORTIGATE_READ_ONLY_SETTING, { capability: 'reservations' });
+        return await this.planReservation(change);
     }
 
-    async apply(): Promise<ApplyResult> {
-        throw new NetError('UNSUPPORTED', FORTIGATE_READ_ONLY);
+    async apply(plan: Plan, options: { allowLockout?: boolean } = {}): Promise<ApplyResult> {
+        const run = this.queue.then(async () => {
+            // Planned again right before writing: anything changed since is a CONFLICT.
+            const fresh = await this.plan(plan.change);
+            if (fresh.basis !== plan.basis) throw new NetError('CONFLICT', 'The FortiGate changed after this change was planned; nothing was written. Plan it again.');
+            if (fresh.wouldLockOut.length && !options.allowLockout) {
+                throw new NetError('LOCKOUT', `This moves ${fresh.wouldLockOut.length} online device(s) to another address at their next DHCP renewal. Nothing was changed; repeat with allowLockout and the dry run's basis if that is intended.`, {
+                    clients: fresh.wouldLockOut,
+                });
+            }
+            return await this.executors.get(fresh)!();
+        });
+        this.queue = run.catch(() => undefined);
+        return await run;
+    }
+
+    /**
+     * Plans setting or removing one DHCP reservation. The basis covers the networks, every DHCP
+     * server's subnet and reserved-address table, and the devices the change moves.
+     */
+    private async planReservation(change: Extract<Change, { kind: 'reservation' }>): Promise<Plan> {
+        const interfaces = list((await this.client.cmdb<Raw[]>('system', 'interface')).results);
+        // Not swallowed here: without the DHCP servers no reservation can be planned.
+        const servers = list((await this.client.cmdb<Raw[]>('system.dhcp', 'server')).results);
+        const networks = interfaces.filter((raw) => this.routed(raw)).flatMap((raw) => [this.toNetwork(raw, servers), ...this.secondaryNetworks(raw)]);
+        const entries = servers.flatMap((server) => list(server['reserved-address']).map((entry) => ({ server, entry })));
+        const isReservation = ({ entry }: { entry: Raw }) =>
+            (text(entry.action) || 'reserved') === 'reserved' && (text(entry.type) || 'mac') === 'mac' && macOf(entry.mac) !== undefined && text(entry.ip) !== '' && text(entry.ip) !== '0.0.0.0';
+        const reservations: Reservation[] = entries.filter(isReservation).map(({ server, entry }) => ({
+            mac: macOf(entry.mac)!,
+            ip: text(entry.ip),
+            network: { id: text(server.interface) },
+            ...(text(entry.description) ? { description: text(entry.description) } : {}),
+        }));
+        const clients = await this.listClients();
+        const world = { networks, reservations, clients };
+        const where = (server: Raw) => `DHCP server ${text(server.id)} (${text(server.interface)})`;
+        const reservedOf = (mac: string) => entries.filter((e) => isReservation(e) && normalizeMac(text(e.entry.mac)) === normalizeMac(mac));
+        const single = (mac: string) => {
+            const found = reservedOf(mac);
+            if (found.length > 1) throw new NetError('INVALID', `${formatMac(mac)} is reserved on several DHCP servers (${found.map((f) => where(f.server)).join(', ')}); fix that in the FortiGate's UI first`);
+            return found[0];
+        };
+
+        // This server's own reservation is never moved or removed, and its address never reserved for
+        // another device (as on Omada): moving it would cut this server off at its next renewal.
+        const serverAt = (ip: string | undefined) => {
+            try {
+                return ip !== undefined && this.serverAddresses.includes(ipToNumber(ip));
+            } catch {
+                return false;
+            }
+        };
+        const serverMacs = new Set(clients.filter((c) => serverAt(c.ip)).map((c) => normalizeMac(c.mac)));
+        const hostNumber = (() => {
+            try {
+                return ipToNumber(this.client.host);
+            } catch {
+                return undefined;
+            }
+        })();
+        // Without MCP_SERVER_ADDRESSES, and reaching the FortiGate from one of its LAN networks, this
+        // server may be any device there: no existing reservation is moved or removed then.
+        const whereUnknown = this.serverAddresses.length === 0 && hostNumber !== undefined && networks.some((n) => n.gateway && inSubnet(hostNumber, n.gateway));
+        const guard = (mac: string, current: Reservation | undefined, ip?: string) => {
+            if (ip !== undefined && serverAt(ip) && !serverMacs.has(normalizeMac(mac)) && current?.ip !== ip) {
+                throw new NetError('PROTECTED', `${ip} is this server's address (MCP_SERVER_ADDRESSES); it is never reserved for another device`);
+            }
+            const touched = current !== undefined && (ip === undefined || current.ip !== ip);
+            if (!touched) return;
+            if (serverAt(current.ip) || serverMacs.has(normalizeMac(mac))) {
+                throw new NetError('PROTECTED', "This is this server's reservation: it is never moved or removed (this server would lose its address at its next renewal)");
+            }
+            if (whereUnknown) {
+                throw new NetError(
+                    'PROTECTED',
+                    'Where this server is can\'t be told (MCP_SERVER_ADDRESSES is not set, and it reaches the FortiGate from one of its LAN networks), so no existing reservation is moved or removed; set MCP_SERVER_ADDRESSES'
+                );
+            }
+        };
+
+        const steps: Plan['steps'] = [];
+        let effects: string[];
+        let wouldLockOut: Plan['wouldLockOut'] = [];
+        let execute: () => Promise<ApplyResult>;
+        const segmentsOf = (server: Raw, entry?: Raw) => ['system.dhcp', 'server', text(server.id), 'reserved-address', ...(entry ? [text(entry.id)] : [])];
+
+        if (change.op === 'delete') {
+            const checked = checkReservationDelete(change.mac, world);
+            const old = single(checked.mac)!;
+            guard(checked.mac, checked.current);
+            effects = checked.effects;
+            steps.push({ ...checked.step, object: RESERVATION_OBJECT, detail: `${checked.current.ip} on ${where(old.server)}` });
+            execute = async () => {
+                await this.send(() => this.client.cmdbWrite('DELETE', segmentsOf(old.server, old.entry)));
+                return await this.readBack(checked.mac, (after) => after === undefined);
+            };
+        } else {
+            const checked = checkReservationSet(change.value, world, { descriptions: true });
+            // The network's own DHCP server hands the address out.
+            const own = servers.filter((s) => text(s.interface) === checked.network.id);
+            if (!own.length) throw new NetError('INVALID', `'${checked.network.name}' has no DHCP server on the FortiGate, so nothing would hand the address out`);
+            if (own.length > 1) throw new NetError('INVALID', `'${checked.network.name}' has several DHCP servers (${own.map((s) => text(s.id)).join(', ')}); which one hands the address out is not clear, so it is refused`);
+            const server = own[0];
+            if (text(server.status) === 'disable') throw new NetError('INVALID', `The DHCP server on '${checked.network.name}' is switched off; switch it on in the FortiGate's UI first`);
+            // FortiOS refuses an address outside the subnet the server hands out (error -8).
+            const iface = interfaces.find((i) => text(i.name) === checked.network.id);
+            const prefix = maskToPrefix(text(server.netmask));
+            const base = text(server['default-gateway']) && text(server['default-gateway']) !== '0.0.0.0' ? text(server['default-gateway']) : (toCidr(iface?.ip) ?? '').split('/')[0];
+            if (prefix !== undefined && base) {
+                const served = parseCidr(`${base}/${prefix}`);
+                const cidr = `${[24, 16, 8, 0].map((shift) => Math.floor(served.network / 2 ** shift) % 256).join('.')}/${prefix}`;
+                if (!inSubnet(ipToNumber(checked.ip), cidr)) throw new NetError('INVALID', `The DHCP server on '${checked.network.name}' serves ${cidr}; ${checked.ip} is outside it`);
+            }
+            // A FortiOS MAC access entry for this device is the FortiGate's own rule: left alone.
+            const access = entries.find(({ entry }) => (text(entry.action) || 'reserved') !== 'reserved' && normalizeMac(text(entry.mac)) === normalizeMac(checked.mac));
+            if (access) {
+                throw new NetError('INVALID', `${checked.mac} has a FortiOS MAC access entry (${text(access.entry.action)}) on ${where(access.server)}; change that in the FortiGate's UI, it is not a reservation`);
+            }
+            // Any other entry holding the address (a block entry, an option-82 reservation) makes it taken.
+            const holder = entries.find(({ entry }) => text(entry.ip) === checked.ip && normalizeMac(text(entry.mac)) !== normalizeMac(checked.mac));
+            if (holder) throw new NetError('EXISTS', `${checked.ip} is already held by entry ${text(holder.entry.id)} on ${where(holder.server)}`);
+            const old = single(checked.mac);
+            guard(checked.mac, checked.current, checked.ip);
+            ({ effects, wouldLockOut } = checked);
+            const mac = checked.mac.toLowerCase().replace(/-/g, ':');
+            const expectAfter = (after: Reservation | undefined) =>
+                after?.ip === checked.ip && 'id' in after.network && after.network.id === checked.network.id && (checked.description === undefined || after.description === checked.description);
+            if (old && old.server === server) {
+                steps.push({ ...checked.step, object: RESERVATION_OBJECT, detail: `${old.entry.ip === checked.ip ? checked.ip : `${text(old.entry.ip)} → ${checked.ip}`} on ${where(server)}` });
+                const body = { ip: checked.ip, ...(change.value.description !== undefined ? { description: checked.description } : {}) };
+                execute = async () => {
+                    await this.send(() => this.client.cmdbWrite('PUT', segmentsOf(server, old.entry), body));
+                    return await this.readBack(checked.mac, expectAfter);
+                };
+            } else {
+                const body = { type: 'mac', mac, ip: checked.ip, action: 'reserved', ...(checked.description ? { description: checked.description } : {}) };
+                steps.push({ ...checked.step, action: 'create', object: RESERVATION_OBJECT, detail: `${checked.ip} on ${where(server)}` });
+                if (old) steps.push({ action: 'delete', object: RESERVATION_OBJECT, name: checked.step.name, detail: `${text(old.entry.ip)} on ${where(old.server)}` });
+                execute = async () => {
+                    await this.send(() => this.client.cmdbWrite('POST', segmentsOf(server), body));
+                    const warnings: string[] = [];
+                    if (old) {
+                        // The new one is in place: the old one left behind is a warning, not a failure.
+                        try {
+                            await this.client.cmdbWrite('DELETE', segmentsOf(old.server, old.entry));
+                        } catch (error) {
+                            warnings.push(
+                                error instanceof FortiGateError && error.maybeDone
+                                    ? `The new reservation is in place; removing the old reservation of ${text(old.entry.ip)} on ${where(old.server)} got no answer, so it may still be there: check net_listReservations.`
+                                    : `The new reservation is in place, but the old reservation of ${text(old.entry.ip)} on ${where(old.server)} is still there (removing it failed); remove it in the FortiGate's UI.`
+                            );
+                        }
+                    }
+                    // With the old entry left behind the device has two: the new one must be among them.
+                    const result = await this.readBack(checked.mac, expectAfter, warnings.length > 0);
+                    return warnings.length ? { ...result, warnings: [...(result.warnings ?? []), ...warnings] } : result;
+                };
+            }
+        }
+
+        const basisOf = {
+            change,
+            controller: this.id,
+            networks,
+            servers: servers.map((s) => ({
+                id: s.id,
+                interface: s.interface,
+                status: s.status,
+                netmask: s.netmask,
+                gateway: s['default-gateway'],
+                entries: list(s['reserved-address']).map((e) => ({ id: e.id, type: e.type, mac: e.mac, ip: e.ip, action: e.action, description: e.description })),
+            })),
+            lockOut: wouldLockOut.map((c) => `${c.mac}@${c.ip ?? ''}`).sort(),
+        };
+        const plan: Plan = {
+            change,
+            vendor: 'fortigate',
+            steps,
+            effects,
+            wouldLockOut,
+            basis: createHash('sha256').update(JSON.stringify(basisOf)).digest('hex').slice(0, 16),
+        };
+        this.executors.set(plan, execute);
+        return plan;
+    }
+
+    /** One write; one sent without an answer may or may not be stored, and says so. */
+    private async send(write: () => Promise<unknown>): Promise<void> {
+        try {
+            await write();
+        } catch (error) {
+            if (error instanceof FortiGateError && error.maybeDone) {
+                throw new FortiGateError('The FortiGate stopped answering while the reservation was being sent, so it may or may not be stored; check net_listReservations before trying again.', 'unreachable', true);
+            }
+            throw error;
+        }
+    }
+
+    /** Reads the device's reservation back after a write: something else stored is a CONFLICT. */
+    private async readBack(mac: string, expected: (after: Reservation | undefined) => boolean, oldMayRemain = false): Promise<ApplyResult> {
+        let after: Reservation[];
+        try {
+            after = await this.listReservations();
+        } catch {
+            return { applied: true, owned: [], warnings: ['The FortiGate accepted the reservation change, but reading it back failed; check it with net_listReservations.'] };
+        }
+        const mine = after.filter((r) => normalizeMac(r.mac) === normalizeMac(mac));
+        const found = mine.find((r) => expected(r));
+        // Exactly what was asked: one reservation as expected, or none after a removal. A move whose
+        // old entry stayed (a warning already) may show both; the new one must be among them.
+        const ok = oldMayRemain ? found !== undefined : mine.length === 0 ? expected(undefined) : mine.length === 1 && found !== undefined;
+        if (!ok) {
+            throw new NetError('CONFLICT', 'The FortiGate accepted the reservation change but shows something else now; check it with net_listReservations.');
+        }
+        return { applied: true, ...(found ? { object: found } : {}), owned: [] };
     }
 }
 

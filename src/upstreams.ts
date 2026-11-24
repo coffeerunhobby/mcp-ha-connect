@@ -128,6 +128,7 @@ export const defaultFactories: UpstreamFactories = {
       strictSsl: config.fortigateStrictSsl,
       certSha256: config.fortigateCertSha256,
       vdom: config.fortigateVdom,
+      readOnly: config.fortigateReadOnly,
       serverAddresses: config.serverAddresses,
       timeout: config.fortigateTimeout,
     }),
@@ -264,7 +265,7 @@ export async function connectUpstreams(
     logger.info('Ruijie plugin disabled');
   }
 
-  // FortiGate (read-only)
+  // FortiGate
   if (config.fortigatePluginEnabled) {
     if (config.fortigateBaseUrl && config.fortigateToken) {
       let fortigateClient: FortiGateClient | undefined;

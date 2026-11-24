@@ -12,7 +12,7 @@ import type { LocalAIClient } from '../src/localAI/index.js';
 import type { OmadaClient } from '../src/omadaClient/index.js';
 import { RuijieError, type RuijieClient } from '../src/ruijieClient/index.js';
 import { FortiGateError, type FortiGateClient } from '../src/fortigateClient/index.js';
-import { connectUpstreams, DEFAULT_BACKOFF, OMADA_SITE_DISABLED_MESSAGE, retryInBackground, type UpstreamFactories, type Upstreams } from '../src/upstreams.js';
+import { connectUpstreams, DEFAULT_BACKOFF, defaultFactories, OMADA_SITE_DISABLED_MESSAGE, retryInBackground, type UpstreamFactories, type Upstreams } from '../src/upstreams.js';
 import { logger } from '../src/utils/logger.js';
 
 vi.mock('../src/utils/logger.js');
@@ -310,6 +310,14 @@ describe('retryInBackground', () => {
     release();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(attempt).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('defaultFactories: the FortiGate client', () => {
+  it('passes FORTIGATE_READ_ONLY on', () => {
+    const base = { fortigateBaseUrl: 'https://192.0.2.99', fortigateToken: 'tok', fortigateStrictSsl: true, serverAddresses: [] } as unknown as EnvironmentConfig;
+    expect(defaultFactories.fortigate({ ...base, fortigateReadOnly: true } as EnvironmentConfig).readOnly).toBe(true);
+    expect(defaultFactories.fortigate({ ...base, fortigateReadOnly: false } as EnvironmentConfig).readOnly).toBe(false);
   });
 });
 
