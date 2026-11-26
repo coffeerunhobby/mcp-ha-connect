@@ -693,20 +693,11 @@ export class FortiGateNetworkController implements NetworkController {
             const expected = toRule(written, at - 1, ctx);
             return found !== undefined && found.position === at && !found.foreign && (['name', 'action', 'from', 'to', 'protocol', 'replies', 'enabled'] as const).every((key) => JSON.stringify(found[key]) === JSON.stringify(expected[key]));
         };
-        /** Address objects these tools made that no policy (but `except`) or group uses any more. */
-        const unused = (addrs: string[], except: Raw) =>
-            [...new Set(addrs)].filter(
-                (name) =>
-                    text(context.addresses.get(name)?.comment) === OWNED_ADDRESS_COMMENT &&
-                    !policies.some((p) => p !== except && [...names(p.srcaddr), ...names(p.dstaddr)].includes(name)) &&
-                    !groupsRaw.some((g) => names(g.member).includes(name))
-            );
         const objectSteps = (create: PolicySide['create']): Plan['steps'] => create.map((c) => ({ action: 'create', object: ADDRESS_OBJECT, name: c.name, detail: c.subnet.replace(' ', ' mask ') }));
-        const dropSteps = (drop: string[]): Plan['steps'] => drop.map((name) => ({ action: 'delete', object: ADDRESS_OBJECT, name, detail: 'no rule uses it any more' }));
-        const objectEffects = (create: PolicySide['create'], drop: string[]) => [
-            ...(create.length ? [`Address object(s) ${create.map((c) => c.name).join(', ')} are created for the addresses; they are removed with the last rule using them.`] : []),
-            ...(drop.length ? [`Address object(s) ${drop.join(', ')}, made for an earlier rule, are removed: nothing uses them any more.`] : []),
-        ];
+        // Address objects stay after their rules: which ones these tools made can't be proven later (a
+        // comment can be copied), and an unused one does no harm; the next rule with that address uses it.
+        const objectEffects = (create: PolicySide['create']) =>
+            create.length ? [`Address object(s) ${create.map((c) => c.name).join(', ')} are created for the addresses; they stay when the rule goes (reused by later rules; remove them in the FortiGate's UI if no longer wanted).`] : [];
         const IMPLICIT_DENY = 'Policies are checked from the top and the first match decides; traffic no policy allows is dropped.';
 
         let steps: Plan['steps'];
@@ -728,7 +719,7 @@ export class FortiGateNetworkController implements NetworkController {
                 ...(body.action === 'deny' ? ['New connections are stopped; replies to connections started from the other side still pass.'] : []),
                 ...(body.nat === 'enable' ? ["NAT is on: the devices reach the internet through the FortiGate's WAN address."] : []),
                 `It is policy ${at} of ${policies.length + 1}. ${IMPLICIT_DENY}`,
-                ...objectEffects(create, []),
+                ...objectEffects(create),
             ];
             execute = async () => {
                 const made: string[] = [];
@@ -774,17 +765,13 @@ export class FortiGateNetworkController implements NetworkController {
             const { raw, rule } = editable(change.ref, 'deleted');
             if (text(raw.action) === 'accept' && mayMatchServer(raw, world)) throw cutsOff(`Removing the allow '${rule.name}'`);
             const id = text(raw.policyid);
-            const drop = unused([...names(raw.srcaddr), ...names(raw.dstaddr)], raw);
-            steps = [{ action: 'delete', object: POLICY_OBJECT, name: rule.name }, ...dropSteps(drop)];
+            steps = [{ action: 'delete', object: POLICY_OBJECT, name: rule.name }];
             effects = [
                 `Policy '${rule.name}' is removed${rule.enabled ? `; the traffic it matched follows the policies below it${text(raw.action) === 'accept' ? ', and is dropped if none allows it' : ''}` : ' (it was switched off)'}.`,
-                ...objectEffects([], drop),
             ];
             execute = async () => {
                 await this.send(() => this.client.cmdbWrite('DELETE', ['firewall', 'policy', id]), 'the delete of the policy', 'net_listRules');
-                const warnings = await this.dropAddresses(drop);
-                const result = await this.ruleReadBack(id, (r) => r === undefined);
-                return warnings.length ? { ...result, warnings: [...(result.warnings ?? []), ...warnings] } : result;
+                return await this.ruleReadBack(id, (r) => r === undefined);
             };
         } else if (change.op === 'move') {
             const { raw, rule } = editable(change.ref, 'moved');
@@ -848,17 +835,15 @@ export class FortiGateNetworkController implements NetworkController {
                 if (text(merged.action) === 'deny' && mayMatchServer(merged, worldWith(create))) throw cutsOff(`The block '${rule.name}' as changed`);
             }
             const created = create.filter((c) => [...names(merged.srcaddr), ...names(merged.dstaddr)].includes(c.name));
-            const drop = unused([...names(raw.srcaddr), ...names(raw.dstaddr)].filter((n) => ![...names(merged.srcaddr), ...names(merged.dstaddr)].includes(n)), raw);
             steps = [
                 ...objectSteps(created),
                 { action: 'update', object: POLICY_OBJECT, name: rule.name, detail: [Object.keys(patch).length ? describePolicy(merged) : '', moves ? `position ${to}` : ''].filter(Boolean).join('; ') },
-                ...dropSteps(drop),
             ];
             effects = [
                 `Policy '${rule.name}' becomes: ${describePolicy(merged)}${text(merged.status) === 'disable' ? ' (switched off)' : ''}, at position ${to}.`,
                 ...(patch.nat !== undefined ? [patch.nat === 'enable' ? "NAT is switched on: the devices reach the internet through the FortiGate's WAN address." : 'NAT is switched off.'] : []),
                 ...(moves ? [IMPLICIT_DENY] : []),
-                ...objectEffects(created, drop),
+                ...objectEffects(created),
             ];
             const others = policies.filter((p) => p !== raw);
             execute = async () => {
@@ -893,9 +878,7 @@ export class FortiGateNetworkController implements NetworkController {
                         `Changing policy '${rule.name}' failed halfway${moved && !back ? `: it is at position ${to} (it was at ${rule.position}) with its old settings` : ''}${dropped ? '' : ', and address objects made for it may be left'}. Check net_listRules.`
                     );
                 }
-                const warnings = await this.dropAddresses(drop);
-                const result = await this.ruleReadBack(id, same(merged, to, withObjects(created)));
-                return warnings.length ? { ...result, warnings: [...(result.warnings ?? []), ...warnings] } : result;
+                return await this.ruleReadBack(id, same(merged, to, withObjects(created)));
             };
         }
 
@@ -938,7 +921,7 @@ export class FortiGateNetworkController implements NetworkController {
         }
     }
 
-    /** Removes address objects these tools made; each one that stays is a warning. */
+    /** Removes address objects made by a change that couldn't be finished; each one that stays is a warning. */
     private async dropAddresses(objects: string[]): Promise<string[]> {
         const warnings: string[] = [];
         for (const name of [...objects].reverse()) {

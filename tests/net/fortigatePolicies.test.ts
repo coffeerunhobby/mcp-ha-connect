@@ -212,7 +212,7 @@ describe('FortiGate policies: create', () => {
         const f = fortigate();
         const plan = await f.adapter.plan(create({ name: 'cam to dns', from: [{ addresses: ['192.168.20.5'] }], to: [{ addresses: ['9.9.9.9'] }], protocol: 'udp' }));
         expect(plan.steps[0]).toEqual({ action: 'create', object: 'fortigate.firewall/address', name: 'net-192.168.20.5', detail: '192.168.20.5 mask 255.255.255.255' });
-        expect(plan.effects).toContain('Address object(s) net-192.168.20.5 are created for the addresses; they are removed with the last rule using them.');
+        expect(plan.effects).toContain("Address object(s) net-192.168.20.5 are created for the addresses; they stay when the rule goes (reused by later rules; remove them in the FortiGate's UI if no longer wanted).");
         const result = await f.adapter.apply(plan);
         expect(f.writes[0]).toEqual({ method: 'POST', segments: ['firewall', 'address'], body: { name: 'net-192.168.20.5', type: 'ipmask', subnet: '192.168.20.5 255.255.255.255', comment: OWNED_ADDRESS_COMMENT } });
         expect(f.writes[1].body).toMatchObject({ srcintf: intf('iot'), srcaddr: intf('net-192.168.20.5'), dstintf: intf('wan1', 'wan2'), dstaddr: intf('dns'), service: intf('ALL_UDP') });
@@ -411,35 +411,19 @@ describe('FortiGate policies: delete, move, update', () => {
         expect(result).toEqual({ applied: true, owned: [] });
     });
 
-    it('removes the address objects it made once no rule or group uses them', async () => {
+    it('address objects stay when their rules go (a comment proves nothing), and the next rule reuses them (Codex)', async () => {
         const f = fortigate();
         await run(f, create({ name: 'a', from: [{ addresses: ['192.168.20.5'] }] }));
-        await run(f, create({ name: 'b', from: [{ addresses: ['192.168.20.5', '192.168.20.6'] }], to: [{ network: { name: 'Home LAN' } }] }));
+        const plan = await f.adapter.plan(remove('a'));
+        expect(plan.steps).toEqual([{ action: 'delete', object: 'fortigate.firewall/policy', name: 'a' }]);
         f.writes.length = 0;
-        const first = await f.adapter.plan(remove('a'));
-        expect(first.steps).toHaveLength(1);
-        await f.adapter.apply(first);
+        await f.adapter.apply(plan);
+        expect(f.writes).toEqual([{ method: 'DELETE', segments: ['firewall', 'policy', '8'] }]);
         expect(f.state.addresses.some((a) => a.name === 'net-192.168.20.5')).toBe(true);
-        const second = await f.adapter.plan(remove('b'));
-        expect(second.steps.slice(1)).toEqual([
-            { action: 'delete', object: 'fortigate.firewall/address', name: 'net-192.168.20.5', detail: 'no rule uses it any more' },
-            { action: 'delete', object: 'fortigate.firewall/address', name: 'net-192.168.20.6', detail: 'no rule uses it any more' },
-        ]);
-        await f.adapter.apply(second);
-        expect(f.state.addresses.map((a) => a.name)).toEqual(fx.addresses.map((a) => a.name));
-    });
-
-    it('never removes an address object it didn\'t make, or one a group holds; one that won\'t go is a warning', async () => {
-        const f = fortigate();
-        await run(f, create({ name: 'a', from: [{ addresses: ['192.168.20.5'] }] }));
-        await run(f, create({ name: 'c', from: [{ addresses: ['192.168.20.9'] }] }));
-        f.state.groups.push({ name: 'g', member: [{ name: 'net-192.168.20.5' }] });
-        f.state.policies.push({ policyid: 30, name: 'x', status: 'enable', srcintf: intf('lan'), dstintf: intf('wan1'), srcaddr: intf('node-c6'), dstaddr: intf('all'), action: 'accept', service: intf('ALL'), schedule: 'always' });
-        expect((await f.adapter.plan(remove('a'))).steps).toHaveLength(1);
-        expect((await f.adapter.plan(remove('x'))).steps).toHaveLength(1);
-        f.hooks.failWrite = (w) => (w.method === 'DELETE' && w.segments[1] === 'address' ? new FortiGateError('in use (-23)') : undefined);
-        const result = await run(f, remove('c'));
-        expect(result.warnings).toEqual(["The address object 'net-192.168.20.9' made for a rule couldn't be removed (something else may use it); remove it in the FortiGate's UI if nothing does."]);
+        f.writes.length = 0;
+        await run(f, create({ name: 'b', from: [{ addresses: ['192.168.20.5'] }] }));
+        expect(f.writes.filter((w) => w.segments[1] === 'address')).toEqual([]);
+        expect(f.state.policies.at(-1)).toMatchObject({ srcaddr: intf('net-192.168.20.5') });
     });
 
     it("an address object it didn't make stays, even when no rule uses it any more", async () => {
@@ -509,12 +493,13 @@ describe('FortiGate policies: delete, move, update', () => {
         expect(f.writes[0].body).toEqual({ action: 'deny', nat: 'disable', 'match-vip': 'enable' });
     });
 
-    it('new addresses on one side make an object, the old owned one goes', async () => {
+    it('new addresses on one side make an object; the old one stays', async () => {
         const f = fortigate();
         await run(f, create({ name: 'a', from: [{ addresses: ['192.168.20.5'] }] }));
         f.writes.length = 0;
         const result = await run(f, update('a', { from: [{ addresses: ['192.168.20.6'] }], to: [{ network: { name: 'dmz' } }] }));
-        expect(f.writes.map((w) => `${w.method} ${w.segments.join('/')}`)).toEqual(['POST firewall/address', 'PUT firewall/policy/8', 'DELETE firewall/address/net-192.168.20.5']);
+        expect(f.writes.map((w) => `${w.method} ${w.segments.join('/')}`)).toEqual(['POST firewall/address', 'PUT firewall/policy/8']);
+        expect(f.state.addresses.some((a) => a.name === 'net-192.168.20.5')).toBe(true);
         expect(f.writes[1].body).toEqual({ srcaddr: intf('net-192.168.20.6'), dstintf: intf('dmz') });
         expect(result.object).toMatchObject({ from: [{ addresses: ['192.168.20.6'] }], to: [{ network: { id: 'dmz' } }] });
     });
@@ -700,6 +685,21 @@ describe('FortiGate policies: when something goes wrong', () => {
         await expect(run(f, update('block IoT to LAN', { protocol: 'tcp', position: 1 }))).rejects.toThrow('refused');
         expect(f.writes.map((w) => w.query ?? w.body)).toEqual([{ action: 'move', before: '1' }, { service: intf('ALL_TCP') }, { action: 'move', before: '3' }]);
         expect(f.state.policies).toEqual(fx.policies);
+    });
+
+    it('a change with a new address object is refused: the object made for it is removed again', async () => {
+        const f = fortigate();
+        f.hooks.failWrite = (w) => (w.method === 'PUT' ? new FortiGateError('refused') : undefined);
+        await expect(run(f, update('block IoT to LAN', { to: [{ addresses: ['192.168.1.70'] }] }))).rejects.toThrow('refused');
+        expect(f.writes.map((w) => `${w.method} ${w.segments.join('/')}`)).toEqual(['POST firewall/address', 'PUT firewall/policy/5', 'DELETE firewall/address/net-192.168.1.70']);
+        expect(f.state.addresses).toEqual(fx.addresses);
+    });
+
+    it('a change with a new address object gets no answer: the object stays (the change may use it), and said so', async () => {
+        const f = fortigate();
+        f.hooks.failWrite = (w) => (w.method === 'PUT' ? new FortiGateError('The FortiGate is not reachable', 'unreachable', true) : undefined);
+        await expect(run(f, update('block IoT to LAN', { to: [{ addresses: ['192.168.1.70'] }] }))).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('address objects made for it may be left') });
+        expect(f.writes.filter((w) => w.method === 'DELETE')).toEqual([]);
     });
 
     it('a change after a move gets no answer: left where it is, and said so', async () => {

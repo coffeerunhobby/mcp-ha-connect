@@ -285,7 +285,7 @@ one is set in the controller's web UI. Reads need `QUERY`, changes `CONFIGURE`.
 | `net_listWifi` | Wi-Fi networks: network, bands, security, isolation, MAC filter |
 | `net_createWifi` / `net_updateWifi` / `net_deleteWifi` | Create or change an SSID on a given network (bands, WPA2/WPA3, PMF, isolation, hidden, 802.11r, MAC filter), or reset its password to a random one |
 | `net_listRules` | Traffic rules in evaluation order (the first match decides); rules the model can't express are shown read-only (`foreign`, with the reason) |
-| `net_createRule` / `net_updateRule` / `net_deleteRule` / `net_moveRule` | Allow or block traffic from networks, a group or addresses to networks, a group, addresses (optionally on ports) or the internet, at a chosen position. **Stateful:** a block stops new connections, replies to connections started from the other side still pass ("block IoT → Home" lets Home still reach IoT). Addresses given in a rule become a group the rule owns and removes with it (on a FortiGate: address objects, removed with the last rule using them). A change after which the controller or this server (`MCP_SERVER_ADDRESSES`) could no longer reach the internet, in its end state or on the way there, is refused; on a FortiGate no policy is changed without `MCP_SERVER_ADDRESSES` |
+| `net_createRule` / `net_updateRule` / `net_deleteRule` / `net_moveRule` | Allow or block traffic from networks, a group or addresses to networks, a group, addresses (optionally on ports) or the internet, at a chosen position. **Stateful:** a block stops new connections, replies to connections started from the other side still pass ("block IoT → Home" lets Home still reach IoT). Addresses given in a rule become a group the rule owns and removes with it (on a FortiGate: address objects, which stay and are reused). A change after which the controller or this server (`MCP_SERVER_ADDRESSES`) could no longer reach the internet, in its end state or on the way there, is refused; on a FortiGate no policy is changed without `MCP_SERVER_ADDRESSES` |
 | `net_listGroups` | Address groups (usable in rules) and MAC groups (Wi-Fi allow/deny lists) |
 | `net_listClients` | Online devices with the network and VLAN each is on (wireless ones too), their Wi-Fi network or switch port; optionally only one network ("what is on VLAN 2?") |
 | `net_listPortProfiles` | Switch port profiles and, when a profile sets them, the networks a port following it carries |
@@ -353,7 +353,8 @@ live-tested on a FortiGate 80F with FortiOS 7.4.13. A rule goes from networks, a
 FortiGate's networks to networks, addresses, a group or the internet (the WAN interfaces), with protocol any, TCP,
 UDP or ICMP (the predefined services `ALL`, `ALL_TCP`, `ALL_UDP`, `ALL_ICMP`). An allow to the internet gets NAT. A
 plain address uses an address object holding exactly it, or gets one (`net-<address>`, with a comment saying it was
-made here) that is removed with the last rule using it. A new policy is written switched off at the bottom, moved
+made here); address objects stay when their rules go (a later rule with that address reuses it; remove unused
+ones in the FortiGate's UI). A new policy is written switched off at the bottom, moved
 into place and then switched on; a move is one call. Refused with the reason: ports (they need a custom service),
 devices (MAC), Wi-Fi, schedules, the FortiGate itself as a destination (that is its local-in policy), the internet
 as a source, addresses partly inside a network, an interface with secondary subnets, names over 35 characters or

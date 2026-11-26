@@ -237,7 +237,7 @@ export function toRule(raw: Raw, index: number, context: RuleContext): Rule {
 
 /** FortiOS policy names are at most 35 characters. */
 export const MAX_POLICY_NAME = 35;
-/** The comment on address objects these tools create for a rule's addresses; they are removed when no rule uses them. */
+/** The comment on address objects these tools create for a rule's addresses (they stay when the rule goes, and are reused). */
 export const OWNED_ADDRESS_COMMENT = 'Made by mcp-ha-connect for a net_ rule';
 /** The services the model's protocols become (the FortiGate's predefined ones). */
 export const SERVICE_OF: Record<'any' | 'tcp' | 'udp' | 'icmp', string> = { any: 'ALL', tcp: 'ALL_TCP', udp: 'ALL_UDP', icmp: 'ALL_ICMP' };
