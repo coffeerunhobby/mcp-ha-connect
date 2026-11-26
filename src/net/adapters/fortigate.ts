@@ -96,6 +96,9 @@ const RESERVATION_OBJECT = 'fortigate.system.dhcp/server.reserved-address';
 /** The vendor objects a rule step writes. */
 const POLICY_OBJECT = 'fortigate.firewall/policy';
 const ADDRESS_OBJECT = 'fortigate.firewall/address';
+/** A change that stopped while its address objects were being made, with everything it made removed again. */
+const NOTHING_KEPT = () =>
+    new FortiGateError("The FortiGate stopped answering while an address object was being made; nothing of this change was kept (what was stored is removed again). Plan it again.", 'unreachable');
 
 export interface FortiGateAdapterOptions {
     /** Defaults to "fortigate:<host>". */
@@ -723,6 +726,7 @@ export class FortiGateNetworkController implements NetworkController {
             ];
             execute = async () => {
                 const made: string[] = [];
+                const unsure: PolicySide['create'] = [];
                 let id: string | undefined;
                 // Whether the new policy may be stored: only then is it looked for, and only this one is removed.
                 let posted = false;
@@ -737,10 +741,7 @@ export class FortiGateNetworkController implements NetworkController {
                     return mine.length ? text(mine[0].policyid) : undefined;
                 };
                 try {
-                    for (const c of create) {
-                        await this.send(() => this.client.cmdbWrite('POST', ['firewall', 'address'], { name: c.name, type: 'ipmask', subnet: c.subnet, comment: OWNED_ADDRESS_COMMENT }), 'an address object', 'net_listRules');
-                        made.push(c.name);
-                    }
+                    await this.makeObjects(create, made, unsure);
                     let answer: { mkey?: string };
                     try {
                         answer = await this.send(() => this.client.cmdbWrite('POST', ['firewall', 'policy'], written), 'the new policy', 'net_listRules');
@@ -754,10 +755,10 @@ export class FortiGateNetworkController implements NetworkController {
                     if (at <= policies.length) await this.send(() => this.client.cmdbWrite('PUT', ['firewall', 'policy', id!], undefined, moveTo(policies, at)), 'the move of the new policy', 'net_listRules');
                     if (body.status === 'enable') await this.send(() => this.client.cmdbWrite('PUT', ['firewall', 'policy', id!], { status: 'enable' }), 'switching the new policy on', 'net_listRules');
                 } catch (error) {
-                    if (!(await this.undoCreate(posted ? (id ?? findOurs) : undefined, made))) {
+                    if (!(await this.undoCreate(posted ? (id ?? findOurs) : undefined, made, unsure))) {
                         throw new NetError('CONFLICT', `Creating policy '${name}' failed halfway and what it made couldn't all be removed again: the policy may still be stored (switched off or on), and address objects may be left. Check net_listRules.`);
                     }
-                    throw error;
+                    throw unsure.length ? NOTHING_KEPT() : error;
                 }
                 return await this.ruleReadBack(id, same({ ...body, policyid: id }, at, withObjects(create)));
             };
@@ -848,18 +849,21 @@ export class FortiGateNetworkController implements NetworkController {
             const others = policies.filter((p) => p !== raw);
             execute = async () => {
                 const made: string[] = [];
+                const unsure: PolicySide['create'] = [];
                 let moved = false;
                 try {
-                    for (const c of created) {
-                        await this.send(() => this.client.cmdbWrite('POST', ['firewall', 'address'], { name: c.name, type: 'ipmask', subnet: c.subnet, comment: OWNED_ADDRESS_COMMENT }), 'an address object', 'net_listRules');
-                        made.push(c.name);
-                    }
+                    await this.makeObjects(created, made, unsure);
                     if (moves) {
                         await this.send(() => this.client.cmdbWrite('PUT', ['firewall', 'policy', id], undefined, moveTo(others, to)), 'the move of the policy', 'net_listRules');
                         moved = true;
                     }
                     if (Object.keys(patch).length) await this.send(() => this.client.cmdbWrite('PUT', ['firewall', 'policy', id], patch), 'the policy change', 'net_listRules');
                 } catch (error) {
+                    // Failed while making the address objects: the policy is untouched.
+                    if (unsure.length) {
+                        if (await this.dropMade(made, unsure)) throw NOTHING_KEPT();
+                        throw new NetError('CONFLICT', `Changing policy '${rule.name}' failed before the policy was touched, and address objects made for it may be left. Check net_listRules.`);
+                    }
                     // A change that may have been stored is left as it is: undoing it could undo someone else's.
                     const sure = !(error instanceof FortiGateError && error.maybeDone);
                     let back = !moved;
@@ -871,7 +875,7 @@ export class FortiGateNetworkController implements NetworkController {
                             back = false;
                         }
                     }
-                    const dropped = sure ? (await this.dropAddresses(made)).length === 0 : made.length === 0;
+                    const dropped = sure ? await this.dropMade(made, []) : made.length === 0;
                     if (back && dropped) throw error;
                     throw new NetError(
                         'CONFLICT',
@@ -908,17 +912,50 @@ export class FortiGateNetworkController implements NetworkController {
      * gone. The policy is this attempt's own: its id, or the one `find` tells (undefined when it was
      * surely never stored); never another one by its name.
      */
-    private async undoCreate(policy: string | (() => Promise<string | undefined>) | undefined, made: string[]): Promise<boolean> {
+    private async undoCreate(policy: string | (() => Promise<string | undefined>) | undefined, made: string[], unsure: PolicySide['create']): Promise<boolean> {
         try {
             const id = typeof policy === 'function' ? await policy() : policy;
             if (id !== undefined) {
                 await this.client.cmdbWrite('DELETE', ['firewall', 'policy', id]);
                 if (list((await this.client.cmdb<Raw[]>('firewall', 'policy')).results).some((p) => text(p.policyid) === id)) return false;
             }
-            return (await this.dropAddresses(made)).length === 0;
+            return await this.dropMade(made, unsure);
         } catch {
             return false;
         }
+    }
+
+    /** Makes the address objects a change needs, in order: `made` collects them, `unsure` one whose answer got lost. */
+    private async makeObjects(create: PolicySide['create'], made: string[], unsure: PolicySide['create']): Promise<void> {
+        for (const c of create) {
+            try {
+                await this.send(() => this.client.cmdbWrite('POST', ['firewall', 'address'], { name: c.name, type: 'ipmask', subnet: c.subnet, comment: OWNED_ADDRESS_COMMENT }), 'an address object', 'net_listRules');
+            } catch (error) {
+                if (error instanceof FortiGateError && error.maybeDone) unsure.push(c);
+                throw error;
+            }
+            made.push(c.name);
+        }
+    }
+
+    /**
+     * Removes the address objects a change made, and one whose answer got lost when it is stored as
+     * written (the plan saw no object of that name just before); true when none of them is left.
+     */
+    private async dropMade(made: string[], unsure: PolicySide['create']): Promise<boolean> {
+        const drop = [...made];
+        if (unsure.length) {
+            try {
+                const stored = new Map(list((await this.client.cmdb<Raw[]>('firewall', 'address')).results).map((a) => [text(a.name), a]));
+                for (const c of unsure) {
+                    const found = stored.get(c.name);
+                    if (found && text(found.subnet) === c.subnet && text(found.comment) === OWNED_ADDRESS_COMMENT) drop.push(c.name);
+                }
+            } catch {
+                return false;
+            }
+        }
+        return (await this.dropAddresses(drop)).length === 0;
     }
 
     /** Removes address objects made by a change that couldn't be finished; each one that stays is a warning. */

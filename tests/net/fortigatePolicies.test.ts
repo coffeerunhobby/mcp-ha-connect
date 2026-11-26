@@ -532,6 +532,54 @@ describe('FortiGate policies: when something goes wrong', () => {
         expect(f.state.addresses).toEqual(fx.addresses);
     });
 
+    it('the answer to a new address object got lost and it was stored: it is removed again, nothing changed (Codex)', async () => {
+        const f = fortigate();
+        f.hooks.loseAnswer = (w) => (w.method === 'POST' && w.segments[1] === 'address' ? new FortiGateError('The FortiGate is not reachable', 'unreachable', true) : undefined);
+        await expect(run(f, create({ from: [{ addresses: ['192.168.20.5'] }] }))).rejects.toThrow('nothing of this change was kept');
+        expect(f.state.addresses).toEqual(fx.addresses);
+        expect(f.state.policies).toEqual(fx.policies);
+        const g = fortigate();
+        g.hooks.loseAnswer = f.hooks.loseAnswer;
+        await expect(run(g, update('block IoT to LAN', { to: [{ addresses: ['192.168.1.70'] }] }))).rejects.toThrow('nothing of this change was kept');
+        expect(g.state.addresses).toEqual(fx.addresses);
+        expect(g.state.policies).toEqual(fx.policies);
+    });
+
+    it('the answer to a new address object got lost and nothing was stored: nothing is removed, an object of that name saying something else stays', async () => {
+        const f = fortigate();
+        f.hooks.failWrite = (w) => {
+            if (w.method !== 'POST' || w.segments[1] !== 'address') return undefined;
+            f.state.addresses.push({ name: 'net-192.168.20.5', type: 'ipmask', subnet: '192.168.20.5 255.255.255.255', comment: 'mine' });
+            return new FortiGateError('The FortiGate is not reachable', 'unreachable', true);
+        };
+        await expect(run(f, create({ from: [{ addresses: ['192.168.20.5'] }] }))).rejects.toThrow('nothing of this change was kept');
+        expect(f.writes.filter((w) => w.method === 'DELETE')).toEqual([]);
+        expect(f.state.addresses.at(-1)).toMatchObject({ comment: 'mine' });
+    });
+
+    it('the answer to a new address object got lost: one of that name with our comment but another subnet stays', async () => {
+        const f = fortigate();
+        f.hooks.failWrite = (w) => {
+            if (w.method !== 'POST' || w.segments[1] !== 'address') return undefined;
+            f.state.addresses.push({ name: 'net-192.168.20.5', type: 'ipmask', subnet: '192.168.20.6 255.255.255.255', comment: OWNED_ADDRESS_COMMENT });
+            return new FortiGateError('The FortiGate is not reachable', 'unreachable', true);
+        };
+        await expect(run(f, create({ from: [{ addresses: ['192.168.20.5'] }] }))).rejects.toThrow('nothing of this change was kept');
+        expect(f.writes.filter((w) => w.method === 'DELETE')).toEqual([]);
+    });
+
+    it('the answer to a new address object got lost and the check fails: CONFLICT', async () => {
+        const f = fortigate();
+        f.hooks.loseAnswer = (w) => (w.method === 'POST' && w.segments[1] === 'address' ? new FortiGateError('The FortiGate is not reachable', 'unreachable', true) : undefined);
+        const read = f.adapter['client'].cmdb.bind(f.adapter['client']);
+        let reads = 0;
+        (f.adapter['client'] as { cmdb: typeof read }).cmdb = async (...args: Parameters<typeof read>) => {
+            if (args.join('/') === 'firewall/address' && ++reads > 2) throw new FortiGateError('gone', 'unreachable');
+            return await read(...args);
+        };
+        await expect(run(f, create({ from: [{ addresses: ['192.168.20.5'] }] }))).rejects.toMatchObject({ code: 'CONFLICT' });
+    });
+
     it('an address object refused: nothing else is written', async () => {
         const f = fortigate();
         f.hooks.failWrite = (w) => (w.segments[1] === 'address' ? new FortiGateError('refused') : undefined);
