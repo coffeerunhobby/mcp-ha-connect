@@ -218,6 +218,16 @@ describe('FortiGateClient writes (cmdb POST / PUT / DELETE)', () => {
         expect((sent[1].init.headers as Record<string, string>)['Content-Type']).toBeUndefined();
     });
 
+    it("an action's arguments go in the query, after the VDOM; the VDOM can't be chosen there", async () => {
+        const sent = fortigate(() => ok('PUT', 2));
+        await client({ vdom: 'root' }).cmdbWrite('PUT', ['firewall', 'policy', '2'], undefined, { action: 'move', before: '1' });
+        expect(sent[0].url).toBe('https://192.0.2.99/api/v2/cmdb/firewall/policy/2?vdom=root&action=move&before=1');
+        expect(JSON.parse(String(sent[0].init.body))).toEqual({});
+        const f = await failure(client({ vdom: 'root' }).cmdbWrite('PUT', ['firewall', 'policy', '2'], undefined, { VDOM: 'other' }));
+        expect(f.kind).toBe('notFound');
+        expect(sent).toHaveLength(1);
+    });
+
     it('a FortiOS refusal carries only the HTTP status and its numeric error code', async () => {
         fortigate(() => json({ http_method: 'POST', revision_changed: false, cli_error: ['duplicate 02:00:00:00:00:01 at 192.0.2.10'], error: -15, status: 'error', http_status: 500 }, 500));
         const f = await failure(client().cmdbWrite('POST', RES, { ip: '192.168.1.50' }));

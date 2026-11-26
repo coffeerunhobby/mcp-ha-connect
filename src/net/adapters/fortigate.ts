@@ -1,6 +1,6 @@
 /**
  * FortiGate adapter for the vendor-neutral net_* tools (FortiOS 7.x REST API). It reads everything
- * below; of the changes it makes only DHCP reservations so far (2.7.0), the rest is refused.
+ * below; of the changes it makes DHCP reservations (2.7.0) and firewall policies (2.8.0), the rest is refused.
  *
  * What it reads (src/fortigateClient):
  * - networks: cmdb system/interface (routed LAN interfaces: physical, hardware switch, VLAN,
@@ -23,8 +23,14 @@
  * description}, PUT .../reserved-address/<entry> to change one, DELETE to remove it. FortiOS itself
  * refuses a MAC or address twice in one server (error -15) and an address outside the server's
  * subnet (-8); the plan refuses those first, with the reason. Moving a reservation to another
- * network adds it there before removing the old one, so the device is never without one. Every
- * change is planned again right before writing (CONFLICT if anything changed) and read back.
+ * network adds it there before removing the old one, so the device is never without one.
+ *
+ * Changes (2.8.0): firewall policies (mapped live on a FortiGate 80F, FortiOS 7.4.13): POST
+ * firewall/policy adds one at the bottom, PUT firewall/policy/<id>?action=move&before|after=<id>
+ * moves it in one call, PUT changes it, DELETE removes it; FortiOS refuses a name twice (-651) and
+ * an address object in use (-23). See planRule and fortigateRules.ts.
+ *
+ * Every change is planned again right before writing (CONFLICT if anything changed) and read back.
  * FORTIGATE_READ_ONLY=true refuses them all. Everything else is refused (UNSUPPORTED).
  */
 
@@ -32,7 +38,7 @@ import { createHash } from 'node:crypto';
 
 import { formatMac, normalizeMac } from '../../omadaClient/client.js';
 import { FortiGateError, type FortiGateClient } from '../../fortigateClient/index.js';
-import { inSubnet, ipToNumber, parseCidr, subnetsOverlap } from '../../utils/ipv4.js';
+import { inSubnet, ipToNumber, parseCidr } from '../../utils/ipv4.js';
 import { checkReservationDelete, checkReservationSet } from '../reservations.js';
 import {
     NetError,
@@ -53,16 +59,43 @@ import {
     type Ref,
     type Reservation,
     type Rule,
-    type Selector,
     type Wifi,
 } from '../model.js';
 
-type Raw = Record<string, unknown>;
+import {
+    addressValue,
+    checkPolicyName,
+    describePolicy,
+    groupComplete,
+    list,
+    macOf,
+    maskToPrefix,
+    mayMatchServer,
+    names,
+    OWNED_ADDRESS_COMMENT,
+    policyBody,
+    policySide,
+    SERVICE_OF,
+    text,
+    toCidr,
+    toRule,
+    type GroupInfo,
+    type PolicySide,
+    type PolicyWorld,
+    type Raw,
+    type RuleContext,
+} from './fortigateRules.js';
+import { resolve } from './omadaRules.js';
 
-export const FORTIGATE_READ_ONLY = 'The FortiGate changes only DHCP reservations through these tools for now; make other changes in its web UI.';
+export { maskToPrefix, toCidr } from './fortigateRules.js';
+
+export const FORTIGATE_READ_ONLY = 'The FortiGate changes only DHCP reservations and firewall policies through these tools for now; make other changes in its web UI.';
 export const FORTIGATE_READ_ONLY_SETTING = 'The FortiGate is read-only here (FORTIGATE_READ_ONLY=true); nothing is changed through these tools.';
 /** The vendor object a reservation step writes. */
 const RESERVATION_OBJECT = 'fortigate.system.dhcp/server.reserved-address';
+/** The vendor objects a rule step writes. */
+const POLICY_OBJECT = 'fortigate.firewall/policy';
+const ADDRESS_OBJECT = 'fortigate.firewall/address';
 
 export interface FortiGateAdapterOptions {
     /** Defaults to "fortigate:<host>". */
@@ -71,41 +104,6 @@ export interface FortiGateAdapterOptions {
     serverHosts?: string[];
 }
 
-const text = (value: unknown): string => (typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '');
-const list = (value: unknown): Raw[] => (Array.isArray(value) ? (value.filter((v) => v && typeof v === 'object') as Raw[]) : []);
-const names = (value: unknown): string[] => list(value).map((v) => text(v.name)).filter(Boolean);
-
-/** "255.255.255.0" -> 24; undefined for a mask that isn't contiguous. */
-export function maskToPrefix(mask: string): number | undefined {
-    let n: number;
-    try {
-        n = ipToNumber(mask);
-    } catch {
-        return undefined;
-    }
-    const bits = n.toString(2).padStart(32, '0');
-    if (!/^1*0*$/.test(bits)) return undefined;
-    return bits.indexOf('0') === -1 ? 32 : bits.indexOf('0');
-}
-
-/** FortiOS "a.b.c.d m.m.m.m" -> "a.b.c.d/p"; undefined for 0.0.0.0 or anything unreadable. */
-export function toCidr(value: unknown): string | undefined {
-    const [ip, mask] = text(value).trim().split(/\s+/);
-    if (!ip || !mask || ip === '0.0.0.0') return undefined;
-    const prefix = mask.includes('.') ? maskToPrefix(mask) : Number(mask);
-    if (prefix === undefined || !Number.isInteger(prefix) || prefix < 0 || prefix > 32) return undefined;
-    try {
-        ipToNumber(ip);
-    } catch {
-        return undefined;
-    }
-    return `${ip}/${prefix}`;
-}
-
-function macOf(value: unknown): string | undefined {
-    const hex = normalizeMac(text(value));
-    return /^[0-9A-F]{12}$/.test(hex) && hex !== '000000000000' ? formatMac(hex) : undefined;
-}
 
 const ROUTED_TYPES = new Set(['physical', 'hard-switch', 'vlan', 'aggregate', 'redundant', 'switch', 'emac-vlan']);
 
@@ -138,14 +136,15 @@ export class FortiGateNetworkController implements NetworkController {
     }
 
     async capabilities(): Promise<Capabilities> {
+        const writes = this.client.readOnly ? 'unsupported' : 'native';
         return {
             vendor: 'fortigate',
             networks: { create: 'unsupported', isolation: 'unsupported', ipv6: 'unsupported', guestPurpose: 'unsupported' },
             wifi: { create: 'unsupported', bands: [], security: [], pmf: 'unsupported', fastRoaming: 'unsupported', bandSteering: 'unsupported' },
             ports: { profiles: 'unsupported', assign: 'unsupported' },
-            rules: { between: 'unsupported', toInternet: 'unsupported', deviceMatch: 'unsupported', wifiMatch: 'unsupported', stateful: 'unsupported', schedule: 'unsupported' },
+            rules: { between: writes, toInternet: writes, deviceMatch: 'unsupported', wifiMatch: 'unsupported', stateful: writes, schedule: 'unsupported' },
             groups: { address: 'unsupported', mac: 'unsupported' },
-            reservations: this.client.readOnly ? 'unsupported' : 'native',
+            reservations: writes,
             mdnsRepeater: 'unsupported',
             firmware: 'unsupported',
         };
@@ -289,30 +288,39 @@ export class FortiGateNetworkController implements NetworkController {
     }
 
     async listRules(): Promise<Rule[]> {
+        const { policies, context } = await this.policyState();
+        return policies.map((raw, i) => toRule(raw, i, context));
+    }
+
+    /** The policies and everything they are read against, in one read. */
+    private async policyState(): Promise<{ interfaces: Raw[]; networks: Network[]; policies: Raw[]; groupsRaw: Raw[]; context: RuleContext }> {
         const { interfaces, dhcpServers } = await this.snapshot();
-        const networks = new Map(interfaces.filter((raw) => this.routed(raw)).map((raw) => [text(raw.name), this.toNetwork(raw, dhcpServers)]));
+        const routed = interfaces.filter((raw) => this.routed(raw));
+        const lans = new Map(routed.map((raw) => [text(raw.name), this.toNetwork(raw, dhcpServers)]));
         const wan = new Set(interfaces.filter((raw) => text(raw.role) === 'wan').map((raw) => text(raw.name)));
         const policies = list((await this.client.cmdb<Raw[]>('firewall', 'policy')).results);
         const addresses = new Map(list((await this.client.cmdb<Raw[]>('firewall', 'address')).results).map((a) => [text(a.name), a]));
         // Each group: whether its listed entries say all it holds (no FQDN, range or nested group), and its addresses.
-        let groups = new Map<string, GroupInfo>();
+        let groupsRaw: Raw[] = [];
         try {
-            groups = new Map(
-                list((await this.client.cmdb<Raw[]>('firewall', 'addrgrp')).results).map((g) => [
-                    text(g.name),
-                    {
-                        complete: groupComplete(g, addresses),
-                        addresses: names(g.member).flatMap((m) => (addressValue(addresses.get(m))?.kind === 'address' ? addressValue(addresses.get(m))!.values : [])),
-                        macs: names(g.member).some((m) => addressValue(addresses.get(m))?.kind === 'mac'),
-                    },
-                ])
-            );
+            groupsRaw = list((await this.client.cmdb<Raw[]>('firewall', 'addrgrp')).results);
         } catch (error) {
             if (!(error instanceof FortiGateError && (error.kind === 'forbidden' || error.kind === 'notFound'))) throw error;
         }
+        const groups = new Map<string, GroupInfo>(
+            groupsRaw.map((g) => [
+                text(g.name),
+                {
+                    complete: groupComplete(g, addresses),
+                    addresses: names(g.member).flatMap((m) => (addressValue(addresses.get(m))?.kind === 'address' ? addressValue(addresses.get(m))!.values : [])),
+                    macs: names(g.member).some((m) => addressValue(addresses.get(m))?.kind === 'mac'),
+                },
+            ])
+        );
         // Interfaces carrying further subnets than the primary one their network shows.
         const secondary = new Set(interfaces.filter((raw) => text(raw['secondary-IP']) === 'enable' || list(raw.secondaryip).length > 0).map((raw) => text(raw.name)));
-        return policies.map((raw, i) => toRule(raw, i, { networks, wan, addresses, groups, secondary }));
+        const networks = routed.flatMap((raw) => [lans.get(text(raw.name))!, ...this.secondaryNetworks(raw)]);
+        return { interfaces, networks, policies, groupsRaw, context: { networks: lans, wan, addresses, groups, secondary } };
     }
 
     async listGroups(kind?: Group['kind']): Promise<Group[]> {
@@ -417,9 +425,9 @@ export class FortiGateNetworkController implements NetworkController {
     }
 
     async plan(change: Change): Promise<Plan> {
-        if (change.kind !== 'reservation') throw new NetError('UNSUPPORTED', FORTIGATE_READ_ONLY, { capability: change.kind });
-        if (this.client.readOnly) throw new NetError('UNSUPPORTED', FORTIGATE_READ_ONLY_SETTING, { capability: 'reservations' });
-        return await this.planReservation(change);
+        if (change.kind !== 'reservation' && change.kind !== 'rule') throw new NetError('UNSUPPORTED', FORTIGATE_READ_ONLY, { capability: change.kind });
+        if (this.client.readOnly) throw new NetError('UNSUPPORTED', FORTIGATE_READ_ONLY_SETTING, { capability: change.kind === 'rule' ? 'rules' : 'reservations' });
+        return change.kind === 'rule' ? await this.planRule(change) : await this.planReservation(change);
     }
 
     async apply(plan: Plan, options: { allowLockout?: boolean } = {}): Promise<ApplyResult> {
@@ -609,13 +617,340 @@ export class FortiGateNetworkController implements NetworkController {
         return plan;
     }
 
-    /** One write; one sent without an answer may or may not be stored, and says so. */
-    private async send(write: () => Promise<unknown>): Promise<void> {
+    /**
+     * Plans one firewall policy change. The basis covers the interfaces, every policy, address object
+     * and group, and this server's addresses: anything else changed since is a CONFLICT.
+     *
+     * What must stay reachable is this server: no change may newly stop traffic from it, or to its own
+     * address (mayMatchServer). A policy that can't match that traffic can be changed freely; one that
+     * can may only change in ways that let more through: a new allow, a block removed or moved down, an
+     * allow moved up. FortiGate policies are checked from the top, and traffic none allows is dropped.
+     *
+     * A new policy is written switched off at the bottom, moved into place and then switched on, so it
+     * never acts from the wrong position; one that can't be finished is removed again.
+     */
+    private async planRule(change: Extract<Change, { kind: 'rule' }>): Promise<Plan> {
+        if (!this.serverAddresses.length) {
+            throw new NetError('PROTECTED', "Where this server is isn't configured (MCP_SERVER_ADDRESSES), so no firewall policy is changed: one could cut it off. Set MCP_SERVER_ADDRESSES.");
+        }
+        const { interfaces, networks, policies, groupsRaw, context } = await this.policyState();
+        // The interfaces this server's traffic passes: its LAN network's, else the WAN when it reaches the
+        // FortiGate on a WAN address; anywhere when that can't be told.
+        const serverInterfaces = new Set<string>();
+        let anywhere = false;
+        for (const address of this.serverAddresses) {
+            const network = networks.find((n) => n.gateway && inSubnet(address, n.gateway));
+            if (network) {
+                serverInterfaces.add(network.id.split(':secondary:')[0]);
+                continue;
+            }
+            const reached = interfaces.find((raw) => toCidr(raw.ip)?.split('/')[0] === this.client.host);
+            if (reached && text(reached.role) === 'wan') for (const w of context.wan) serverInterfaces.add(w);
+            else anywhere = true;
+        }
+        const world: PolicyWorld = {
+            networks,
+            lans: context.networks,
+            wan: [...context.wan],
+            secondary: context.secondary,
+            addresses: context.addresses,
+            groups: context.groups,
+            serverAddresses: this.serverAddresses,
+            serverInterfaces: anywhere ? 'any' : serverInterfaces,
+        };
+        const rules = policies.map((raw, i) => ({ raw, rule: toRule(raw, i, context) }));
+        const editable = (ref: Ref, what: string) => {
+            const found = resolve(
+                rules.map((r) => ({ ...r, id: r.rule.id, name: r.rule.name })),
+                ref,
+                'rule'
+            );
+            if (found.rule.foreign) throw new NetError('UNSUPPORTED', `Rule '${found.rule.name}' can't be ${what} through net_: ${found.rule.foreign.reason}`, { capability: 'rule' });
+            return found;
+        };
+        const checkPosition = (position: number, count: number) => {
+            if (!Number.isInteger(position) || position < 1 || position > count) throw new NetError('INVALID', `Position ${position} must be from 1 to ${count}`);
+            return position;
+        };
+        const nameTaken = (name: string, except?: string) => {
+            if (rules.some((r) => r.rule.id !== except && (r.rule.name.toLowerCase() === name.toLowerCase() || text(r.raw.name).toLowerCase() === name.toLowerCase()))) {
+                throw new NetError('EXISTS', `A policy named '${name}' already exists`);
+            }
+        };
+        const cutsOff = (what: string) =>
+            new NetError('PROTECTED', `${what} may stop traffic from this server or to its address, and this server has to stay reachable; refused. Change it in the FortiGate's UI if that is intended.`);
+        /** Where to move a policy so it ends up at `to` among the others: before the one there, else after the last. */
+        const moveTo = (others: Raw[], to: number): Record<string, string> => (to <= others.length ? { action: 'move', before: text(others[to - 1].policyid) } : { action: 'move', after: text(others[others.length - 1].policyid) });
+        /** The context with the address objects a change creates. */
+        const withObjects = (create: PolicySide['create']): RuleContext => ({
+            ...context,
+            addresses: new Map([...context.addresses, ...create.map((c): [string, Raw] => [c.name, { name: c.name, type: 'ipmask', subnet: c.subnet, comment: OWNED_ADDRESS_COMMENT }])]),
+        });
+        /** The world with the address objects a change creates (for the server check). */
+        const worldWith = (create: PolicySide['create']): PolicyWorld => ({ ...world, addresses: withObjects(create).addresses });
+        /** Whether a rule read back says what the policy written says, at that position. */
+        const same = (written: Raw, at: number, ctx: RuleContext) => (found: Rule | undefined) => {
+            const expected = toRule(written, at - 1, ctx);
+            return found !== undefined && found.position === at && !found.foreign && (['name', 'action', 'from', 'to', 'protocol', 'replies', 'enabled'] as const).every((key) => JSON.stringify(found[key]) === JSON.stringify(expected[key]));
+        };
+        /** Address objects these tools made that no policy (but `except`) or group uses any more. */
+        const unused = (addrs: string[], except: Raw, create: PolicySide['create'] = []) =>
+            [...new Set(addrs)].filter(
+                (name) =>
+                    text(context.addresses.get(name)?.comment) === OWNED_ADDRESS_COMMENT &&
+                    !create.some((c) => c.name === name) &&
+                    !policies.some((p) => p !== except && [...names(p.srcaddr), ...names(p.dstaddr)].includes(name)) &&
+                    !groupsRaw.some((g) => names(g.member).includes(name))
+            );
+        const objectSteps = (create: PolicySide['create']): Plan['steps'] => create.map((c) => ({ action: 'create', object: ADDRESS_OBJECT, name: c.name, detail: c.subnet.replace(' ', ' mask ') }));
+        const dropSteps = (drop: string[]): Plan['steps'] => drop.map((name) => ({ action: 'delete', object: ADDRESS_OBJECT, name, detail: 'no rule uses it any more' }));
+        const objectEffects = (create: PolicySide['create'], drop: string[]) => [
+            ...(create.length ? [`Address object(s) ${create.map((c) => c.name).join(', ')} are created for the addresses; they are removed with the last rule using them.`] : []),
+            ...(drop.length ? [`Address object(s) ${drop.join(', ')}, made for an earlier rule, are removed: nothing uses them any more.`] : []),
+        ];
+        const IMPLICIT_DENY = 'Policies are checked from the top and the first match decides; traffic no policy allows is dropped.';
+
+        let steps: Plan['steps'];
+        let effects: string[];
+        let execute: () => Promise<ApplyResult>;
+
+        if (change.op === 'create') {
+            const { body, create } = policyBody(change.value, world);
+            nameTaken(text(body.name));
+            const at = change.value.position === undefined ? policies.length + 1 : checkPosition(change.value.position, policies.length + 1);
+            if (body.action === 'deny') {
+                body['match-vip'] = 'enable';
+                if (mayMatchServer(body, worldWith(create))) throw cutsOff(`A new block '${text(body.name)}'`);
+            }
+            const name = text(body.name);
+            steps = [...objectSteps(create), { action: 'create', object: POLICY_OBJECT, name, detail: `${describePolicy(body)}, position ${at}` }];
+            effects = [
+                `${describePolicy(body)}${body.status === 'enable' ? '' : ' (switched off)'}.`,
+                ...(body.action === 'deny' ? ['New connections are stopped; replies to connections started from the other side still pass.'] : []),
+                ...(body.nat === 'enable' ? ["NAT is on: the devices reach the internet through the FortiGate's WAN address."] : []),
+                `It is policy ${at} of ${policies.length + 1}. ${IMPLICIT_DENY}`,
+                ...objectEffects(create, []),
+            ];
+            execute = async () => {
+                const made: string[] = [];
+                let id: string | undefined;
+                try {
+                    for (const c of create) {
+                        await this.send(() => this.client.cmdbWrite('POST', ['firewall', 'address'], { name: c.name, type: 'ipmask', subnet: c.subnet, comment: OWNED_ADDRESS_COMMENT }), 'an address object', 'net_listRules');
+                        made.push(c.name);
+                    }
+                    const answer = await this.send(() => this.client.cmdbWrite('POST', ['firewall', 'policy'], { ...body, status: 'disable' }), 'the new policy', 'net_listRules');
+                    id = answer.mkey ?? text(list((await this.client.cmdb<Raw[]>('firewall', 'policy')).results).find((p) => text(p.name) === name)?.policyid);
+                    if (!id) throw new NetError('CONFLICT', `The FortiGate accepted policy '${name}' but didn't say its id, and it couldn't be found again.`);
+                    if (at <= policies.length) await this.send(() => this.client.cmdbWrite('PUT', ['firewall', 'policy', id!], undefined, moveTo(policies, at)), 'the move of the new policy', 'net_listRules');
+                    if (body.status === 'enable') await this.send(() => this.client.cmdbWrite('PUT', ['firewall', 'policy', id!], { status: 'enable' }), 'switching the new policy on', 'net_listRules');
+                } catch (error) {
+                    if (!(await this.undoCreate(name, made))) {
+                        throw new NetError('CONFLICT', `Creating policy '${name}' failed halfway and what it made couldn't all be removed again: the policy may still be stored (switched off or on), and address objects may be left. Check net_listRules.`);
+                    }
+                    throw error;
+                }
+                return await this.ruleReadBack(id, same({ ...body, policyid: id }, at, withObjects(create)));
+            };
+        } else if (change.op === 'delete') {
+            const { raw, rule } = editable(change.ref, 'deleted');
+            if (text(raw.action) === 'accept' && mayMatchServer(raw, world)) throw cutsOff(`Removing the allow '${rule.name}'`);
+            const id = text(raw.policyid);
+            const drop = unused([...names(raw.srcaddr), ...names(raw.dstaddr)], raw);
+            steps = [{ action: 'delete', object: POLICY_OBJECT, name: rule.name }, ...dropSteps(drop)];
+            effects = [
+                `Policy '${rule.name}' is removed${rule.enabled ? `; the traffic it matched follows the policies below it${text(raw.action) === 'accept' ? ', and is dropped if none allows it' : ''}` : ' (it was switched off)'}.`,
+                ...objectEffects([], drop),
+            ];
+            execute = async () => {
+                await this.send(() => this.client.cmdbWrite('DELETE', ['firewall', 'policy', id]), 'the delete of the policy', 'net_listRules');
+                const warnings = await this.dropAddresses(drop);
+                const result = await this.ruleReadBack(id, (r) => r === undefined);
+                return warnings.length ? { ...result, warnings: [...(result.warnings ?? []), ...warnings] } : result;
+            };
+        } else if (change.op === 'move') {
+            const { raw, rule } = editable(change.ref, 'moved');
+            const to = checkPosition(change.position, policies.length);
+            if (to === rule.position) throw new NetError('INVALID', `Rule '${rule.name}' is already at position ${to}`);
+            // Only an allow moving up or a block moving down can't stop more of this server's traffic.
+            if (mayMatchServer(raw, world) && (text(raw.action) === 'accept' ? to > rule.position : to < rule.position)) throw cutsOff(`Moving '${rule.name}' ${to > rule.position ? 'down' : 'up'}`);
+            const id = text(raw.policyid);
+            steps = [{ action: 'update', object: POLICY_OBJECT, name: rule.name, detail: `position ${to}` }];
+            effects = [`Policy '${rule.name}' moves from position ${rule.position} to ${to}. ${IMPLICIT_DENY}`];
+            execute = async () => {
+                await this.send(() => this.client.cmdbWrite('PUT', ['firewall', 'policy', id], undefined, moveTo(policies.filter((p) => p !== raw), to)), 'the move of the policy', 'net_listRules');
+                return await this.ruleReadBack(id, same(raw, to, context));
+            };
+        } else {
+            const { raw, rule } = editable(change.value.ref, 'changed');
+            const id = text(raw.policyid);
+            const { position, ...fields } = change.value.set;
+            if (fields.schedule !== undefined && fields.schedule.kind !== 'always') throw new NetError('UNSUPPORTED', "A FortiGate rule can't use a schedule through the tools", { capability: 'rules.schedule' });
+            if (fields.replies !== undefined && fields.replies !== 'allow') throw new NetError('UNSUPPORTED', 'FortiGate policies are stateful: replies always pass', { capability: 'rules.stateful' });
+            if (typeof fields.protocol === 'object') throw new NetError('UNSUPPORTED', "A FortiGate rule can't use ports through the tools (that needs a custom service)", { capability: 'rules.ports' });
+            const patch: Raw = {};
+            const create: PolicySide['create'] = [];
+            if (fields.name !== undefined) {
+                const name = checkPolicyName(fields.name);
+                if (name !== text(raw.name)) {
+                    nameTaken(name, rule.id);
+                    patch.name = name;
+                }
+            }
+            if (fields.enabled !== undefined) patch.status = fields.enabled ? 'enable' : 'disable';
+            if (fields.action !== undefined) patch.action = fields.action === 'allow' ? 'accept' : 'deny';
+            if (fields.from !== undefined) {
+                const from = policySide(fields.from, world, 'source');
+                Object.assign(patch, { srcintf: from.intf.map((name) => ({ name })), srcaddr: from.addr.map((name) => ({ name })) });
+                create.push(...from.create);
+            }
+            if (fields.to !== undefined) {
+                const to = policySide(fields.to, world, 'destination');
+                Object.assign(patch, { dstintf: to.intf.map((name) => ({ name })), dstaddr: to.addr.map((name) => ({ name })) });
+                create.push(...to.create.filter((c) => !create.some((x) => x.name === c.name)));
+            }
+            if (fields.protocol !== undefined) patch.service = [{ name: SERVICE_OF[fields.protocol] }];
+            // Only what differs is written.
+            for (const key of Object.keys(patch)) if (JSON.stringify(Array.isArray(patch[key]) ? names(patch[key]) : patch[key]) === JSON.stringify(Array.isArray(raw[key]) ? names(raw[key]) : raw[key])) delete patch[key];
+            const merged: Raw = { ...raw, ...patch };
+            if ('action' in patch || 'dstintf' in patch) {
+                // NAT follows the action and the destination, as for a new rule; a block matches port-forwarded traffic too.
+                const dst = names(merged.dstintf);
+                const nat = text(merged.action) === 'accept' && dst.length > 0 && dst.every((i) => world.wan.includes(i)) ? 'enable' : 'disable';
+                if (nat !== text(raw.nat)) patch.nat = nat;
+                if (text(merged.action) === 'deny' && text(raw['match-vip']) !== 'enable') patch['match-vip'] = 'enable';
+                Object.assign(merged, patch);
+            }
+            const both = names(merged.srcintf).find((i) => names(merged.dstintf).includes(i));
+            if (both) throw new NetError('INVALID', `Traffic inside '${both}' doesn't pass a FortiGate policy between interfaces; give a source and destination on different networks`);
+            const to = position === undefined ? rule.position : checkPosition(position, policies.length);
+            const moves = to !== rule.position;
+            if (!Object.keys(patch).length && !moves) throw new NetError('INVALID', `Nothing to change on rule '${rule.name}'`);
+            // The policy moves first (with its old settings), then changes in place.
+            if (moves && mayMatchServer(raw, world) && (text(raw.action) === 'accept' ? to > rule.position : to < rule.position)) throw cutsOff(`Moving '${rule.name}' ${to > rule.position ? 'down' : 'up'}`);
+            if (Object.keys(patch).some((key) => key !== 'name')) {
+                if (text(raw.action) === 'accept' && mayMatchServer(raw, world)) throw cutsOff(`Changing the allow '${rule.name}'`);
+                if (text(merged.action) === 'deny' && mayMatchServer(merged, worldWith(create))) throw cutsOff(`The block '${rule.name}' as changed`);
+            }
+            const created = create.filter((c) => [...names(merged.srcaddr), ...names(merged.dstaddr)].includes(c.name));
+            const drop = unused([...names(raw.srcaddr), ...names(raw.dstaddr)].filter((n) => ![...names(merged.srcaddr), ...names(merged.dstaddr)].includes(n)), raw);
+            steps = [
+                ...objectSteps(created),
+                { action: 'update', object: POLICY_OBJECT, name: rule.name, detail: [Object.keys(patch).length ? describePolicy(merged) : '', moves ? `position ${to}` : ''].filter(Boolean).join('; ') },
+                ...dropSteps(drop),
+            ];
+            effects = [
+                `Policy '${rule.name}' becomes: ${describePolicy(merged)}${text(merged.status) === 'disable' ? ' (switched off)' : ''}, at position ${to}.`,
+                ...(patch.nat !== undefined ? [patch.nat === 'enable' ? "NAT is switched on: the devices reach the internet through the FortiGate's WAN address." : 'NAT is switched off.'] : []),
+                ...(moves ? [IMPLICIT_DENY] : []),
+                ...objectEffects(created, drop),
+            ];
+            const others = policies.filter((p) => p !== raw);
+            execute = async () => {
+                const made: string[] = [];
+                let moved = false;
+                try {
+                    for (const c of created) {
+                        await this.send(() => this.client.cmdbWrite('POST', ['firewall', 'address'], { name: c.name, type: 'ipmask', subnet: c.subnet, comment: OWNED_ADDRESS_COMMENT }), 'an address object', 'net_listRules');
+                        made.push(c.name);
+                    }
+                    if (moves) {
+                        await this.send(() => this.client.cmdbWrite('PUT', ['firewall', 'policy', id], undefined, moveTo(others, to)), 'the move of the policy', 'net_listRules');
+                        moved = true;
+                    }
+                    if (Object.keys(patch).length) await this.send(() => this.client.cmdbWrite('PUT', ['firewall', 'policy', id], patch), 'the policy change', 'net_listRules');
+                } catch (error) {
+                    // A change that may have been stored is left as it is: undoing it could undo someone else's.
+                    const sure = !(error instanceof FortiGateError && error.maybeDone);
+                    let back = !moved;
+                    if (moved && sure) {
+                        try {
+                            await this.client.cmdbWrite('PUT', ['firewall', 'policy', id], undefined, moveTo(others, rule.position));
+                            back = true;
+                        } catch {
+                            back = false;
+                        }
+                    }
+                    const dropped = sure ? (await this.dropAddresses(made)).length === 0 : made.length === 0;
+                    if (back && dropped) throw error;
+                    throw new NetError(
+                        'CONFLICT',
+                        `Changing policy '${rule.name}' failed halfway${moved && !back ? `: it is at position ${to} (it was at ${rule.position}) with its old settings` : ''}${dropped ? '' : ', and address objects made for it may be left'}. Check net_listRules.`
+                    );
+                }
+                const warnings = await this.dropAddresses(drop);
+                const result = await this.ruleReadBack(id, same(merged, to, withObjects(created)));
+                return warnings.length ? { ...result, warnings: [...(result.warnings ?? []), ...warnings] } : result;
+            };
+        }
+
+        const basisOf = {
+            change,
+            controller: this.id,
+            interfaces: interfaces.map((raw) => [raw.name, raw.type, raw.role, raw.ip, raw.status, raw.vlanid, raw.interface, raw['secondary-IP'], raw.secondaryip]),
+            policies,
+            addresses: [...context.addresses.values()],
+            groups: groupsRaw,
+            server: this.serverAddresses,
+        };
+        const plan: Plan = {
+            change,
+            vendor: 'fortigate',
+            steps,
+            effects,
+            wouldLockOut: [],
+            basis: createHash('sha256').update(JSON.stringify(basisOf)).digest('hex').slice(0, 16),
+        };
+        this.executors.set(plan, execute);
+        return plan;
+    }
+
+    /** Removes a policy that couldn't be finished (found by its name) and the address objects made for it; true when all is gone. */
+    private async undoCreate(name: string, made: string[]): Promise<boolean> {
         try {
-            await write();
+            const stored = list((await this.client.cmdb<Raw[]>('firewall', 'policy')).results).filter((p) => text(p.name) === name);
+            if (stored.length > 1) return false;
+            if (stored.length) await this.client.cmdbWrite('DELETE', ['firewall', 'policy', text(stored[0].policyid)]);
+            if ((await this.dropAddresses(made)).length) return false;
+            return !list((await this.client.cmdb<Raw[]>('firewall', 'policy')).results).some((p) => text(p.name) === name);
+        } catch {
+            return false;
+        }
+    }
+
+    /** Removes address objects these tools made; each one that stays is a warning. */
+    private async dropAddresses(objects: string[]): Promise<string[]> {
+        const warnings: string[] = [];
+        for (const name of [...objects].reverse()) {
+            try {
+                await this.client.cmdbWrite('DELETE', ['firewall', 'address', name]);
+            } catch {
+                warnings.push(`The address object '${name}' made for a rule couldn't be removed (something else may use it); remove it in the FortiGate's UI if nothing does.`);
+            }
+        }
+        return warnings;
+    }
+
+    /** Reads a policy back after a write: something else stored is a CONFLICT. */
+    private async ruleReadBack(id: string, check: (rule: Rule | undefined) => boolean): Promise<ApplyResult> {
+        let after: Rule[];
+        try {
+            after = await this.listRules();
+        } catch {
+            return { applied: true, owned: [], warnings: ['The FortiGate accepted the policy change, but reading it back failed; check it with net_listRules.'] };
+        }
+        const found = after.find((r) => r.id === id);
+        if (!check(found)) throw new NetError('CONFLICT', 'The FortiGate accepted the policy change but shows something else now; check it with net_listRules.');
+        return { applied: true, ...(found ? { object: found } : {}), owned: [] };
+    }
+
+    /** One write; one sent without an answer may or may not be stored, and says so. */
+    private async send<T>(write: () => Promise<T>, what = 'the reservation', check = 'net_listReservations'): Promise<T> {
+        try {
+            return await write();
         } catch (error) {
             if (error instanceof FortiGateError && error.maybeDone) {
-                throw new FortiGateError('The FortiGate stopped answering while the reservation was being sent, so it may or may not be stored; check net_listReservations before trying again.', 'unreachable', true);
+                throw new FortiGateError(`The FortiGate stopped answering while ${what} was being sent, so it may or may not be stored; check ${check} before trying again.`, 'unreachable', true);
             }
             throw error;
         }
@@ -653,188 +988,3 @@ export function compareVersions(a: string, b: string): number {
     return 0;
 }
 
-/** What one firewall address object stands for, when the model can say it. */
-function addressValue(raw: Raw | undefined): { kind: 'address' | 'mac'; values: string[] } | undefined {
-    if (!raw) return undefined;
-    const type = text(raw.type) || 'ipmask';
-    if (type === 'ipmask') {
-        const cidr = toCidr(raw.subnet);
-        if (!cidr) return text(raw.subnet).startsWith('0.0.0.0 0.0.0.0') ? undefined : undefined;
-        return { kind: 'address', values: [cidr.endsWith('/32') ? cidr.slice(0, -3) : cidr] };
-    }
-    if (type === 'mac') {
-        const macs = list(raw.macaddr).map((m) => macOf(m.macaddr)).filter((m): m is string => !!m);
-        return macs.length ? { kind: 'mac', values: macs } : undefined;
-    }
-    return undefined;
-}
-
-// PING (echo requests only) is narrower than the model's icmp, so it isn't here.
-const isOff = (value: unknown) => value === 'disable' || value === false || value === 0 || value === '' || value === null || value === undefined || (Array.isArray(value) && value.length === 0);
-const zeroTos = (value: unknown) => isOff(value) || /^0x0+$/i.test(text(value));
-
-/** Policy fields (FortiOS 7.4) that narrow its match, each with what its default looks like. */
-const NARROWING: Array<[string, (value: unknown) => boolean]> = [
-    ['ztna-status', isOff],
-    ['ztna-device-ownership', isOff],
-    ['ztna-ems-tag', isOff],
-    ['ztna-ems-tag-secondary', isOff],
-    ['ztna-geo-tag', isOff],
-    ['network-service-dynamic', isOff],
-    ['network-service-src-dynamic', isOff],
-    ['reputation-minimum', isOff],
-    ['reputation-minimum6', isOff],
-    ['src-vendor-mac', isOff],
-    ['tos-mask', zeroTos],
-    ['sgt-check', isOff],
-    ['sgt', isOff],
-    ['fsso-groups', isOff],
-    ['vlan-filter', isOff],
-];
-
-const SERVICES: Record<string, Rule['protocol']> = { ALL: 'any', ALL_TCP: 'tcp', ALL_UDP: 'udp', ALL_ICMP: 'icmp' };
-
-interface RuleContext {
-    networks: Map<string, Network>;
-    wan: Set<string>;
-    addresses: Map<string, Raw>;
-    groups: Map<string, GroupInfo>;
-    secondary: Set<string>;
-}
-
-interface GroupInfo {
-    complete: boolean;
-    addresses: string[];
-    /** Holds MAC objects. */
-    macs: boolean;
-}
-
-/** Whether an address or CIDR lies wholly inside a network (its gateway form "a.b.c.d/p"). */
-function within(address: string, network: string): boolean {
-    try {
-        const a = parseCidr(address);
-        const n = parseCidr(network);
-        return a.network >= n.network && a.broadcast <= n.broadcast;
-    } catch {
-        return false;
-    }
-}
-
-/** Whether every member of a group is an address or MAC object of one kind the model can say. */
-function groupComplete(group: Raw, addresses: Map<string, Raw>): boolean {
-    // A group with exclusions matches its members minus others: not a list of entries.
-    if (text(group.exclude) === 'enable' || names(group['exclude-member']).length) return false;
-    const kinds = names(group.member).map((m) => addressValue(addresses.get(m))?.kind);
-    return kinds.length > 0 && kinds.every((k) => k !== undefined && k === kinds[0]);
-}
-
-/** One side of a policy (interfaces + addresses) as selectors, or why it can't be. */
-function side(interfaces: string[], addrs: string[], context: RuleContext): Selector[] | string {
-    const all = addrs.length === 1 && addrs[0] === 'all';
-    if (!interfaces.length) return 'names no interface';
-    if (interfaces.some((i) => i === 'any')) return 'matches any interface';
-    if (interfaces.some((i) => context.wan.has(i)) && !interfaces.every((i) => context.wan.has(i))) return 'mixes WAN and LAN interfaces';
-    if (interfaces.every((i) => context.wan.has(i))) {
-        if (all) return [{ internet: true }];
-        const sel = addressSelectors(addrs, context);
-        if (typeof sel === 'string') return sel;
-        // Outside addresses reach the WAN by routing; one inside a LAN network would not be what the WAN side says.
-        const lans = [...context.networks.values()].map((n) => n.gateway!).filter(Boolean);
-        if (sel.addresses.some((a) => lans.some((n) => overlaps(a, n)))) return 'uses addresses inside a LAN network on its WAN side';
-        return sel.selectors;
-    }
-    if (!interfaces.every((i) => context.networks.has(i))) return `uses interfaces or zones the model doesn't list (${interfaces.join(', ')})`;
-    if (interfaces.some((i) => context.secondary.has(i))) return 'uses an interface with secondary addresses (its network shows only the primary subnet)';
-    if (all) return interfaces.map((i): Selector => ({ network: { id: i } }));
-    // Addresses on LAN interfaces: the addresses say who, as long as they lie inside those networks
-    // (then the interface limit adds nothing). MACs are only seen on their own segment.
-    const sel = addressSelectors(addrs, context);
-    if (typeof sel === 'string') return sel;
-    const own = interfaces.map((i) => context.networks.get(i)!.gateway!).filter(Boolean);
-    if (!sel.addresses.every((a) => own.some((n) => within(a, n)))) return 'uses addresses outside the networks of its interfaces';
-    // A device (MAC) matches wherever it is in the model; here only on these interfaces.
-    if (sel.macs && ![...context.networks.keys()].every((n) => interfaces.includes(n))) return 'matches a device by MAC only on some networks (the model\'s device rule holds on every network)';
-    return sel.selectors;
-}
-
-function overlaps(address: string, network: string): boolean {
-    try {
-        return subnetsOverlap(address.includes('/') ? address : `${address}/32`, network);
-    } catch {
-        return true;
-    }
-}
-
-/** The selectors for a list of address objects, with every IP address or network they stand for. */
-function addressSelectors(addrs: string[], context: RuleContext): { selectors: Selector[]; addresses: string[]; macs: boolean } | string {
-    const out: Selector[] = [];
-    const plain: string[] = [];
-    const covered: string[] = [];
-    let macs = false;
-    for (const name of addrs) {
-        if (name === 'all') return 'mixes "all" with other addresses';
-        const group = context.groups.get(name);
-        if (group) {
-            if (!group.complete) return `uses the group '${name}', which holds members the model can't express (FQDN, range, nested group...)`;
-            out.push({ group: { name } });
-            covered.push(...group.addresses);
-            macs ||= group.macs;
-            continue;
-        }
-        const value = addressValue(context.addresses.get(name));
-        if (!value) return `uses the address object '${name}' (FQDN, range, geography or other), which the model can't express`;
-        if (value.kind === 'mac') {
-            if (value.values.length !== 1) return `uses a MAC address object with several MACs ('${name}')`;
-            out.push({ device: value.values[0] });
-            macs = true;
-        } else {
-            plain.push(...value.values);
-        }
-    }
-    if (plain.length) out.push({ addresses: plain });
-    return { selectors: out, addresses: [...covered, ...plain], macs };
-}
-
-function toRule(raw: Raw, index: number, context: RuleContext): Rule {
-    const id = text(raw.policyid) || String(index + 1);
-    const services = names(raw.service);
-    const reasons: string[] = [];
-    const from = side(names(raw.srcintf), names(raw.srcaddr), context);
-    const to = side(names(raw.dstintf), names(raw.dstaddr), context);
-    if (typeof from === 'string') reasons.push(`source ${from}`);
-    if (typeof to === 'string') reasons.push(`destination ${to}`);
-    const protocol = services.length === 1 ? SERVICES[services[0]] : undefined;
-    if (!protocol) reasons.push(`service ${services.join(', ') || '(none)'} isn't one the model names`);
-    const schedule = text(raw.schedule) || 'always';
-    if (schedule !== 'always') reasons.push(`runs on the schedule '${schedule}'`);
-    const action = text(raw.action);
-    if (action !== 'accept' && action !== 'deny') reasons.push(`action '${action}'`);
-    // Every FortiOS "...-negate" switch inverts a match; every "internet-service..." switch adds one.
-    // Anything but an explicit "off" counts as on, so an unexpected value format can't hide a negation.
-    const off = isOff;
-    const on = (pattern: RegExp) => Object.entries(raw).some(([key, value]) => pattern.test(key) && !off(value));
-    if (on(/-negate$/)) reasons.push('negates its addresses or services');
-    if (on(/^internet-service/)) reasons.push('matches internet services');
-    // A deny with match-vip off lets port-forwarded (VIP) traffic through; match-vip-only matches only that.
-    if ((action === 'deny' && off(raw['match-vip'] ?? 'enable')) || !off(raw['match-vip-only'])) reasons.push('treats traffic to virtual IPs (port forwards) differently');
-    // Fields that narrow what a FortiOS 7.4 policy matches beyond interfaces, addresses and services.
-    const narrowed = NARROWING.filter(([key, isDefault]) => key in raw && !isDefault(raw[key])).map(([key]) => key);
-    if (narrowed.length) reasons.push(`narrows its match with ${narrowed.join(', ')}`);
-    // A consolidated policy (FortiOS 6.4+) also matches IPv6 through srcaddr6 / dstaddr6.
-    if (names(raw.srcaddr6).length || names(raw.dstaddr6).length) reasons.push('also matches IPv6 addresses');
-    if (names(raw.users).length || names(raw.groups).length) reasons.push('matches users or user groups');
-    return {
-        id,
-        name: text(raw.name) || `policy ${id}`,
-        action: action === 'deny' ? 'block' : 'allow',
-        from: typeof from === 'string' ? [] : from,
-        to: typeof to === 'string' ? [] : to,
-        protocol: protocol ?? 'any',
-        // FortiGate policies are stateful: replies to an allowed connection pass.
-        replies: 'allow',
-        schedule: { kind: 'always' },
-        enabled: text(raw.status) !== 'disable',
-        position: index + 1,
-        ...(reasons.length ? { foreign: { reason: `FortiGate policy ${id} ${reasons.join('; ')}` } } : {}),
-    };
-}

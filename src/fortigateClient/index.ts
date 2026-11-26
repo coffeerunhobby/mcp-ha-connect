@@ -120,12 +120,13 @@ export class FortiGateClient {
     /**
      * A settings change: POST (add to a table), PUT (change an entry) or DELETE (remove one) on
      * /api/v2/cmdb/<path>/<name>[/...]. Sent once, never repeated. Returns the entry's key, when
-     * the FortiGate names it (POST answers the new entry's).
+     * the FortiGate names it (POST answers the new entry's). `query` carries an action's arguments,
+     * e.g. moving a policy: PUT firewall/policy/<id> ?action=move&before=<id>.
      */
-    async cmdbWrite(method: 'POST' | 'PUT' | 'DELETE', segments: string[], body?: Record<string, unknown>): Promise<{ mkey?: string }> {
+    async cmdbWrite(method: 'POST' | 'PUT' | 'DELETE', segments: string[], body?: Record<string, unknown>, query?: Record<string, string | number>): Promise<{ mkey?: string }> {
         if (this.readOnly) throw new FortiGateError('The FortiGate is read-only here (FORTIGATE_READ_ONLY=true); nothing was sent', 'readOnly');
         if (segments.length < 2) throw new FortiGateError('Not a FortiOS API path', 'notFound');
-        const answer = await this.request<unknown>(method, 'cmdb', segments, undefined, method === 'DELETE' ? undefined : (body ?? {}));
+        const answer = await this.request<unknown>(method, 'cmdb', segments, query, method === 'DELETE' ? undefined : (body ?? {}));
         const mkey = answer.mkey;
         return typeof mkey === 'string' || typeof mkey === 'number' ? { mkey: String(mkey) } : {};
     }

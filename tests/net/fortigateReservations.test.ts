@@ -114,7 +114,7 @@ describe('FortiGate DHCP reservations: plan', () => {
 
     it('everything else stays refused (UNSUPPORTED)', async () => {
         const { adapter, writes } = fortigate();
-        await expect(adapter.plan({ op: 'delete', kind: 'rule', ref: { id: '1' } })).rejects.toMatchObject({ code: 'UNSUPPORTED', details: { capability: 'rule' } });
+        await expect(adapter.plan({ op: 'delete', kind: 'network', ref: { id: 'lan' } })).rejects.toMatchObject({ code: 'UNSUPPORTED', details: { capability: 'network' } });
         await expect(adapter.plan({ op: 'set', kind: 'mdnsRepeater', enabled: true })).rejects.toMatchObject({ code: 'UNSUPPORTED' });
         expect(writes).toEqual([]);
     });
@@ -406,7 +406,7 @@ describe('FortiGate DHCP reservations: apply', () => {
     it('apply of a plan this adapter did not make is refused', async () => {
         const f = fortigate();
         const plan = await f.adapter.plan(set({ mac: '02:00:00:00:00:60', ip: '192.168.1.60' }));
-        const forged: Plan = { ...plan, change: { op: 'delete', kind: 'rule', ref: { id: '1' } } };
+        const forged: Plan = { ...plan, change: { op: 'delete', kind: 'network', ref: { id: 'lan' } } };
         await expect(f.adapter.apply(forged)).rejects.toMatchObject({ code: 'UNSUPPORTED' });
         expect(f.writes).toEqual([]);
     });

@@ -285,7 +285,7 @@ one is set in the controller's web UI. Reads need `QUERY`, changes `CONFIGURE`.
 | `net_listWifi` | Wi-Fi networks: network, bands, security, isolation, MAC filter |
 | `net_createWifi` / `net_updateWifi` / `net_deleteWifi` | Create or change an SSID on a given network (bands, WPA2/WPA3, PMF, isolation, hidden, 802.11r, MAC filter), or reset its password to a random one |
 | `net_listRules` | Traffic rules in evaluation order (the first match decides); rules the model can't express are shown read-only (`foreign`, with the reason) |
-| `net_createRule` / `net_updateRule` / `net_deleteRule` / `net_moveRule` | Allow or block traffic from networks, a group or addresses to networks, a group, addresses (optionally on ports) or the internet, at a chosen position. **Stateful:** a block stops new connections, replies to connections started from the other side still pass ("block IoT → Home" lets Home still reach IoT). Addresses given in a rule become a group the rule owns and removes with it. A change after which the controller or this server (`MCP_SERVER_ADDRESSES`) could no longer reach the internet, in its end state or on the way there, is refused |
+| `net_createRule` / `net_updateRule` / `net_deleteRule` / `net_moveRule` | Allow or block traffic from networks, a group or addresses to networks, a group, addresses (optionally on ports) or the internet, at a chosen position. **Stateful:** a block stops new connections, replies to connections started from the other side still pass ("block IoT → Home" lets Home still reach IoT). Addresses given in a rule become a group the rule owns and removes with it (on a FortiGate: address objects, removed with the last rule using them). A change after which the controller or this server (`MCP_SERVER_ADDRESSES`) could no longer reach the internet, in its end state or on the way there, is refused; on a FortiGate no policy is changed without `MCP_SERVER_ADDRESSES` |
 | `net_listGroups` | Address groups (usable in rules) and MAC groups (Wi-Fi allow/deny lists) |
 | `net_listClients` | Online devices with the network and VLAN each is on (wireless ones too), their Wi-Fi network or switch port; optionally only one network ("what is on VLAN 2?") |
 | `net_listPortProfiles` | Switch port profiles and, when a profile sets them, the networks a port following it carries |
@@ -332,18 +332,37 @@ networks (routed LAN-side interfaces, with their DHCP servers), physical ports, 
 those the model can't say, e.g. zones, named schedules, internet services, users, custom services, are `foreign`),
 address groups, DHCP reservations, clients (DHCP leases and ARP) and firmware with `controller: "fortigate"`.
 
-**Changes: DHCP reservations only** (since 2.7.0; every other change is refused). `net_setReservation` and
-`net_deleteReservation` write the reserved-address table of the network's DHCP server, the way the FortiGate's own
-GUI does, with a description if you give one; live-tested on a FortiGate 80F with FortiOS 7.4.4. As on the other
-controllers: a dry run first (with a `basis`), an online device moved to another address needs `allowLockout`, the
-change is planned again right before it is written (anything changed meanwhile is a `CONFLICT`, nothing written), and
-read back afterwards. Refused with the reason: a network without a DHCP server, with its server switched off or with
-several; an address outside the subnet the server hands out; an address another entry holds (also FortiOS's MAC
-access `block` / `assign` entries and option-82 reservations); a device with such a MAC access entry, or one reserved
-on several servers already. Moving a reservation to another network adds the new one before removing the old one;
-if the removal fails, the change is done with a warning naming what is left. This server's own reservation is never
-moved or removed, nor its address reserved for another device (see `net_setReservation` above). The REST API admin needs write access
-to the DHCP settings for this (a read-only profile gets HTTP 403); `FORTIGATE_READ_ONLY=true` refuses every change.
+**Changes: DHCP reservations (since 2.7.0) and firewall policies (since 2.8.0)**; every other change is refused.
+As on the other controllers: a dry run first (with a `basis`), the change is planned again right before it is written
+(anything changed meanwhile is a `CONFLICT`, nothing written), and read back afterwards. The REST API admin needs
+write access to the DHCP and firewall settings (a read-only profile gets HTTP 403); `FORTIGATE_READ_ONLY=true`
+refuses every change.
+
+*Reservations:* `net_setReservation` and `net_deleteReservation` write the reserved-address table of the network's
+DHCP server, the way the FortiGate's own GUI does, with a description if you give one; live-tested on a FortiGate 80F
+with FortiOS 7.4.4. An online device moved to another address needs `allowLockout`. Refused with the reason: a
+network without a DHCP server, with its server switched off or with several; an address outside the subnet the
+server hands out; an address another entry holds (also FortiOS's MAC access `block` / `assign` entries and option-82
+reservations); a device with such a MAC access entry, or one reserved on several servers already. Moving a
+reservation to another network adds the new one before removing the old one; if the removal fails, the change is
+done with a warning naming what is left. This server's own reservation is never moved or removed, nor its address
+reserved for another device (see `net_setReservation` above).
+
+*Firewall policies:* `net_createRule`, `net_updateRule`, `net_deleteRule` and `net_moveRule` write `firewall/policy`;
+live-tested on a FortiGate 80F with FortiOS 7.4.13. A rule goes from networks, addresses or an address group on the
+FortiGate's networks to networks, addresses, a group or the internet (the WAN interfaces), with protocol any, TCP,
+UDP or ICMP (the predefined services `ALL`, `ALL_TCP`, `ALL_UDP`, `ALL_ICMP`). An allow to the internet gets NAT. A
+plain address uses an address object holding exactly it, or gets one (`net-<address>`, with a comment saying it was
+made here) that is removed with the last rule using it. A new policy is written switched off at the bottom, moved
+into place and then switched on; a move is one call. Refused with the reason: ports (they need a custom service),
+devices (MAC), Wi-Fi, schedules, the FortiGate itself as a destination (that is its local-in policy), the internet
+as a source, addresses partly inside a network, an interface with secondary subnets, names over 35 characters or
+already used, and policies the model can't say (`foreign`). **This server stays reachable:** without
+`MCP_SERVER_ADDRESSES` nothing is changed; a policy that may match this server's traffic (from its network, or to
+its own address; anything unreadable counts) may only change in ways that let more through: a new allow, a block
+removed or moved down, an allow moved up. Blocking a network from the internet or from this server's network stays
+possible (replies to connections it starts still pass). Traffic no policy allows is dropped, so the plan says what a
+removed allow means.
 
 `fortigate_read` reads what the `net_` model doesn't cover:
 
@@ -586,7 +605,7 @@ Clients only see the tools they may use: `tools/list` is filtered by the caller'
 | `FORTIGATE_CERT_SHA256` | - | **Recommended.** The FortiGate certificate's SHA-256 fingerprint (colons allowed): exactly that certificate is trusted, any other ends the connection before the token is sent. Replaces `FORTIGATE_STRICT_SSL` |
 | `FORTIGATE_STRICT_SSL` | `true` | Validate the certificate against the system CAs; `false` accepts any certificate (this client only). Prefer `FORTIGATE_CERT_SHA256` |
 | `FORTIGATE_VDOM` | - | The VDOM to read; default the token's own (`root`) |
-| `FORTIGATE_READ_ONLY` | `false` | `true`: every change through the tools is refused (reads only); today that is DHCP reservations |
+| `FORTIGATE_READ_ONLY` | `false` | `true`: every change through the tools is refused (reads only); today that is DHCP reservations and firewall policies |
 | `FORTIGATE_TIMEOUT` | `15000` | Request timeout (ms) |
 
 ## Advanced Configuration Examples
