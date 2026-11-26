@@ -229,6 +229,21 @@ describe('FortiGate policies: create', () => {
         expect(f.state.policies.at(-1)).toMatchObject({ srcintf: intf('iot', 'lan'), dstintf: intf('dmz'), dstaddr: intf('all') });
     });
 
+    it('an address object tied to an interface, or holding a wider network, is not used for an address', async () => {
+        const f = fortigate({ addresses: [...fx.addresses, { name: 'cam-tied', type: 'ipmask', subnet: '192.168.20.5 255.255.255.255', 'associated-interface': 'iot' }] });
+        await run(f, create({ name: 'cam', from: [{ addresses: ['192.168.20.5'] }] }));
+        expect(f.writes[0].body).toMatchObject({ name: 'net-192.168.20.5' });
+        const g = fortigate();
+        await run(g, create({ name: 'printer', from: [{ addresses: ['192.168.1.32'] }] }));
+        expect(g.writes[0].body).toMatchObject({ name: 'net-192.168.1.32', subnet: '192.168.1.32 255.255.255.255' });
+    });
+
+    it('a secondary subnet is refused as a network: a policy names the whole interface', async () => {
+        const f = fortigate();
+        f.state.interfaces = f.state.interfaces.map((i) => (i.name === 'iot' ? { ...i, secondaryip: [{ id: 1, ip: '192.168.21.1 255.255.255.0' }] } : i));
+        await expect(f.adapter.plan(create({ from: [{ network: { id: 'iot:secondary:1' } }] }))).rejects.toThrow('secondary subnet of an interface');
+    });
+
     it('a complete address group is used by name', async () => {
         const f = fortigate({ groups: [...fx.addressGroups, { name: 'cams', member: [{ name: 'printers' }, { name: 'node-c6' }] }] });
         const result = await run(f, create({ name: 'cams out', from: [{ group: { name: 'cams' } }] }));
@@ -374,6 +389,11 @@ describe('FortiGate policies: this server stays reachable', () => {
         expect(mayMatchServer(policy({ dstaddr: intf('dns') }), world)).toBe(false);
         expect(mayMatchServer(policy({ dstaddr: intf('dns'), 'dstaddr-negate': 'enable' }), world)).toBe(true);
         expect(mayMatchServer(policy({ dstaddr: [], 'internet-service': 'enable' }), world)).toBe(true);
+        expect(mayMatchServer(policy({ dstaddr: intf('dns'), 'internet-service': 'enable' }), world)).toBe(true);
+        world.groups.set('half', { complete: false, addresses: ['10.0.0.1'], macs: false });
+        world.groups.set('whole', { complete: true, addresses: ['10.0.0.1'], macs: false });
+        expect(mayMatchServer(policy({ srcintf: intf('lan'), srcaddr: intf('whole') }), world)).toBe(false);
+        expect(mayMatchServer(policy({ srcintf: intf('lan'), srcaddr: intf('half') }), world)).toBe(true);
         expect(mayMatchServer(policy({ srcaddr: [] }), world)).toBe(false);
         expect(mayMatchServer(policy({ srcintf: intf('lan'), srcaddr: [] }), world)).toBe(true);
     });
@@ -422,6 +442,16 @@ describe('FortiGate policies: delete, move, update', () => {
         expect(result.warnings).toEqual(["The address object 'net-192.168.20.9' made for a rule couldn't be removed (something else may use it); remove it in the FortiGate's UI if nothing does."]);
     });
 
+    it("an address object it didn't make stays, even when no rule uses it any more", async () => {
+        const f = fortigate();
+        await run(f, create({ name: 'to dns', to: [{ addresses: ['9.9.9.9'] }] }));
+        expect(f.writes.filter((w) => w.segments[1] === 'address')).toEqual([]);
+        const plan = await f.adapter.plan(remove('to dns'));
+        expect(plan.steps).toHaveLength(1);
+        await f.adapter.apply(plan);
+        expect(f.state.addresses.some((a) => a.name === 'dns')).toBe(true);
+    });
+
     it('moves one in one call: before the policy at that place, or after the last', async () => {
         const f = fortigate();
         const result = await run(f, move('block IoT to LAN', 1));
@@ -433,6 +463,9 @@ describe('FortiGate policies: delete, move, update', () => {
         await run(f, move('block IoT to LAN', 3));
         expect(f.writes[2].query).toEqual({ action: 'move', before: '4' });
         expect(order(f)[2]).toBe('block IoT to LAN');
+        await run(f, move('block IoT to LAN', 5));
+        expect(f.writes[3].query).toEqual({ action: 'move', before: '7' });
+        expect(order(f)[4]).toBe('block IoT to LAN');
     });
 
     it('refuses a move to where it is, out of the list, or of a foreign policy', async () => {
@@ -452,6 +485,20 @@ describe('FortiGate policies: delete, move, update', () => {
         expect(result.object).toMatchObject({ name: 'iot stays out', position: 2 });
         await expect(f.adapter.plan(update('iot stays out', { name: 'iot stays out', action: 'block', enabled: true, protocol: 'any' }))).rejects.toThrow('Nothing to change');
         await expect(f.adapter.plan(update('iot stays out', { name: 'LAN to internet' }))).rejects.toMatchObject({ code: 'EXISTS' });
+    });
+
+    it.each([
+        ['a schedule', { schedule: { kind: 'during' as const, windows: [{ days: ['mon' as const], from: '22:00', to: '24:00' }] } }, 'rules.schedule'],
+        ['replies matched', { replies: 'match' as const }, 'rules.stateful'],
+        ['ports', { protocol: { tcpUdpPorts: '443' } }, 'rules.ports'],
+    ])('a change to %s is refused (UNSUPPORTED)', async (_label, set, capability) => {
+        const f = fortigate();
+        await expect(f.adapter.plan(update('block IoT to LAN', set))).rejects.toMatchObject({ code: 'UNSUPPORTED', details: { capability } });
+    });
+
+    it('a change that puts one interface on both sides is refused', async () => {
+        const f = fortigate();
+        await expect(f.adapter.plan(update('block IoT to LAN', { to: [{ network: { name: 'iot' } }] }))).rejects.toThrow("inside 'iot'");
     });
 
     it('allow becomes block: NAT off, VIP traffic matched too', async () => {
@@ -514,6 +561,77 @@ describe('FortiGate policies: when something goes wrong', () => {
         expect(f.state.policies).toEqual(fx.policies);
     });
 
+    it("the name was taken meanwhile and the new policy refused: the other admin's policy is left alone (Codex)", async () => {
+        const f = fortigate();
+        f.hooks.failWrite = (w) => {
+            if (w.method !== 'POST' || w.segments[1] !== 'policy') return undefined;
+            f.state.policies.push({ policyid: 40, name: 'block iot out', status: 'enable', srcintf: intf('iot'), dstintf: intf('wan1', 'wan2'), srcaddr: intf('all'), dstaddr: intf('all'), action: 'deny', service: intf('ALL'), schedule: 'always' });
+            return new FortiGateError('The FortiGate refused cmdb firewall/policy (HTTP 500, error -651)');
+        };
+        await expect(run(f, create())).rejects.toThrow('-651');
+        expect(f.state.policies.map((p) => p.policyid)).toContain(40);
+        expect(f.writes.filter((w) => w.method === 'DELETE')).toEqual([]);
+    });
+
+    it('the answer got lost and nothing was stored: a same-named policy saying something else is left alone (Codex)', async () => {
+        const f = fortigate();
+        f.hooks.failWrite = (w) => {
+            if (w.method !== 'POST' || w.segments[1] !== 'policy') return undefined;
+            f.state.policies.push({ policyid: 40, name: 'block iot out', status: 'disable', srcintf: intf('lan'), dstintf: intf('dmz'), srcaddr: intf('all'), dstaddr: intf('all'), action: 'deny', service: intf('ALL'), schedule: 'always' });
+            return new FortiGateError('The FortiGate is not reachable', 'unreachable', true);
+        };
+        await expect(run(f, create())).rejects.toThrow('may or may not be stored');
+        expect(f.state.policies.map((p) => p.policyid)).toContain(40);
+        expect(f.writes.filter((w) => w.method === 'DELETE')).toEqual([]);
+    });
+
+    it('the answer got lost: a policy that was there before, renamed to this name meanwhile, is left alone', async () => {
+        const f = fortigate();
+        f.hooks.failWrite = (w) => {
+            if (w.method !== 'POST' || w.segments[1] !== 'policy') return undefined;
+            f.state.policies[1] = { ...f.state.policies[1], name: 'x', status: 'disable' };
+            return new FortiGateError('The FortiGate is not reachable', 'unreachable', true);
+        };
+        await expect(run(f, create({ name: 'x', to: [{ network: { name: 'Home LAN' } }] }))).rejects.toThrow('may or may not be stored');
+        expect(f.state.policies.map((p) => p.policyid)).toContain(5);
+        expect(f.writes.filter((w) => w.method === 'DELETE')).toEqual([]);
+    });
+
+    it('the answer got lost and two new policies say exactly what was written: CONFLICT, neither removed', async () => {
+        const f = fortigate();
+        f.hooks.loseAnswer = (w) => {
+            if (w.method !== 'POST' || w.segments[1] !== 'policy') return undefined;
+            f.state.policies.push({ ...f.state.policies.at(-1)!, policyid: 41 });
+            return new FortiGateError('The FortiGate is not reachable', 'unreachable', true);
+        };
+        await expect(run(f, create())).rejects.toMatchObject({ code: 'CONFLICT' });
+        expect(f.state.policies).toHaveLength(fx.policies.length + 2);
+        expect(f.writes.filter((w) => w.method === 'DELETE')).toEqual([]);
+    });
+
+    it('the new policy is said removed but is still there: CONFLICT', async () => {
+        const f = fortigate();
+        f.hooks.failWrite = (w) => (w.query ? new FortiGateError('Command fail. Return code 1') : undefined);
+        f.hooks.tamper = (w) => {
+            if (w.method === 'DELETE' && w.segments[1] === 'policy') f.state.policies.push({ ...fx.policies[0], policyid: 8, name: 'block iot out' });
+        };
+        await expect(run(f, create({ position: 1 }))).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('may still be stored') });
+    });
+
+    it('no id in the answer and the policy found is not exactly the one written: CONFLICT, nothing removed', async () => {
+        const f = fortigate();
+        f.hooks.tamper = (w) => {
+            if (w.method === 'POST' && w.segments[1] === 'policy') f.state.policies.at(-1)!.service = intf('ALL_UDP');
+        };
+        const write = f.adapter['client'].cmdbWrite.bind(f.adapter['client']);
+        (f.adapter['client'] as { cmdbWrite: typeof write }).cmdbWrite = async (...args: Parameters<typeof write>) => {
+            await write(...args);
+            return {};
+        };
+        await expect(run(f, create())).rejects.toMatchObject({ code: 'CONFLICT' });
+        expect(f.writes.filter((w) => w.method === 'DELETE')).toEqual([]);
+    });
+
     it('no id in the answer: it is looked up by name', async () => {
         const f = fortigate();
         const write = f.adapter['client'].cmdbWrite.bind(f.adapter['client']);
@@ -544,6 +662,26 @@ describe('FortiGate policies: when something goes wrong', () => {
             if (w.body?.status === 'enable') f.state.policies.at(-1)!.service = intf('ALL_UDP');
         };
         await expect(run(f, create())).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('shows something else') });
+    });
+
+    it('it reads back at another position, or as a policy the model cannot say: CONFLICT', async () => {
+        const moved = fortigate();
+        moved.hooks.tamper = (w) => {
+            if (w.body?.status === 'enable') moved.state.policies.unshift(moved.state.policies.pop()!);
+        };
+        await expect(run(moved, create())).rejects.toMatchObject({ code: 'CONFLICT' });
+        const foreign = fortigate();
+        foreign.hooks.tamper = (w) => {
+            if (w.body?.status === 'enable') foreign.state.policies.at(-1)!.schedule = 'school-nights';
+        };
+        await expect(run(foreign, create())).rejects.toMatchObject({ code: 'CONFLICT' });
+    });
+
+    it('the move fails and an address object made for it won\'t go: CONFLICT that says what may be left', async () => {
+        const f = fortigate();
+        f.hooks.failWrite = (w) => (w.query || (w.method === 'DELETE' && w.segments[1] === 'address') ? new FortiGateError('refused') : undefined);
+        await expect(run(f, create({ position: 1, from: [{ addresses: ['192.168.20.5'] }] }))).rejects.toMatchObject({ code: 'CONFLICT', message: expect.stringContaining('address objects may be left') });
+        expect(f.state.policies).toEqual(fx.policies);
     });
 
     it('reading back fails: applied, with a warning', async () => {

@@ -673,7 +673,7 @@ export class FortiGateNetworkController implements NetworkController {
             return position;
         };
         const nameTaken = (name: string, except?: string) => {
-            if (rules.some((r) => r.rule.id !== except && (r.rule.name.toLowerCase() === name.toLowerCase() || text(r.raw.name).toLowerCase() === name.toLowerCase()))) {
+            if (rules.some((r) => r.rule.id !== except && r.rule.name.toLowerCase() === name.toLowerCase())) {
                 throw new NetError('EXISTS', `A policy named '${name}' already exists`);
             }
         };
@@ -694,11 +694,10 @@ export class FortiGateNetworkController implements NetworkController {
             return found !== undefined && found.position === at && !found.foreign && (['name', 'action', 'from', 'to', 'protocol', 'replies', 'enabled'] as const).every((key) => JSON.stringify(found[key]) === JSON.stringify(expected[key]));
         };
         /** Address objects these tools made that no policy (but `except`) or group uses any more. */
-        const unused = (addrs: string[], except: Raw, create: PolicySide['create'] = []) =>
+        const unused = (addrs: string[], except: Raw) =>
             [...new Set(addrs)].filter(
                 (name) =>
                     text(context.addresses.get(name)?.comment) === OWNED_ADDRESS_COMMENT &&
-                    !create.some((c) => c.name === name) &&
                     !policies.some((p) => p !== except && [...names(p.srcaddr), ...names(p.dstaddr)].includes(name)) &&
                     !groupsRaw.some((g) => names(g.member).includes(name))
             );
@@ -734,18 +733,37 @@ export class FortiGateNetworkController implements NetworkController {
             execute = async () => {
                 const made: string[] = [];
                 let id: string | undefined;
+                // Whether the new policy may be stored: only then is it looked for, and only this one is removed.
+                let posted = false;
+                // Without its id: only a policy that wasn't there and says exactly what was written is this one.
+                const known = new Set(policies.map((p) => text(p.policyid)));
+                const written: Raw = { ...body, status: 'disable' };
+                const findOurs = async () => {
+                    const mine = list((await this.client.cmdb<Raw[]>('firewall', 'policy')).results).filter(
+                        (p) => !known.has(text(p.policyid)) && (['name', 'action', 'schedule'] as const).every((k) => text(p[k]) === text(written[k])) && (['srcintf', 'dstintf', 'srcaddr', 'dstaddr', 'service'] as const).every((k) => JSON.stringify(names(p[k])) === JSON.stringify(names(written[k])))
+                    );
+                    if (mine.length > 1) throw new NetError('CONFLICT', `Several new policies named '${name}' say what was written; which one is this can't be told.`);
+                    return mine.length ? text(mine[0].policyid) : undefined;
+                };
                 try {
                     for (const c of create) {
                         await this.send(() => this.client.cmdbWrite('POST', ['firewall', 'address'], { name: c.name, type: 'ipmask', subnet: c.subnet, comment: OWNED_ADDRESS_COMMENT }), 'an address object', 'net_listRules');
                         made.push(c.name);
                     }
-                    const answer = await this.send(() => this.client.cmdbWrite('POST', ['firewall', 'policy'], { ...body, status: 'disable' }), 'the new policy', 'net_listRules');
-                    id = answer.mkey ?? text(list((await this.client.cmdb<Raw[]>('firewall', 'policy')).results).find((p) => text(p.name) === name)?.policyid);
+                    let answer: { mkey?: string };
+                    try {
+                        answer = await this.send(() => this.client.cmdbWrite('POST', ['firewall', 'policy'], written), 'the new policy', 'net_listRules');
+                    } catch (error) {
+                        posted = error instanceof FortiGateError && error.maybeDone;
+                        throw error;
+                    }
+                    posted = true;
+                    id = answer.mkey ?? (await findOurs());
                     if (!id) throw new NetError('CONFLICT', `The FortiGate accepted policy '${name}' but didn't say its id, and it couldn't be found again.`);
                     if (at <= policies.length) await this.send(() => this.client.cmdbWrite('PUT', ['firewall', 'policy', id!], undefined, moveTo(policies, at)), 'the move of the new policy', 'net_listRules');
                     if (body.status === 'enable') await this.send(() => this.client.cmdbWrite('PUT', ['firewall', 'policy', id!], { status: 'enable' }), 'switching the new policy on', 'net_listRules');
                 } catch (error) {
-                    if (!(await this.undoCreate(name, made))) {
+                    if (!(await this.undoCreate(posted ? (id ?? findOurs) : undefined, made))) {
                         throw new NetError('CONFLICT', `Creating policy '${name}' failed halfway and what it made couldn't all be removed again: the policy may still be stored (switched off or on), and address objects may be left. Check net_listRules.`);
                     }
                     throw error;
@@ -791,11 +809,8 @@ export class FortiGateNetworkController implements NetworkController {
             const patch: Raw = {};
             const create: PolicySide['create'] = [];
             if (fields.name !== undefined) {
-                const name = checkPolicyName(fields.name);
-                if (name !== text(raw.name)) {
-                    nameTaken(name, rule.id);
-                    patch.name = name;
-                }
+                patch.name = checkPolicyName(fields.name);
+                nameTaken(text(patch.name), rule.id);
             }
             if (fields.enabled !== undefined) patch.status = fields.enabled ? 'enable' : 'disable';
             if (fields.action !== undefined) patch.action = fields.action === 'allow' ? 'accept' : 'deny';
@@ -905,14 +920,19 @@ export class FortiGateNetworkController implements NetworkController {
         return plan;
     }
 
-    /** Removes a policy that couldn't be finished (found by its name) and the address objects made for it; true when all is gone. */
-    private async undoCreate(name: string, made: string[]): Promise<boolean> {
+    /**
+     * Removes a policy that couldn't be finished and the address objects made for it; true when all is
+     * gone. The policy is this attempt's own: its id, or the one `find` tells (undefined when it was
+     * surely never stored); never another one by its name.
+     */
+    private async undoCreate(policy: string | (() => Promise<string | undefined>) | undefined, made: string[]): Promise<boolean> {
         try {
-            const stored = list((await this.client.cmdb<Raw[]>('firewall', 'policy')).results).filter((p) => text(p.name) === name);
-            if (stored.length > 1) return false;
-            if (stored.length) await this.client.cmdbWrite('DELETE', ['firewall', 'policy', text(stored[0].policyid)]);
-            if ((await this.dropAddresses(made)).length) return false;
-            return !list((await this.client.cmdb<Raw[]>('firewall', 'policy')).results).some((p) => text(p.name) === name);
+            const id = typeof policy === 'function' ? await policy() : policy;
+            if (id !== undefined) {
+                await this.client.cmdbWrite('DELETE', ['firewall', 'policy', id]);
+                if (list((await this.client.cmdb<Raw[]>('firewall', 'policy')).results).some((p) => text(p.policyid) === id)) return false;
+            }
+            return (await this.dropAddresses(made)).length === 0;
         } catch {
             return false;
         }
